@@ -1,0 +1,168 @@
+<!--
+  Source for assets/session-dark.png and assets/session-light.png. Render both:
+
+    C="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+    "$C" --headless --disable-gpu --hide-scrollbars --force-device-scale-factor=2 \
+      --window-size=1160,745 --screenshot=assets/session-dark.png  "file://$PWD/assets/session.html"
+    "$C" --headless --disable-gpu --hide-scrollbars --force-device-scale-factor=2 \
+      --window-size=1160,745 --screenshot=assets/session-light.png "file://$PWD/assets/session.html?light"
+
+  The transcript is a mock, written to match what a real session produces: green
+  bullets on tool calls, white on the model's own prose, and the statusline this
+  repo's author actually runs.
+-->
+<title>agent-journal</title>
+
+<script>
+  /* The theme is chosen by the render, not by the reader: these become two
+     static images that a <picture> element picks between. */
+  if (location.search.indexOf('light') !== -1) document.documentElement.className = 'light';
+</script>
+
+<style>
+  :root {
+    --page:    #16161a;
+    --chrome:  #202027;
+    --ground:  #0d0d11;
+    --text:    #e4e4e7;
+    --dim:     #8b8b96;
+    --entry:   #7b7b87;
+    --dimmer:  #63636e;
+    --green:   #3fb950;
+    --cyan:    #56b6c2;
+    --blue:    #7aa2f7;
+    --red:     #e06c75;
+    --rule:    #2a2a33;
+    --edge:    #3a3a45;
+    --shadow:  0 24px 60px -20px rgba(0, 0, 0, 0.75);
+  }
+
+  /* A real light terminal, not the dark one inverted: the accents are darkened
+     until they hold their own against white, rather than reused. */
+  :root.light {
+    --page:    #e7e7ec;
+    --chrome:  #ededf2;
+    --ground:  #fcfcfd;
+    --text:    #1f2024;
+    --dim:     #5f606a;
+    --entry:   #6b6c76;
+    --dimmer:  #85868f;
+    --green:   #1a7f37;
+    --cyan:    #0e7490;
+    --blue:    #2957c4;
+    --red:     #b42318;
+    --rule:    #d9d9e0;
+    --edge:    #c9c9d2;
+    --shadow:  0 20px 50px -22px rgba(20, 20, 35, 0.35);
+  }
+
+  body {
+    background: var(--page);
+    color: var(--text);
+    margin: 0;
+    padding: 40px 20px 56px;
+    font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Monaco, "Cascadia Code", monospace;
+    font-size: 13px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .shot { max-width: 1120px; margin: 0 auto; }
+
+  .window {
+    background: var(--ground);
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: var(--shadow);
+  }
+
+  .titlebar {
+    background: var(--chrome);
+    border-bottom: 1px solid var(--rule);
+    padding: 9px 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .dot { width: 11px; height: 11px; border-radius: 50%; }
+  .dot.r { background: #ec6a5e; }
+  .dot.y { background: #f4bf4f; }
+  .dot.g { background: #61c554; }
+  .titlebar .name { margin-left: 8px; color: var(--dimmer); font-size: 12px; }
+
+  .screen { padding: 18px 20px 16px; overflow-x: auto; }
+
+  pre { margin: 0; font: inherit; white-space: pre; color: var(--text); }
+
+  /* Roles inside the transcript */
+  .b      { color: var(--text); }     /* bullet on the model's own prose */
+  .t      { color: var(--green); }    /* bullet on a tool call */
+  .tool   { color: var(--text); font-weight: 600; }
+  .arg    { color: var(--cyan); }
+  .res    { color: var(--dim); }      /* the ⎿ result line */
+  .entry  { color: var(--entry); }    /* file content echoed back */
+  .key    { color: var(--dim); }
+  .more   { color: var(--dimmer); }
+  .prompt { color: var(--dim); }
+  .gap    { display: block; height: 1.62em; }
+
+  .box {
+    margin-top: 14px;
+    border: 1px solid var(--edge);
+    border-radius: 7px;
+    padding: 7px 12px;
+    color: var(--dimmer);
+  }
+  .caret {
+    display: inline-block;
+    width: 8px;
+    height: 1.05em;
+    background: var(--dim);
+    vertical-align: text-bottom;
+    margin-left: 2px;
+  }
+
+  .status { margin-top: 9px; padding-left: 2px; }
+  .s-mark { color: var(--green); font-weight: 600; }
+  .s-proj { color: var(--cyan); }
+  .s-par  { color: var(--blue); font-weight: 600; }
+  .s-br   { color: var(--red); }
+  .s-mod  { color: var(--dimmer); }
+</style>
+
+<div class="shot">
+  <div class="window">
+    <div class="titlebar">
+      <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+      <span class="name">agent-journal — claude</span>
+    </div>
+
+    <div class="screen"><pre><span class="prompt">&gt; the adapter drops the session id when the payload has none. fix it</span>
+<span class="gap"></span><span class="b">⏺</span> Found it. The adapter reads the working directory and the session id out of the payload as one stream and splits on the
+  newline between them. Command substitution strips trailing newlines, so a payload with no session id arrives as a single
+  line, and the split hands the working directory over as the id.
+<span class="gap"></span><span class="t">⏺</span> <span class="tool">Update</span>(<span class="arg">adapters/claude-code/session-start.sh</span>)
+  <span class="res">⎿  Updated adapters/claude-code/session-start.sh with 14 additions and 2 removals</span>
+<span class="gap"></span><span class="t">⏺</span> <span class="tool">Write</span>(<span class="arg">~/agent-journal/2026-08-11T083120Z.md</span>)
+  <span class="res">⎿  Wrote 12 lines to ~/agent-journal/2026-08-11T083120Z.md</span>
+     <span class="entry">---</span>
+     <span class="entry"><span class="key">date:</span> 2026-08-11T08:31:20Z</span>
+     <span class="entry"><span class="key">project:</span> agent-journal</span>
+     <span class="entry"><span class="key">summary:</span> "Fixed the adapter handing the working directory over as the session id whenever a payload carried none."</span>
+     <span class="entry"><span class="key">cwd:</span> ~/Developer/agent-journal</span>
+     <span class="entry"><span class="key">session_id:</span> 4eb89b17-6f7f-4264-95d4-ea5313ef277e</span>
+     <span class="entry">---</span>
+     <span class="entry"></span>
+     <span class="entry">The two fields arrive as one stream and were split on the newline between them. Command substitution strips trailing</span>
+     <span class="entry">newlines, so an absent session id left one line rather than two and the working directory was handed over as the id.</span>
+     <span class="more">… +3 lines</span>
+<span class="gap"></span><span class="b">⏺</span> Fixed. The split now checks for a newline before it splits, so a payload without a session id leaves the field out of the
+  entry instead of filling it with the wrong value. The failing test came first and covers exactly that payload.
+</pre>
+
+      <div class="box">&gt; <span class="caret"></span></div>
+      <div class="status"><span class="s-mark">&gt;</span> <span class="s-proj">agent-journal</span> <span class="s-par">git(</span><span class="s-br">main</span><span class="s-par">)</span>  <span class="s-mod">Opus 5</span></div>
+    </div>
+  </div>
+</div>
