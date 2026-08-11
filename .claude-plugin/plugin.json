@@ -1,7 +1,7 @@
 {
   "name": "agent-journal",
   "version": "0.1.0",
-  "description": "A journal that survives the session that wrote it. One markdown file per entry, written by the agent at milestones, scannable with grep and ls.",
+  "description": "A journal written by your agent, autonomously. One small markdown file per milestone, written as the work happens, in a format built to be scanned with grep and ls.",
   "author": {
     "name": "Chris Cook",
     "url": "https://github.com/zirkelc"
