@@ -1,0 +1,335 @@
+#!/bin/sh
+#
+# The whole of agent-journal that is not prose.
+#
+#   agent-journal context [--cwd DIR] [--session-id ID]
+#   agent-journal config  [set|unset <key> [value]]
+#
+# `context` prints the text a session should be given: INSTRUCTIONS.md,
+# resolved against the settings and against where the session is.
+# It prints plain text and knows nothing about any agent, which is the seam that
+# lets one adapter per agent wrap it in whatever that agent reads.
+#
+# `config` reads and writes the settings, and is the only thing that knows the
+# config file's syntax, so a shell, an installer and a model all go through it
+# rather than each carrying a copy of the format.
+#
+# POSIX sh and awk only. No runtime to install, and fast enough to sit in front
+# of every session.
+
+set -u
+
+self=$0
+case $self in
+  */*) ;;
+  *) self=./$self ;;
+esac
+root=$(cd "$(dirname "$self")/.." 2>/dev/null && pwd) || root=
+
+config_file="${XDG_CONFIG_HOME:-$HOME/.config}/agent-journal/config"
+
+# The shipped default, stated once. `config` reports it back as the effective
+# value whenever the key is unset, and `config set` removes the key rather than
+# writing it when the value matches, so changing it here reaches every install
+# that never overrode it.
+default_journal_dir=$HOME/agent-journal
+
+usage() {
+  cat >&2 <<'EOF'
+usage: agent-journal context [--cwd DIR] [--session-id ID]
+       agent-journal config
+       agent-journal config set   journal_dir <path>
+       agent-journal config unset journal_dir
+
+settings: journal_dir    where journal entries are written
+EOF
+  exit 2
+}
+
+newline='
+'
+
+# ---------------------------------------------------------------- config
+
+# One file decides where entries go. Flat `key=value`, one per line, `#`
+# comments, read by shell and written by a setup script or a model, so it stays
+# the simplest format both can handle without a parser.
+#
+# Unrecognised keys are ignored rather than rejected. A newer version writing a
+# key this one has not heard of must not break the session, and the reverse has
+# to hold too, because both will exist on the same machine during any upgrade.
+cfg_journal_dir=
+
+read_config() {
+  [ -f "$1" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    case $line in
+      '' | '#'*) continue ;;
+      *=*) ;;
+      *) continue ;;
+    esac
+    key=${line%%=*}
+    value=${line#*=}
+    key=${key% }
+    key=${key# }
+    value=${value# }
+    value=${value% }
+
+    case $key in
+      journal_dir) cfg_journal_dir=$value ;;
+    esac
+  done < "$1"
+}
+
+# A config file is hand-editable, so a leading `~` is likely and expanding it
+# costs less than the bug report.
+expand_home() {
+  case $1 in
+    '~') printf '%s\n' "$HOME" ;;
+    '~/'*) printf '%s\n' "$HOME/${1#\~/}" ;;
+    *) printf '%s\n' "$1" ;;
+  esac
+}
+
+# The inverse, for anything a human reads. Entries record `cwd` in this form,
+# which is also the form every existing entry already uses.
+abbrev_home() {
+  case $1 in
+    "$HOME") printf '~\n' ;;
+    "$HOME"/*) printf '~/%s\n' "${1#"$HOME"/}" ;;
+    *) printf '%s\n' "$1" ;;
+  esac
+}
+
+# The only thing that writes the config, so the format has one owner.
+#
+# Rewrites in place, keeping every line it is not changing: comments, blank
+# lines, ordering, and keys it does not recognise all survive. Setting a key to
+# its default deletes the line instead of writing it, so accepting a default
+# never pins it.
+write_config() {
+  target=$1
+  set_key=$2
+  set_value=$3
+
+  mkdir -p "$(dirname "$target")" || return 1
+  tmp=$target.$$
+
+  : > "$tmp" || return 1
+  written=0
+
+  # A file nobody has seen before gets a header saying what may go in it, since
+  # the point of a plain text config is that opening it explains itself.
+  if [ ! -f "$target" ]; then
+    cat >> "$tmp" <<'EOF'
+# agent-journal
+#
+# Written by `agent-journal config set`. Editing by hand works, but that command
+# validates values and is what the setup and the slash command both use.
+#
+#   journal_dir    where journal entries are written
+#
+# Only settings that differ from the default are here. An absent key follows the
+# default, which is how a changed default reaches you.
+
+EOF
+  fi
+
+  if [ -f "$target" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      case $line in
+        '' | '#'*) printf '%s\n' "$line" >> "$tmp"; continue ;;
+        *=*) ;;
+        *) printf '%s\n' "$line" >> "$tmp"; continue ;;
+      esac
+      key=${line%%=*}
+      key=${key% }
+      key=${key# }
+      if [ "$key" = "$set_key" ]; then
+        # Replaced in place rather than appended, so a key keeps its position
+        # and the file does not grow a second copy of itself over time.
+        [ -z "$set_value" ] || printf '%s=%s\n' "$set_key" "$set_value" >> "$tmp"
+        written=1
+      else
+        printf '%s\n' "$line" >> "$tmp"
+      fi
+    done < "$target"
+  fi
+
+  if [ "$written" = 0 ] && [ -n "$set_value" ]; then
+    printf '%s=%s\n' "$set_key" "$set_value" >> "$tmp"
+  fi
+
+  mv "$tmp" "$target"
+}
+
+# ---------------------------------------------------------------- location
+
+# The name a session's entries are filed under. It comes from the common git
+# dir, never from the working tree's own root: a worktree's root is named after
+# its branch, so `--show-toplevel` would file `nebula.worktrees/fix-auth` under
+# `fix-auth` and scatter one repository across a project per branch. The common
+# dir always points at the main repository, so every worktree agrees. It also
+# collapses subdirectories and bare repositories.
+#
+# Storing entries inside a repository would be the other question, and would
+# take the other answer: that is per-worktree content and would come from
+# `--show-toplevel`. Nothing asks it yet.
+resolve_project() {
+  project=
+  gitdir=$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || gitdir=
+
+  if [ -n "$gitdir" ]; then
+    case $gitdir in
+      */.git) gitdir=${gitdir%/.git} ;;
+    esac
+    project=${gitdir##*/}
+    project=${project%.git}
+  fi
+
+  # Outside a repository there is no project, and the directory's own name is not
+  # a substitute for one: it would file `Downloads` as a project and dilute the
+  # one field whose job is grouping. Left empty, which drops the line and takes
+  # the field out of the entry. `cwd` still records where the work happened.
+}
+
+# ---------------------------------------------------------------- arguments
+
+cmd=${1:-}
+[ -n "$cmd" ] || usage
+shift
+
+cwd=
+session_id=
+
+arg1=
+arg2=
+arg3=
+argc=0
+
+while [ $# -gt 0 ]; do
+  case $1 in
+    --cwd) [ $# -ge 2 ] || usage; cwd=$2; shift 2 ;;
+    --cwd=*) cwd=${1#--cwd=}; shift ;;
+    --session-id) [ $# -ge 2 ] || usage; session_id=$2; shift 2 ;;
+    --session-id=*) session_id=${1#--session-id=}; shift ;;
+    -h | --help) usage ;;
+    --*) usage ;;
+    *)
+      argc=$((argc + 1))
+      case $argc in
+        1) arg1=$1 ;;
+        2) arg2=$1 ;;
+        3) arg3=$1 ;;
+        *) usage ;;
+      esac
+      shift
+      ;;
+  esac
+done
+
+[ -n "$cwd" ] || cwd=$PWD
+# Entries record this path, and one that reads `.` records nothing at all. An
+# adapter passes an absolute path, but a shell invocation is where the mistake
+# would be made and it costs one line to make it impossible.
+abs=$(cd "$cwd" 2>/dev/null && pwd) && cwd=$abs
+
+read_config "$config_file"
+journal_dir=$(expand_home "${cfg_journal_dir:-$default_journal_dir}")
+
+# ---------------------------------------------------------------- config
+
+if [ "$cmd" = config ]; then
+  action=$arg1
+
+  if [ -z "$action" ]; then
+    # Effective value first, then where it came from, so the common question
+    # ("what is it doing") is answered before the rarer one ("why").
+    printf 'journal_dir=%s\n' "$journal_dir"
+    printf 'journal_dir_from=%s\n' "$([ -n "$cfg_journal_dir" ] && echo config || echo default)"
+    printf 'config_file=%s\n' "$config_file"
+    exit 0
+  fi
+
+  case $action in
+    set) [ "$argc" -ge 3 ] || usage; set_key=$arg2; set_value=$arg3 ;;
+    unset) [ "$argc" -ge 2 ] || usage; set_key=$arg2; set_value= ;;
+    *) usage ;;
+  esac
+
+  case $set_key in
+    journal_dir) ;;
+    *) printf '%s: not a setting\n' "$set_key" >&2; exit 2 ;;
+  esac
+
+  # Writing the default is the same as not having the key, and saying so is what
+  # keeps the default free to change later.
+  if [ -n "$set_value" ] && [ "$(expand_home "$set_value")" = "$default_journal_dir" ]; then
+    set_value=
+  fi
+
+  write_config "$config_file" "$set_key" "$set_value" || exit 1
+
+  # Created here rather than at session start, so the directory exists before
+  # anything tries to write an entry into it and no hook has a side effect.
+  read_config "$config_file"
+  mkdir -p "$(expand_home "${cfg_journal_dir:-$default_journal_dir}")" || exit 1
+  exit 0
+fi
+
+[ "$cmd" = context ] || usage
+
+# ---------------------------------------------------------------- context
+
+instructions=$root/INSTRUCTIONS.md
+
+# A missing file means nothing to say, which is not worth failing a session over.
+# Print nothing and let the caller decide that means nothing to inject.
+[ -n "$root" ] || exit 0
+[ -f "$instructions" ] || exit 0
+
+resolve_project "$cwd"
+
+# INSTRUCTIONS.md is the whole of the injected text, placeholders and all, so
+# that every word a session is given lives in one file a person can read. This is
+# the only thing that renders it.
+awk \
+  -v journal_dir="$journal_dir" \
+  -v project="$project" \
+  -v cwd="$(abbrev_home "$cwd")" \
+  -v session_id="$session_id" '
+  BEGIN {
+    keys = "journal_dir project cwd session_id"
+    n = split(keys, key, " ")
+    value["journal_dir"] = journal_dir
+    value["project"] = project
+    value["cwd"] = cwd
+    value["session_id"] = session_id
+
+    # In a gsub replacement `&` means the matched text and `\` escapes, so a
+    # value containing either would substitute itself back in mangled.
+    for (i = 1; i <= n; i++) gsub(/[\\&]/, "\\\\&", value[key[i]])
+  }
+
+  # The editing note the template carries for its human readers is not part of
+  # what the session is told.
+  NR == 1 && /^<!--/ { comment = 1 }
+  comment { if (/-->/) comment = 0; next }
+  # The blank lines the comment left behind are not the start of the text.
+  !started && /^[ \t]*$/ { next }
+
+  {
+    started = 1
+    line = $0
+    for (i = 1; i <= n; i++) {
+      placeholder = "__" toupper(key[i]) "__"
+      if (!index(line, placeholder)) continue
+      # A value the adapter could not supply takes its whole line with it,
+      # rather than leaving a label with nothing after it.
+      if (value[key[i]] == "") next
+      gsub(placeholder, value[key[i]], line)
+    }
+    print line
+  }
+' "$instructions"
+

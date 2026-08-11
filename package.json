@@ -1,0 +1,15 @@
+{
+  "name": "agent-journal",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A journal that survives the session that wrote it",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "typescript": "^5",
+    "vitest": "^3"
+  }
+}
