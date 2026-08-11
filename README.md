@@ -50,7 +50,7 @@ The file starts with frontmatter metadata, for a quick search across many files.
 ---
 date: 2026-01-11T14:30:00Z
 project: my-awesome-lib
-summary: "Shipped the v1.2 sync path on prepared statements, with rollback when a batch fails. Not deployed, waiting on Monday's validation."
+summary: "Shipped the v1.2 sync path on prepared statements, with rollback when a batch fails."
 cwd: ~/Developer/my-awesome-lib
 session_id: 4eb89b17-6f7f-4264-95d4-ea5313ef277e
 ---
