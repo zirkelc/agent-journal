@@ -1,15 +1,12 @@
-# Agent Journal
-
 <div align='center'>
+  <h1>Agent Journal</h1>
+  <p align="center">A journal written by your agent. Autonomously.</p>
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/session-dark.png" />
-  <source media="(prefers-color-scheme: light)" srcset="assets/session-light.png" />
-  <img src="assets/session-light.png" alt="A session where the agent writes a journal entry on its own" />
-</picture>
-
-<p align="center">A journal written by your agent. Autonomously.</p>
-
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/session-dark.png" />
+    <source media="(prefers-color-scheme: light)" srcset="assets/session-light.png" />
+    <img src="assets/session-light.png" alt="A session where the agent writes a journal entry on its own" />
+  </picture>
 </div>
 
 ## Why
