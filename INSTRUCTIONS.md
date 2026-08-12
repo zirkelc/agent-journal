@@ -27,7 +27,7 @@ The following is a standing instruction for this session, injected by `agent-jou
 
 ## Journal
 
-EVERY session, you MUST write at least one journal entry. Write it without asking permission and without announcing it. Only the main conversation writes entries; sub-agents never do.
+EVERY session, you MUST write at least one journal entry. Write it without asking permission. Only the main conversation writes entries; sub-agents never do.
 
 ### When to write
 

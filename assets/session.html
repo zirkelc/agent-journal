@@ -3,9 +3,9 @@
 
     C="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
     F="--headless --disable-gpu --hide-scrollbars --default-background-color=00000000"
-    "$C" $F --force-device-scale-factor=2 --window-size=1020,736 \
+    "$C" $F --force-device-scale-factor=2 --window-size=1020,777 \
       --screenshot=assets/session-dark.png  "file://$PWD/assets/session.html"
-    "$C" $F --force-device-scale-factor=2 --window-size=1020,736 \
+    "$C" $F --force-device-scale-factor=2 --window-size=1020,777 \
       --screenshot=assets/session-light.png "file://$PWD/assets/session.html?light"
 
   The viewport is sized to the window, which is sized to the longest line, so the
@@ -107,6 +107,9 @@
   .tool   { color: var(--text); font-weight: 600; }
   .arg    { color: var(--cyan); }
   .res    { color: var(--dim); }      /* the ⎿ result line */
+  /* The corner glyph falls back to a non-monospace face and is wider than one
+     cell, which pushes the first result line right of the ones below it. */
+  .corner { display: inline-block; width: 1ch; }
   .entry  { color: var(--entry); }    /* file content echoed back */
   .key    { color: var(--dim); }
   .more   { color: var(--dimmer); }
@@ -149,9 +152,10 @@
   newline between them. Command substitution strips trailing newlines, so a payload with no session id arrives as a single
   line, and the split hands the working directory over as the id.
 <span class="gap"></span><span class="t">⏺</span> <span class="tool">Update</span>(<span class="arg">adapters/claude-code/session-start.sh</span>)
-  <span class="res">⎿  Updated adapters/claude-code/session-start.sh with 14 additions and 2 removals</span>
+  <span class="res"><span class="corner">⎿</span>  Updated adapters/claude-code/session-start.sh with 14 additions and 2 removals</span>
+<span class="gap"></span><span class="b">⏺</span> Let me record that for next time, since the symptom pointed at the wrong half of the code.
 <span class="gap"></span><span class="t">⏺</span> <span class="tool">Write</span>(<span class="arg">~/agent-journal/2026-08-11T083120Z.md</span>)
-  <span class="res">⎿  Wrote 12 lines to ~/agent-journal/2026-08-11T083120Z.md</span>
+  <span class="res"><span class="corner">⎿</span>  Wrote 12 lines to ~/agent-journal/2026-08-11T083120Z.md</span>
      <span class="entry">---</span>
      <span class="entry"><span class="key">date:</span> 2026-08-11T08:31:20Z</span>
      <span class="entry"><span class="key">project:</span> agent-journal</span>
