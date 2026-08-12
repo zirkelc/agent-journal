@@ -11,13 +11,12 @@
 
 ## Why
 
+Working with agents is fast-paced: you work on multiple projects in parallel, make decisions on every turn, generate ideas and build new things.
 Your agent sessions do the work, then disappear. A week later you cannot answer simple questions:
 
-- What did we work on last week?
-- How did we fix that bug?
+- What did we do last week?
+- Why did we do it that way?
 - What was that idea again?
-
-Your decisions and ideas are buried in endless session transcripts that are hard to read and search. 
 
 Agent Journal makes the model record its work along the way: one small markdown file per milestone, written on its own, in a format that's easy to read and scan. A year later, the answer is one question to your agent, or one `grep`, away.
 
@@ -123,6 +122,10 @@ journal_dir=~/agent-journal
 ```
 
 Run `/agent-journal:config` in your agent to change it or update the config manually.
+
+## Credits
+
+The idea for an agent journal is inspired by [Malaiac's Claude Diary](https://github.com/Malaiac/claude/tree/main/templates/diary).
 
 ## License
 
