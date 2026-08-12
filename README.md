@@ -67,7 +67,7 @@ failed batch leaves nothing half-written, which is what caused Thursday's partia
 Install the plugin:
 
 ```
-/plugin marketplace add zirkelc/claude-plugins
+/plugin marketplace add zirkelc/agent-plugins
 /plugin install agent-journal@zirkelc
 ```
 
