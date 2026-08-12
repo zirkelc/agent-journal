@@ -15,8 +15,8 @@ Working with agents is fast-paced: you work on multiple projects in parallel, ma
 Your agent sessions do the work, then disappear. A week later you cannot answer simple questions:
 
 - What did we do last week?
-- Why did we do it that way?
-- What was that idea again?
+- Why did we build it this way?
+- What did we try that did not work?
 
 Agent Journal makes the model record its work along the way: one small markdown file per milestone, written on its own, in a format that's easy to read and scan. A year later, the answer is one question to your agent, or one `grep`, away.
 
