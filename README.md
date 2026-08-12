@@ -68,7 +68,7 @@ Install the plugin:
 
 ```
 /plugin marketplace add zirkelc/claude-plugins
-/plugin install agent-journal@claude-plugins
+/plugin install agent-journal@zirkelc
 ```
 
 It works on defaults immediately. Nothing else is required.
