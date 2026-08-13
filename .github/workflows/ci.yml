@@ -47,8 +47,21 @@ jobs:
       - uses: actions/checkout@v6
       - name: Parse with dash
         run: |
-          for script in bin/agent-journal install.sh adapters/*/*.sh; do
-            dash -n "$script"
+          # Found by shebang rather than by extension, so the list cannot go
+          # stale and nothing has to be remembered when a script is added. A
+          # `*.sh` glob would miss bin/agent-journal, which has no extension and
+          # is the one that matters most.
+          scripts=$(git ls-files | while IFS= read -r file; do
+            case "$(head -n 1 "$file")" in
+              '#!/bin/sh'* | '#!/usr/bin/env sh'*) echo "$file" ;;
+            esac
+          done)
+
+          [ -n "$scripts" ] || { echo 'found no shell scripts, so this check is doing nothing'; exit 1; }
+
+          echo "$scripts" | while IFS= read -r file; do
+            echo "parsing $file"
+            dash -n "$file" || exit 1
           done
 
   # The manifest is only ever read by Claude Code, on someone else's machine, at
@@ -61,10 +74,11 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
+      # The native installer, not npm: it ships a binary that needs no Node at
+      # all, which is why this job has no toolchain step.
       - name: Install Claude Code
-        run: npm install -g @anthropic-ai/claude-code
+        run: |
+          curl -fsSL https://claude.ai/install.sh | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Validate the plugin
         run: claude plugin validate .
