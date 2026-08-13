@@ -2,8 +2,12 @@
 #
 # The whole of agent-journal that is not prose.
 #
-#   agent-journal context [--cwd DIR] [--session-id ID]
+#   agent-journal list    [filters]
+#   agent-journal search  TEXT [filters]
+#   agent-journal read    ID
+#   agent-journal write   [-m SUMMARY]
 #   agent-journal config  [set|unset <key> [value]]
+#   agent-journal context [--cwd DIR] [--session-id ID]
 #
 # `context` prints the text a session should be given: INSTRUCTIONS.md,
 # resolved against the settings and against where the session is.
@@ -13,6 +17,10 @@
 # `config` reads and writes the settings, and is the only thing that knows the
 # config file's syntax, so a shell, an installer and a model all go through it
 # rather than each carrying a copy of the format.
+#
+# `list`, `search`, `read` and `write` are the human half. They are what a person
+# has instead of remembering grep recipes, and they are the seam an index can sit
+# behind later without any adapter noticing.
 #
 # POSIX sh and awk only. No runtime to install, and fast enough to sit in front
 # of every session.
@@ -24,6 +32,22 @@ case $self in
   */*) ;;
   *) self=./$self ;;
 esac
+
+# An installed copy is reached through a symlink, since `agent-journal` and `aj`
+# both point here from a bin directory. Following them is what makes the root the
+# checkout rather than that bin directory, which is where INSTRUCTIONS.md would
+# otherwise be looked for and never found. Bounded, so a symlink that points at
+# itself cannot hang a session.
+links=0
+while [ -L "$self" ] && [ "$links" -lt 32 ]; do
+  links=$((links + 1))
+  target=$(readlink "$self") || break
+  case $target in
+    /*) self=$target ;;
+    *) self=$(dirname "$self")/$target ;;
+  esac
+done
+
 root=$(cd "$(dirname "$self")/.." 2>/dev/null && pwd) || root=
 
 config_file="${XDG_CONFIG_HOME:-$HOME/.config}/agent-journal/config"
@@ -34,16 +58,47 @@ config_file="${XDG_CONFIG_HOME:-$HOME/.config}/agent-journal/config"
 # that never overrode it.
 default_journal_dir=$HOME/agent-journal
 
-usage() {
-  cat >&2 <<'EOF'
-usage: agent-journal context [--cwd DIR] [--session-id ID]
-       agent-journal config
-       agent-journal config set   journal_dir <path>
-       agent-journal config unset journal_dir
+help_text() {
+  cat <<'EOF'
+usage: agent-journal list   [filters]
+       agent-journal search TEXT [filters]
+       agent-journal read   latest | 2026-01-11T143000Z | 2026-01-11
+       agent-journal write  [-m SUMMARY] [--project P] [--cwd DIR] [--session-id ID]
+       agent-journal config [set|unset journal_dir <path>]
+       agent-journal context [--cwd DIR] [--session-id ID]
+       agent-journal help
+
+write takes the entry from stdin when anything is piped in: the first line is
+the summary and the rest is the body. With -m, all of stdin is the body. With
+neither, it opens $EDITOR on a template. The project and the directory are
+resolved from where you are unless the flags say otherwise.
+
+filters: --date D      a prefix of the timestamp: 2026, 2026-01, 2026-01-11
+         --since D     from this day on, as YYYY-MM-DD, today, or 7d
+         --until D     up to this day, same forms
+         --project P   entries filed under one project
+         --cwd DIR     entries from a directory and everything under it
+         --limit N     how many of the most recent to print, default 20
+         --all         no limit
 
 settings: journal_dir    where journal entries are written
+
+Entries are listed oldest first, so the newest is nearest the prompt.
 EOF
+}
+
+# The same text, and the difference is who asked for it. A mistake belongs on
+# stderr and has to fail, or a script would carry on as though it had worked;
+# `agent-journal help` was asked for, so it belongs on stdout and succeeds, which
+# is also what makes piping it into a pager work.
+usage() {
+  help_text >&2
   exit 2
+}
+
+show_help() {
+  help_text
+  exit 0
 }
 
 newline='
@@ -195,12 +250,34 @@ resolve_project() {
 
 # ---------------------------------------------------------------- arguments
 
-cmd=${1:-}
-[ -n "$cmd" ] || usage
-shift
+# Bare `agent-journal` lists, because the question a person arrives with is what
+# is in the journal, not how to ask. `--help` is still there for the other one.
+if [ $# -eq 0 ]; then
+  cmd=list
+else
+  case $1 in
+    help | -h | --help) show_help ;;
+    # A filter with no command in front of it is still a question about the
+    # entries, so `aj --since 7d` reads the way it looks.
+    -*) cmd=list ;;
+    *)
+      cmd=$1
+      shift
+      ;;
+  esac
+fi
 
 cwd=
+cwd_set=0
 session_id=
+
+date_filter=
+since=
+until=
+project_filter=
+limit=20
+message=
+message_set=0
 
 arg1=
 arg2=
@@ -209,12 +286,28 @@ argc=0
 
 while [ $# -gt 0 ]; do
   case $1 in
-    --cwd) [ $# -ge 2 ] || usage; cwd=$2; shift 2 ;;
-    --cwd=*) cwd=${1#--cwd=}; shift ;;
+    # One flag, two readings: for `context` it says where the session is, and for
+    # the query commands it says which entries to keep. Each command below takes
+    # the one it means.
+    --cwd) [ $# -ge 2 ] || usage; cwd=$2; cwd_set=1; shift 2 ;;
+    --cwd=*) cwd=${1#--cwd=}; cwd_set=1; shift ;;
     --session-id) [ $# -ge 2 ] || usage; session_id=$2; shift 2 ;;
     --session-id=*) session_id=${1#--session-id=}; shift ;;
-    -h | --help) usage ;;
-    --*) usage ;;
+    --date) [ $# -ge 2 ] || usage; date_filter=$2; shift 2 ;;
+    --date=*) date_filter=${1#--date=}; shift ;;
+    --since) [ $# -ge 2 ] || usage; since=$2; shift 2 ;;
+    --since=*) since=${1#--since=}; shift ;;
+    --until) [ $# -ge 2 ] || usage; until=$2; shift 2 ;;
+    --until=*) until=${1#--until=}; shift ;;
+    --project) [ $# -ge 2 ] || usage; project_filter=$2; shift 2 ;;
+    --project=*) project_filter=${1#--project=}; shift ;;
+    --limit) [ $# -ge 2 ] || usage; limit=$2; shift 2 ;;
+    --limit=*) limit=${1#--limit=}; shift ;;
+    --all) limit=0; shift ;;
+    -m | --message) [ $# -ge 2 ] || usage; message=$2; message_set=1; shift 2 ;;
+    --message=*) message=${1#--message=}; message_set=1; shift ;;
+    -h | --help) show_help ;;
+    -*) usage ;;
     *)
       argc=$((argc + 1))
       case $argc in
@@ -227,6 +320,10 @@ while [ $# -gt 0 ]; do
       ;;
   esac
 done
+
+case $limit in
+  '' | *[!0-9]*) printf '%s: --limit takes a number\n' "$limit" >&2; exit 2 ;;
+esac
 
 [ -n "$cwd" ] || cwd=$PWD
 # Entries record this path, and one that reads `.` records nothing at all. An
@@ -274,6 +371,423 @@ if [ "$cmd" = config ]; then
   # anything tries to write an entry into it and no hook has a side effect.
   read_config "$config_file"
   mkdir -p "$(expand_home "${cfg_journal_dir:-$default_journal_dir}")" || exit 1
+  exit 0
+fi
+
+# ---------------------------------------------------------------- entries
+
+# A day, from the three forms a person types. Absolute dates and `today` are
+# free; `Nd` needs arithmetic, which POSIX `date` cannot do and the two
+# implementations that can do it disagree about. Try both rather than pick one
+# and be wrong on half the machines this runs on.
+resolve_day() {
+  case $1 in
+    today) date -u +%Y-%m-%d ;;
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) printf '%s\n' "$1" ;;
+    *d)
+      n=${1%d}
+      case $n in
+        '' | *[!0-9]*) return 1 ;;
+      esac
+      date -u -v-"${n}"d +%Y-%m-%d 2>/dev/null && return 0
+      date -u -d "$n days ago" +%Y-%m-%d 2>/dev/null && return 0
+      return 1
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+# One line per entry, out of the files it is given. `list` and `search` differ
+# only in whether `query` is set, and `read` borrows it to show what an ambiguous
+# id matched, so the format is defined once.
+#
+# Reads whole files rather than stopping at the frontmatter, because `nextfile`
+# is not in POSIX awk and the entries are small: a year of them is a few
+# megabytes, which is less than `grep` already crosses to answer the same
+# question.
+render() {
+  awk \
+    -v query="${query:-}" \
+    -v project="$project_filter" \
+    -v cwdf="$cwd_filter" \
+    -v since="$since" \
+    -v until="$until" \
+    -v limit="$limit" \
+    -v color="$color" \
+    -v cols="$cols" '
+    function emit(   day) {
+      if (!had) return
+      day = substr(stem, 1, 10)
+      if (since != "" && day < since) return
+      if (until != "" && day > until) return
+      if (project != "" && proj != project) return
+      if (cwdf != "" && index(dir, cwdf) != 1) return
+      if (q != "" && index(tolower(summary " " body), q) == 0) return
+
+      n++
+      when[n] = day " " substr(stem, 12, 2) ":" substr(stem, 14, 2)
+      who[n] = proj
+      what[n] = summary
+    }
+
+    BEGIN { q = tolower(query) }
+
+    FILENAME != cur {
+      if (cur != "") emit()
+      cur = FILENAME
+      stem = FILENAME
+      sub(/.*\//, "", stem)
+      sub(/\.md$/, "", stem)
+      fm = 0; had = 0; proj = ""; summary = ""; dir = ""; body = ""
+    }
+
+    FNR == 1 && $0 == "---" { fm = 1; had = 1; next }
+
+    fm == 1 {
+      if ($0 == "---") { fm = 2; next }
+      line = $0
+      if (sub(/^project:[ \t]*/, "", line)) { proj = line; next }
+      if (sub(/^cwd:[ \t]*/, "", line)) { dir = line; next }
+      if (sub(/^summary:[ \t]*/, "", line)) {
+        # The one quoted field, and the quotes are punctuation rather than value.
+        if (substr(line, 1, 1) == "\"") line = substr(line, 2)
+        if (substr(line, length(line), 1) == "\"") line = substr(line, 1, length(line) - 1)
+        summary = line
+        next
+      }
+      next
+    }
+
+    q != "" { body = body " " $0 }
+
+    END {
+      emit()
+      first = 1
+      if (limit > 0 && n > limit) first = n - limit + 1
+
+      # Measured over the rows that will be printed, not over everything that
+      # matched: one long project name in January should not indent all of today.
+      for (i = first; i <= n; i++)
+        if (length(who[i]) > width) width = length(who[i])
+
+      for (i = first; i <= n; i++) {
+        pad = who[i]
+        while (length(pad) < width) pad = pad " "
+        text = what[i]
+        # Only ever narrowed for a terminal. Down a pipe the summary stays whole,
+        # so `list | grep` sees what `grep` on the entries would have seen.
+        if (cols > 0) {
+          room = cols - (length(when[i]) + 2 + width + 2)
+          if (room > 4 && length(text) > room) text = substr(text, 1, room - 3) "…"
+        }
+        if (color)
+          printf "\033[2m%s\033[0m  \033[36m%s\033[0m  %s\n", when[i], pad, text
+        else
+          printf "%s  %s  %s\n", when[i], pad, text
+      }
+    }
+  ' "$@"
+}
+
+if [ "$cmd" = list ] || [ "$cmd" = search ] || [ "$cmd" = read ]; then
+  # A prefix and a range are two ways to say the same thing, and honouring both
+  # at once would quietly return the intersection nobody asked for.
+  if [ -n "$date_filter" ] && { [ -n "$since" ] || [ -n "$until" ]; }; then
+    printf 'use --date or --since/--until, not both\n' >&2
+    exit 2
+  fi
+
+  # Through a second name, because assigning the substitution directly would
+  # empty the variable before the failure branch could name what was wrong with
+  # it.
+  if [ -n "$since" ]; then
+    day=$(resolve_day "$since") || {
+      printf 'not a day: %s. Use YYYY-MM-DD, today, or 7d\n' "$since" >&2
+      exit 2
+    }
+    since=$day
+  fi
+  if [ -n "$until" ]; then
+    day=$(resolve_day "$until") || {
+      printf 'not a day: %s. Use YYYY-MM-DD, today, or 7d\n' "$until" >&2
+      exit 2
+    }
+    until=$day
+  fi
+
+  # Entries record `cwd` abbreviated, and a filter is compared against what is
+  # written rather than what is on disk. `--cwd .` therefore means here.
+  cwd_filter=
+  [ "$cwd_set" = 0 ] || cwd_filter=$(abbrev_home "$cwd")
+
+  color=0
+  cols=0
+  if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+    color=1
+    cols=$(tput cols 2>/dev/null) || cols=0
+    case $cols in
+      '' | *[!0-9]*) cols=0 ;;
+    esac
+  fi
+
+  if [ ! -d "$journal_dir" ]; then
+    printf 'no journal at %s\n' "$journal_dir" >&2
+    exit 1
+  fi
+fi
+
+if [ "$cmd" = list ] || [ "$cmd" = search ]; then
+  query=
+  if [ "$cmd" = search ]; then
+    [ "$argc" -ge 1 ] || usage
+    query=$arg1
+  else
+    [ "$argc" -eq 0 ] || usage
+  fi
+
+  # The filenames are the instant each entry records, so the shell's own ordering
+  # is chronological and a `--date` prefix is a date range the glob applies for
+  # free: the entries it excludes are never opened.
+  #
+  # Starting from the shape of an entry name matters. A journal directory is a
+  # plain directory and often holds a README, which `*.md` would sweep up and
+  # which sorts after every timestamp there will ever be.
+  if [ -n "$date_filter" ]; then
+    set -- "$journal_dir"/"$date_filter"*.md
+  else
+    set -- "$journal_dir"/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*.md
+  fi
+
+  # A glob only ever expands to names that exist, so the one case to rule out is
+  # that it matched nothing and was left as its own pattern. Testing the first
+  # argument settles it. Filtering the whole list instead would be quadratic:
+  # each `set -- "$@" ...` copies every argument, which on a year of entries is
+  # seconds of work to learn what the shell already guaranteed.
+  [ -f "$1" ] || exit 0
+
+  render "$@"
+  exit 0
+fi
+
+# ---------------------------------------------------------------- read
+
+if [ "$cmd" = read ]; then
+  [ "$argc" -le 1 ] || usage
+  id=$arg1
+  [ -n "$id" ] || id=latest
+
+  if [ "$id" = latest ]; then
+    entry=
+    for candidate in "$journal_dir"/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*.md; do
+      [ -f "$candidate" ] || continue
+      entry=$candidate
+    done
+    [ -n "$entry" ] || {
+      printf 'no entries in %s\n' "$journal_dir" >&2
+      exit 1
+    }
+    cat "$entry"
+    exit 0
+  fi
+
+  matches=0
+  entry=
+  for candidate in "$journal_dir"/"$id"*.md; do
+    [ -f "$candidate" ] || continue
+    matches=$((matches + 1))
+    entry=$candidate
+  done
+
+  if [ "$matches" = 0 ]; then
+    printf 'no entry matches %s\n' "$id" >&2
+    exit 1
+  fi
+
+  # Printing a guess would be the wrong answer more often than it would be right,
+  # so an ambiguous id shows what it matched and lets the next attempt be exact.
+  if [ "$matches" -gt 1 ]; then
+    printf '%s matches %d entries:\n' "$id" "$matches" >&2
+    query=
+    limit=0
+    render "$journal_dir"/"$id"*.md
+    exit 1
+  fi
+
+  cat "$entry"
+  exit 0
+fi
+
+# ---------------------------------------------------------------- write
+
+if [ "$cmd" = write ]; then
+  [ "$argc" -eq 0 ] || usage
+
+  # The clock is read once and that one instant is both the filename and the
+  # `date` field, which is the rule the instruction asks a model to follow by
+  # hand. Here it is the only way it can happen.
+  #
+  # A name is one second wide, so two entries written in the same second want the
+  # same one. Waiting for the next second keeps the filename the instant it
+  # records, which every date filter and `read` prefix depends on; a suffix would
+  # buy nothing and cost that.
+  tries=0
+  while :; do
+    now=$(date -u +%Y-%m-%dT%H:%M:%SZ) || exit 1
+    stem=$(printf '%s' "$now" | tr -d ':')
+    entry=$journal_dir/$stem.md
+
+    [ -e "$entry" ] || break
+
+    tries=$((tries + 1))
+    [ "$tries" -le 3 ] || {
+      printf 'an entry already exists for this second: %s\n' "$entry" >&2
+      exit 1
+    }
+    sleep 1
+  done
+
+  # A value that would end its field early or split the line is refused rather
+  # than escaped. The summary is quoted, so only a quote or a newline can break
+  # it; the others are bare, where a colon ends the key as well.
+  refuse_if_unquotable() {
+    case $2 in
+      *'"'* | *"$newline"*)
+        printf 'the %s cannot contain a quote or a newline\n' "$1" >&2
+        exit 2
+        ;;
+    esac
+    [ "$3" = bare ] || return 0
+    case $2 in
+      *:*)
+        printf 'the %s cannot contain a colon\n' "$1" >&2
+        exit 2
+        ;;
+    esac
+  }
+
+  refuse_if_unquotable summary "$message" quoted
+  refuse_if_unquotable project "$project_filter" bare
+  refuse_if_unquotable 'session id' "$session_id" bare
+
+  mkdir -p "$journal_dir" || exit 1
+
+  resolve_project "$cwd"
+  # Derived from where the session is, unless it was named. The same flag filters
+  # the other commands, and here it says which project the entry belongs to.
+  [ -z "$project_filter" ] || project=$project_filter
+
+  # Read once, before anything decides what it is. Empty means there was nothing
+  # piped in, which is what separates `echo … | aj write` from `aj write`.
+  stdin_text=
+  [ -t 0 ] || stdin_text=$(cat)
+
+  summary=$message
+  body=
+
+  if [ "$message_set" = 1 ]; then
+    body=$stdin_text
+  elif [ -n "$stdin_text" ]; then
+    # The shape a commit message has, for the same reason: the first line is what
+    # gets listed, and everything under it is the detail.
+    summary=${stdin_text%%"$newline"*}
+    case $stdin_text in
+      *"$newline"*) body=${stdin_text#*"$newline"} ;;
+    esac
+    refuse_if_unquotable summary "$summary" quoted
+  fi
+
+  while :; do
+    case $body in
+      "$newline"*) body=${body#"$newline"} ;;
+      *) break ;;
+    esac
+  done
+
+  # In a directory of its own, so the name can end in `.md` for the editor while
+  # the path stays unguessable. A shared /tmp is somebody else's to write in too.
+  draft_dir=$(mktemp -d "${TMPDIR:-/tmp}/agent-journal-XXXXXX") || exit 1
+  draft=$draft_dir/entry.md
+  {
+    printf -- '---\n'
+    printf 'date: %s\n' "$now"
+    [ -z "$project" ] || printf 'project: %s\n' "$project"
+    printf 'summary: "%s"\n' "$summary"
+    printf 'cwd: %s\n' "$(abbrev_home "$cwd")"
+    [ -z "$session_id" ] || printf 'session_id: %s\n' "$session_id"
+    printf -- '---\n\n'
+  } > "$draft" || exit 1
+
+  if [ "$message_set" = 1 ] || [ -n "$stdin_text" ]; then
+    [ -z "$body" ] || printf '%s\n' "$body" >> "$draft"
+  else
+    # A terminal is only needed for the fallback to `vi`, which would fight for a
+    # screen it has not got. An editor the caller named is the caller's business
+    # and may well be a script.
+    if [ -z "${VISUAL:-}" ] && [ -z "${EDITOR:-}" ] && { [ ! -t 0 ] || [ ! -t 1 ]; }; then
+      printf 'nothing to write it from. Pipe the entry in, or use -m SUMMARY\n' >&2
+      rm -rf "$draft_dir"
+      exit 2
+    fi
+
+    # The same idiom INSTRUCTIONS.md uses: guidance in a comment that the reader
+    # strips, so the template is a valid entry and the note never survives it.
+    cat >> "$draft" <<'EOF'
+<!--
+Fill in the summary between the quotes above: one line, at most 200 characters,
+what happened and what it means rather than a topic.
+
+Everything below is the body: what was decided, what was rejected and why, what
+is still open. This comment goes away when you save.
+-->
+
+EOF
+
+    # Through a shell, so that `EDITOR="code -w"` works. An editor setting is a
+    # command line rather than a program name, and every other tool that opens
+    # one treats it that way.
+    sh -c "${VISUAL:-${EDITOR:-vi}} \"\$1\"" sh "$draft" || {
+      printf 'editor exited without saving, draft kept at %s\n' "$draft" >&2
+      exit 1
+    }
+
+    stripped=$draft.stripped
+    awk '
+      fences < 2 { print; if ($0 == "---") fences++; next }
+      comment { if (/-->/) comment = 0; next }
+      /^<!--/ { comment = 1; next }
+      # The blank lines the comment leaves behind are not the start of the body,
+      # which begins one line after the frontmatter however much room the note
+      # took up.
+      !started && /^[ \t]*$/ { next }
+      { if (!started) { started = 1; print "" } print }
+    ' "$draft" > "$stripped" && mv "$stripped" "$draft"
+  fi
+
+  summary_line=$(awk '
+    fm == 1 && sub(/^summary:[ \t]*/, "") { print; exit }
+    $0 == "---" { fm = 1 }
+  ' "$draft")
+
+  reject() {
+    printf '%s\n' "$1" >&2
+    printf 'draft kept at %s\n' "$draft" >&2
+    exit 1
+  }
+
+  case $summary_line in
+    '"'*'"') ;;
+    *) reject 'the summary must be wrapped in double quotes' ;;
+  esac
+
+  inner=${summary_line#\"}
+  inner=${inner%\"}
+
+  [ -n "$inner" ] || reject 'the summary is empty'
+  [ "${#inner}" -le 200 ] ||
+    reject "the summary is ${#inner} characters, and the limit is 200"
+
+  mv "$draft" "$entry" || exit 1
+  printf '%s\n' "$entry"
   exit 0
 fi
 

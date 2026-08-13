@@ -12,7 +12,7 @@
 ## Why
 
 Working with agents is fast-paced: you work on multiple projects in parallel, make decisions on every turn, generate ideas and build new things.
-Your agent sessions do the work, then disappear. A week later you cannot answer simple questions:
+Your agents do the work, then disappear. A week later you cannot answer simple questions:
 
 - What did we do last week?
 - Why did we build it this way?
@@ -59,9 +59,37 @@ Replaced the string-interpolated SQL in the sync path with prepare(). Added a ro
 failed batch leaves nothing half-written, which is what caused Thursday's partial state.
 ```
 
+## Recall
+
+Filenames are UTC timestamps, so a glob is a date range and `ls` is already chronological:
+
+```sh
+# the most recent entries
+ls ~/agent-journal | tail -5
+
+# how many entries this year
+ls ~/agent-journal/2026-*.md | wc -l
+
+# one dated line per entry, for a day or a month
+grep -h '^summary:' ~/agent-journal/2026-01-11*.md
+
+# every entry for one project
+grep -rl '^project: foo$' ~/agent-journal
+
+# anywhere in an entry, body included
+grep -rl 'rate limit' ~/agent-journal | tail -3
+
+# one entry in full
+cat ~/agent-journal/2026-01-11T143000Z.md
+```
+
+The agent can recall entries on its own, just ask "What did we work on last week?" to try it.
+
 ## Install
 
 ### Claude Code
+
+#### Plugin
 
 Install the plugin:
 
@@ -70,47 +98,76 @@ Install the plugin:
 /plugin install agent-journal@zirkelc
 ```
 
-It works on defaults immediately. Nothing else is required.
+Then open a new session and ask Claude to write a journal entry.
+By default, it will write to the directory `~/agent-journal/`.
 
-Without the plugin system, clone the repository and merge this into `"hooks"` in
-`~/.claude/settings.json`:
+Run `/agent-journal:config` in Claude to change the directory.
+
+#### Manual Installation
+
+Clone the repository and merge this into `"hooks"` in `~/.claude/settings.json`:
 
 ```json
 "SessionStart": [
   {
     "matcher": "startup|clear|compact",
     "hooks": [
-      { "type": "command", "command": "/path/to/agent-journal/adapters/claude-code/session-start.sh", "timeout": 10 }
+      { 
+        "type": "command", 
+        "command": "/path/to/agent-journal/adapters/claude-code/session-start.sh", 
+        "timeout": 10 
+      }
     ]
   }
 ]
 ```
+
+#### Permissions
+
+Depending on your permission mode, Claude will ask for permission to write a journal entry. To allow journal entries in general, add this to `~/.claude/settings.json`:
+
+```json
+{
+  "permissions": {
+    "allow": ["Edit(~/agent-journal/**)"]
+  }
+}
+```
+
+### Command line
+
+The CLI is optional and only required if you want to interact with `agent-journal` manually from your shell:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/zirkelc/agent-journal/main/install.sh | sh
+```
+
+It symlinks `agent-journal` and the shorter `aj` into `~/.local/bin` and makes them accessible from `$PATH`.
+
+The CLI provides a thin interface over `ls` and `grep`:
+
+| CLI | same as | description |
+| --- | --- | --- |
+| `aj list` | `ls ~/agent-journal \| tail -20` | the 20 most recent entries, one line each |
+| `aj list --date 2026-01` | `grep -h '^summary:' ~/agent-journal/2026-01-*.md` | one year, month, day or entry, by prefix |
+| `aj list --since 7d` | | a relative range, which needs date arithmetic `date` cannot do portably |
+| `aj list --project foo` | `grep -rl '^project: foo$' ~/agent-journal` | one project, across all its worktrees |
+| `aj list --cwd .` | `grep -rl '^cwd: ~/Developer/foo' ~/agent-journal` | one directory and everything under it |
+| `aj search "rate limit"` | `grep -rli 'rate limit' ~/agent-journal` | summaries and bodies, ignoring case |
+| `aj read latest` | `cat "$(ls ~/agent-journal/*.md \| tail -1)"` | one entry in full, by name or by prefix |
+| `aj write` | `$EDITOR ~/agent-journal/$(date -u +%Y-%m-%dT%H%M%SZ).md` | add an entry yourself, or pipe one in |
+| `aj help` | | every option |
+
+The options combine, and every one of them narrows by filename before opening anything. `list` is the default, so `aj` and `aj --since 7d` are the same as the first two rows with it spelled out.
 
 ### Other agents
 
 Not yet. Codex is next, and adding one is a directory with a small script in it:
 see [`adapters/README.md`](adapters/README.md).
 
-## Recall
-
-Filenames are UTC timestamps, so a glob is a date range and `ls` is already chronological:
-
-```sh
-# the most recent entries
-ls ~/agent-journal | tail -20
-
-# one dated line per entry, for a month
-grep '^summary:' ~/agent-journal/2026-01-*.md
-
-# every entry for one project
-grep -rl '^project: nebula$' ~/agent-journal
-```
-
-The agent can recall entries on its own, just ask "What did we work on last week?" to try it.
-
 ## Configuration
 
-The default directory for journal entries is `~/agent-journal`. 
+The default directory for journal entries is `~/agent-journal`.
 
 The config lives in `~/.config/agent-journal/config` as flat `key=value` pairs:
 

@@ -70,7 +70,95 @@ export function run(store: Fixture, args: Array<string>, options: RunOptions = {
     encoding: 'utf8',
     cwd: options.at,
     env: baseEnv(store, options.env),
+    input: options.stdin ?? '',
   });
+}
+
+/** A run that is expected to be refused, with the reason it gave. */
+export function fails(
+  store: Fixture,
+  args: Array<string>,
+  options: RunOptions = {},
+): { status: number; stderr: string } {
+  try {
+    /** Captured rather than inherited, so a refusal under test is not noise in the run. */
+    execFileSync(store.bin, args, {
+      encoding: 'utf8',
+      cwd: options.at,
+      env: baseEnv(store, options.env),
+      input: options.stdin ?? '',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  } catch (error: any) {
+    return { status: error.status, stderr: String(error.stderr ?? '') };
+  }
+  throw new Error(`expected \`${args.join(' ')}\` to fail`);
+}
+
+export type Entry = {
+  /** The filename without `.md`, which is also the instant the entry records. */
+  stem: string;
+  project?: string;
+  summary: string;
+  cwd?: string;
+  body?: string;
+};
+
+/** Entries on disk, as a session would have left them. */
+export function seed(store: Fixture, entries: Array<Entry>): void {
+  mkdirSync(store.journalDir, { recursive: true });
+
+  for (const entry of entries) {
+    const date = `${entry.stem.slice(0, 11)}${entry.stem.slice(11, 13)}:${entry.stem.slice(13, 15)}:${entry.stem.slice(15, 17)}Z`;
+    const front = [
+      '---',
+      `date: ${date}`,
+      ...(entry.project ? [`project: ${entry.project}`] : []),
+      `summary: "${entry.summary}"`,
+      ...(entry.cwd ? [`cwd: ${entry.cwd}`] : []),
+      '---',
+      '',
+      entry.body ?? '',
+      '',
+    ];
+    writeFileSync(join(store.journalDir, `${entry.stem}.md`), front.join('\n'));
+  }
+}
+
+/**
+ * The columns of one listed entry.
+ *
+ * The project column is padded to the widest name being printed, so the split is
+ * on the run of spaces between the columns rather than on a fixed offset. An
+ * entry with no project leaves that group empty, which is the point of testing
+ * it at all.
+ */
+export function rows(out: string): Array<{ when: string; project: string; summary: string }> {
+  const result: Array<{ when: string; project: string; summary: string }> = [];
+
+  for (const line of out.split('\n')) {
+    if (!line) continue;
+    const match = /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2})  (.*?)\s{2,}(.*)$/.exec(line);
+    if (match) result.push({ when: match[1], project: match[2], summary: match[3] });
+  }
+
+  return result;
+}
+
+/** The frontmatter of a written entry, as field to value. */
+export function frontmatter(entry: string): Record<string, string> {
+  const result: Record<string, string> = {};
+
+  for (const line of entry.split('\n').slice(1)) {
+    if (line === '---') break;
+    const at = line.indexOf(': ');
+    if (at === -1) continue;
+    let value = line.slice(at + 2);
+    if (value.startsWith('"') && value.endsWith('"')) value = value.slice(1, -1);
+    result[line.slice(0, at)] = value;
+  }
+
+  return result;
 }
 
 /** The rules as a session would receive them. */
