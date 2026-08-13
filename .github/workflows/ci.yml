@@ -12,23 +12,10 @@ permissions:
   contents: read
 
 jobs:
-  # The shipped artefact is a shell script, so parsing it is the closest thing
-  # this repository has to a build, and dash is what catches the bashisms that
-  # zsh and bash on a developer's machine accept without complaint.
-  shell:
-    name: Shell
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - name: Parse with dash
-        run: |
-          for script in bin/agent-journal install.sh adapters/*/*.sh; do
-            dash -n "$script"
-          done
-
   # Both platforms, because the code the tests drive is POSIX sh and awk, where
   # the two families genuinely differ: `date` cannot subtract days the same way
-  # on each, and BSD and GNU awk disagree about what is an extension.
+  # on each, and BSD and GNU awk disagree about what is an extension. The tests
+  # run the real scripts, so on Ubuntu they are already running under dash.
   test:
     name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -48,3 +35,36 @@ jobs:
         run: pnpm install
       - name: Test
         run: pnpm test
+
+  # Parsing every script catches the branches the tests never take: an error path
+  # with a bashism in it is invisible until the day it runs. dash is the smallest
+  # POSIX shell and is `/bin/sh` on Debian and Ubuntu, so it rejects what bash in
+  # sh-mode, which is `/bin/sh` on macOS, quietly accepts.
+  shell:
+    name: Shell
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Parse with dash
+        run: |
+          for script in bin/agent-journal install.sh adapters/*/*.sh; do
+            dash -n "$script"
+          done
+
+  # The manifest is only ever read by Claude Code, on someone else's machine, at
+  # install time. This is the one place it meets the program that reads it, which
+  # is why the CLI is unpinned: the question is whether the plugin is still valid
+  # against the current one, not against the one this was written for.
+  plugin:
+    name: Plugin
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+      - name: Validate the plugin
+        run: claude plugin validate .
