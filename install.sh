@@ -168,8 +168,10 @@ case ":$PATH:" in
 esac
 
 echo
-echo "Entries live in ${cyan}${journal_dir}${reset}"
-echo "Change that with: ${command_style}agent-journal config set journal_dir${reset} ${dim}<path>${reset}"
+echo "Journal lives in ${cyan}${journal_dir}${reset}"
+echo "To change the location, run:"
+echo
+echo "    ${command_style}agent-journal config set journal_dir${reset} ${dim}<path>${reset}"
 
 if command -v claude > /dev/null 2>&1; then
   echo

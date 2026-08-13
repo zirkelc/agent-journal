@@ -97,7 +97,7 @@ describe('install.sh', () => {
     const output = run(home, ['--prefix', join(home, 'opt'), '--source', ROOT, '--dir', journalDir]);
 
     // Assert
-    expect(output).toContain(`Entries live in ${journalDir}`);
+    expect(output).toContain(`Journal lives in ${journalDir}`);
     expect(output).toContain('agent-journal config set journal_dir');
   });
 
