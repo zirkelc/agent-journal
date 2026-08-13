@@ -106,32 +106,57 @@ journal_dir=${journal_dir:-$("$installed" config | sed -n 's/^journal_dir=//p')}
 
 # ---------------------------------------------------------------- report
 
-echo "agent-journal is installed at $data_dir"
-echo "agent-journal and aj are linked into $bin_dir"
+# Colour only for a terminal, and never when NO_COLOR is set, so a log or a pipe
+# reads as plain text. Built with printf rather than written as escapes, so no
+# assumption is made about which `echo` this shell has.
+#
+# Under `curl … | sh` it is stdin that is the pipe, not stdout, so this is on in
+# exactly the case the installer is usually run in.
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+  bold=$(printf '\033[1m')
+  dim=$(printf '\033[2m')
+  cyan=$(printf '\033[36m')
+  reset=$(printf '\033[0m')
+  # The mark is part of the decoration, so a log file gets the sentence alone
+  # rather than a tick nothing coloured.
+  tick=$(printf '\033[32m✔\033[0m ')
+else
+  bold=
+  dim=
+  cyan=
+  reset=
+  tick=
+fi
+
+# Paths in cyan, commands to run in bold, and anything that is only there to be
+# read in dim. Three roles, so the eye can find the line it has to act on.
+echo "${tick}agent-journal is installed at ${cyan}${data_dir}${reset}"
+echo "${tick}agent-journal and aj are linked into ${cyan}${bin_dir}${reset}"
 
 case ":$PATH:" in
   *":$bin_dir:"*) ;;
   *)
     echo
-    echo "$bin_dir is not on your PATH. Add this to your shell profile:"
+    echo "${cyan}${bin_dir}${reset} is not on your PATH. Add this to your shell profile:"
     echo
-    echo "    export PATH=\"$bin_dir:\$PATH\""
+    echo "    ${bold}export PATH=\"${bin_dir}:\$PATH\"${reset}"
     ;;
 esac
 
 echo
-echo "Entries live in $journal_dir"
-echo "Change that with: agent-journal config set journal_dir <path>"
+echo "Entries live in ${cyan}${journal_dir}${reset}"
+echo "Change that with: ${bold}agent-journal config set journal_dir${reset} ${dim}<path>${reset}"
 
 if command -v claude > /dev/null 2>&1; then
   echo
   echo 'Claude Code found. To have sessions journal on their own, install the plugin:'
   echo
-  echo '    /plugin marketplace add zirkelc/agent-plugins'
-  echo '    /plugin install agent-journal@zirkelc'
+  echo "    ${bold}/plugin marketplace add zirkelc/agent-plugins${reset}"
+  echo "    ${bold}/plugin install agent-journal@zirkelc${reset}"
   echo
-  echo 'Or, without the plugin system, merge this into "hooks" in ~/.claude/settings.json:'
+  echo "Or, without the plugin system, merge this into ${bold}\"hooks\"${reset} in ${cyan}~/.claude/settings.json${reset}:"
   echo
+  printf '%s' "$dim"
   cat <<EOF
     "SessionStart": [
       {
@@ -142,7 +167,8 @@ if command -v claude > /dev/null 2>&1; then
       }
     ]
 EOF
+  printf '%s' "$reset"
 fi
 
 echo
-echo 'Try: aj'
+echo "Try: ${bold}aj${reset}"
