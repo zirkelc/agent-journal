@@ -48,6 +48,48 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# ---------------------------------------------------------------- style
+
+# Colour only for a terminal, and never when NO_COLOR is set, so a log or a pipe
+# reads as plain text. Built with printf rather than written as escapes, so no
+# assumption is made about which `echo` this shell has.
+#
+# Under `curl … | sh` it is stdin that is the pipe, not stdout, so this is on in
+# exactly the case the installer is usually run in.
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+  cyan=$(printf '\033[36m')
+  # A command is the only thing on screen that has to be typed somewhere else,
+  # so it gets a colour of its own rather than bold, which a terminal renders
+  # too close to ordinary text to pick out.
+  command_style=$(printf '\033[1;33m')
+  # 256-colour 173 is the closest terminals get to Claude's orange, and it is
+  # used for nothing else here, so the word always means the same product.
+  orange=$(printf '\033[38;5;173m')
+  dim=$(printf '\033[2m')
+  reset=$(printf '\033[0m')
+  # The mark is part of the decoration, so a log file gets the sentence alone
+  # rather than a tick nothing coloured.
+  tick=$(printf '\033[32m✔\033[0m ')
+else
+  cyan=
+  command_style=
+  orange=
+  dim=
+  reset=
+  tick=
+fi
+
+# Two rows rather than the six a full figlet alphabet needs, because an
+# installer that is piped into a shell should not open by taking the screen.
+# Skipped entirely when nothing is watching.
+if [ -t 1 ]; then
+  printf '%s\n' \
+    "" \
+    "${cyan}█▀█ █▀▀ █▀▀ █▄░█ ▀█▀   ░░█ █▀█ █░█ █▀█ █▄░█ █▀█ █░░${reset}" \
+    "${cyan}█▀█ █▄█ ██▄ █░▀█ ░█░   █▄█ █▄█ █▄█ █▀▄ █░▀█ █▀█ █▄▄${reset}" \
+    ""
+fi
+
 # A prefix covers both halves, which is what makes an install into a scratch
 # directory a single flag. Without one, the XDG defaults apply.
 if [ -n "$prefix" ]; then
@@ -106,30 +148,9 @@ journal_dir=${journal_dir:-$("$installed" config | sed -n 's/^journal_dir=//p')}
 
 # ---------------------------------------------------------------- report
 
-# Colour only for a terminal, and never when NO_COLOR is set, so a log or a pipe
-# reads as plain text. Built with printf rather than written as escapes, so no
-# assumption is made about which `echo` this shell has.
-#
-# Under `curl … | sh` it is stdin that is the pipe, not stdout, so this is on in
-# exactly the case the installer is usually run in.
-if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
-  bold=$(printf '\033[1m')
-  dim=$(printf '\033[2m')
-  cyan=$(printf '\033[36m')
-  reset=$(printf '\033[0m')
-  # The mark is part of the decoration, so a log file gets the sentence alone
-  # rather than a tick nothing coloured.
-  tick=$(printf '\033[32m✔\033[0m ')
-else
-  bold=
-  dim=
-  cyan=
-  reset=
-  tick=
-fi
-
-# Paths in cyan, commands to run in bold, and anything that is only there to be
-# read in dim. Three roles, so the eye can find the line it has to act on.
+# Paths in cyan, commands to run in their own colour, and anything that is only
+# there to be read in dim. Three roles, so the eye can find the line it has to
+# act on.
 echo "${tick}agent-journal is installed at ${cyan}${data_dir}${reset}"
 echo "${tick}agent-journal and aj are linked into ${cyan}${bin_dir}${reset}"
 
@@ -139,22 +160,24 @@ case ":$PATH:" in
     echo
     echo "${cyan}${bin_dir}${reset} is not on your PATH. Add this to your shell profile:"
     echo
-    echo "    ${bold}export PATH=\"${bin_dir}:\$PATH\"${reset}"
+    echo "    ${command_style}export PATH=\"${bin_dir}:\$PATH\"${reset}"
     ;;
 esac
 
 echo
 echo "Entries live in ${cyan}${journal_dir}${reset}"
-echo "Change that with: ${bold}agent-journal config set journal_dir${reset} ${dim}<path>${reset}"
+echo "Change that with: ${command_style}agent-journal config set journal_dir${reset} ${dim}<path>${reset}"
 
 if command -v claude > /dev/null 2>&1; then
   echo
-  echo 'Claude Code found. To have sessions journal on their own, install the plugin:'
+  echo "${orange}Claude Code${reset} found. To have sessions journal on their own, install the plugin:"
   echo
-  echo "    ${bold}/plugin marketplace add zirkelc/agent-plugins${reset}"
-  echo "    ${bold}/plugin install agent-journal@zirkelc${reset}"
+  echo "    ${command_style}/plugin marketplace add zirkelc/agent-plugins${reset}"
+  echo "    ${command_style}/plugin install agent-journal@zirkelc${reset}"
   echo
-  echo "Or, without the plugin system, merge this into ${bold}\"hooks\"${reset} in ${cyan}~/.claude/settings.json${reset}:"
+  # `"hooks"` is left plain: it is a key in a file, and giving it the colour that
+  # means "type this somewhere" would say the wrong thing.
+  echo "Or, without the plugin system, merge this into \"hooks\" in ${cyan}~/.claude/settings.json${reset}:"
   echo
   printf '%s' "$dim"
   cat <<EOF
@@ -171,4 +194,4 @@ EOF
 fi
 
 echo
-echo "Try: ${bold}aj${reset}"
+echo "Try: ${command_style}aj${reset}"
