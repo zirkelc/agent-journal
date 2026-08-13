@@ -146,6 +146,29 @@ describe('list', () => {
     expect(listed[1].summary).toBe('Split the checkout form into two steps.');
   });
 
+  test(`should read a relative day, on whichever date implementation is here`, () => {
+    // Arrange
+    const store = fixture();
+    const stamp = (daysAgo: number) =>
+      new Date(Date.now() - daysAgo * 86_400_000).toISOString().replace(/[:.]/g, '').slice(0, 17);
+
+    seed(store, [
+      { stem: `${stamp(30).slice(0, 15)}Z`, summary: 'A month ago.' },
+      { stem: `${stamp(0).slice(0, 15)}Z`, summary: 'Today.' },
+    ]);
+
+    // Act
+    const listed = rows(run(store, ['list', '--since', '7d']));
+
+    // Assert
+    /**
+     * `date` cannot subtract days portably, so this is the case that fails on
+     * whichever of BSD and GNU was not the one it was written on.
+     */
+    expect(listed.length).toBe(1);
+    expect(listed[0].summary).toBe('Today.');
+  });
+
   test(`should refuse a date prefix together with a range`, () => {
     // Arrange
     const store = fixture();

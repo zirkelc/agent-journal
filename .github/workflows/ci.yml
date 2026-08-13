@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # The shipped artefact is a shell script, so parsing it is the closest thing
+  # this repository has to a build, and dash is what catches the bashisms that
+  # zsh and bash on a developer's machine accept without complaint.
+  shell:
+    name: Shell
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Parse with dash
+        run: |
+          for script in bin/agent-journal install.sh adapters/*/*.sh; do
+            dash -n "$script"
+          done
+
+  # Both platforms, because the code the tests drive is POSIX sh and awk, where
+  # the two families genuinely differ: `date` cannot subtract days the same way
+  # on each, and BSD and GNU awk disagree about what is an extension.
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: 'pnpm'
+      - name: Install
+        run: pnpm install
+      - name: Test
+        run: pnpm test

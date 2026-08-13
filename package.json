@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "description": "A journal that survives the session that wrote it",
+  "packageManager": "pnpm@9.15.0",
   "scripts": {
     "test": "vitest run"
   },
