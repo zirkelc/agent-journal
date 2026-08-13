@@ -63,15 +63,16 @@ help_text() {
 usage: agent-journal list   [filters]
        agent-journal search TEXT [filters]
        agent-journal read   latest | 2026-01-11T143000Z | 2026-01-11
-       agent-journal write  [-m SUMMARY] [--project P] [--cwd DIR] [--session-id ID]
+       agent-journal write  [-s SUMMARY] [-b BODY] [--project P] [--cwd DIR]
        agent-journal config [set|unset journal_dir <path>]
        agent-journal context [--cwd DIR] [--session-id ID]
        agent-journal help
 
-write takes the entry from stdin when anything is piped in: the first line is
-the summary and the rest is the body. With -m, all of stdin is the body. With
-neither, it opens $EDITOR on a template. The project and the directory are
-resolved from where you are unless the flags say otherwise.
+write fills what the flags leave out from stdin: with -s it is the body, with
+-b it is the summary, and with neither the first line is the summary and the
+rest is the body. Given nothing at all it opens $EDITOR on a template. The
+project and the directory come from where you are unless the flags say
+otherwise.
 
 filters: --date D      a prefix of the timestamp: 2026, 2026-01, 2026-01-11
          --since D     from this day on, as YYYY-MM-DD, today, or 7d
@@ -276,8 +277,10 @@ since=
 until=
 project_filter=
 limit=20
-message=
-message_set=0
+opt_summary=
+summary_set=0
+opt_body=
+body_set=0
 
 arg1=
 arg2=
@@ -304,8 +307,12 @@ while [ $# -gt 0 ]; do
     --limit) [ $# -ge 2 ] || usage; limit=$2; shift 2 ;;
     --limit=*) limit=${1#--limit=}; shift ;;
     --all) limit=0; shift ;;
-    -m | --message) [ $# -ge 2 ] || usage; message=$2; message_set=1; shift 2 ;;
-    --message=*) message=${1#--message=}; message_set=1; shift ;;
+    # One flag per field, rather than one flag for "the message". An entry is a
+    # summary and a body, and a single `-m` cannot say which it meant.
+    -s | --summary) [ $# -ge 2 ] || usage; opt_summary=$2; summary_set=1; shift 2 ;;
+    --summary=*) opt_summary=${1#--summary=}; summary_set=1; shift ;;
+    -b | --body) [ $# -ge 2 ] || usage; opt_body=$2; body_set=1; shift 2 ;;
+    --body=*) opt_body=${1#--body=}; body_set=1; shift ;;
     -h | --help) show_help ;;
     -*) usage ;;
     *)
@@ -665,7 +672,7 @@ if [ "$cmd" = write ]; then
     esac
   }
 
-  refuse_if_unquotable summary "$message" quoted
+  refuse_if_unquotable summary "$opt_summary" quoted
   refuse_if_unquotable project "$project_filter" bare
   refuse_if_unquotable 'session id' "$session_id" bare
 
@@ -676,23 +683,30 @@ if [ "$cmd" = write ]; then
   # the other commands, and here it says which project the entry belongs to.
   [ -z "$project_filter" ] || project=$project_filter
 
-  # Read once, before anything decides what it is. Empty means there was nothing
-  # piped in, which is what separates `echo … | aj write` from `aj write`.
+  summary=$opt_summary
+  body=$opt_body
+
+  # Whatever the flags did not say, stdin fills. Read once, before anything
+  # decides what it is, and not at all when both fields are already given, which
+  # is also what stops `--summary X --body Y` waiting on a pipe nobody wrote to.
   stdin_text=
-  [ -t 0 ] || stdin_text=$(cat)
+  if [ "$summary_set" = 0 ] || [ "$body_set" = 0 ]; then
+    [ -t 0 ] || stdin_text=$(cat)
+  fi
 
-  summary=$message
-  body=
-
-  if [ "$message_set" = 1 ]; then
-    body=$stdin_text
-  elif [ -n "$stdin_text" ]; then
-    # The shape a commit message has, for the same reason: the first line is what
-    # gets listed, and everything under it is the detail.
-    summary=${stdin_text%%"$newline"*}
-    case $stdin_text in
-      *"$newline"*) body=${stdin_text#*"$newline"} ;;
-    esac
+  if [ -n "$stdin_text" ]; then
+    if [ "$summary_set" = 1 ]; then
+      body=$stdin_text
+    elif [ "$body_set" = 1 ]; then
+      summary=$stdin_text
+    else
+      # The shape a commit message has, for the same reason: the first line is
+      # what gets listed, and everything under it is the detail.
+      summary=${stdin_text%%"$newline"*}
+      case $stdin_text in
+        *"$newline"*) body=${stdin_text#*"$newline"} ;;
+      esac
+    fi
     refuse_if_unquotable summary "$summary" quoted
   fi
 
@@ -717,14 +731,14 @@ if [ "$cmd" = write ]; then
     printf -- '---\n\n'
   } > "$draft" || exit 1
 
-  if [ "$message_set" = 1 ] || [ -n "$stdin_text" ]; then
+  if [ -n "$summary" ]; then
     [ -z "$body" ] || printf '%s\n' "$body" >> "$draft"
   else
     # A terminal is only needed for the fallback to `vi`, which would fight for a
     # screen it has not got. An editor the caller named is the caller's business
     # and may well be a script.
     if [ -z "${VISUAL:-}" ] && [ -z "${EDITOR:-}" ] && { [ ! -t 0 ] || [ ! -t 1 ]; }; then
-      printf 'nothing to write it from. Pipe the entry in, or use -m SUMMARY\n' >&2
+      printf 'nothing to write it from. Pipe the entry in, or use -s SUMMARY\n' >&2
       rm -rf "$draft_dir"
       exit 2
     fi

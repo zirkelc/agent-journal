@@ -38,7 +38,7 @@ describe('write', () => {
     const store = fixture();
 
     // Act
-    run(store, ['write', '-m', 'Added the write command.'], { at: store.repo });
+    run(store, ['write', '-s', 'Added the write command.'], { at: store.repo });
 
     // Assert
     const entry = written(store);
@@ -50,7 +50,7 @@ describe('write', () => {
     const store = fixture();
 
     // Act
-    run(store, ['write', '-m', 'Added the write command.'], {
+    run(store, ['write', '-s', 'Added the write command.'], {
       at: store.repo,
       stdin: 'The detail the summary had to leave out.\n',
     });
@@ -59,12 +59,41 @@ describe('write', () => {
     expect(written(store).text).toContain('The detail the summary had to leave out.');
   });
 
+  test(`should take the body from its own flag`, () => {
+    // Arrange
+    const store = fixture();
+
+    // Act
+    run(store, ['write', '-s', 'Both given.', '-b', 'The body, from a flag.'], { at: store.repo });
+
+    // Assert
+    const entry = written(store).text;
+    expect(frontmatter(entry).summary).toBe('Both given.');
+    expect(entry).toContain('---\n\nThe body, from a flag.\n');
+  });
+
+  test(`should take the summary from stdin when only the body was given`, () => {
+    // Arrange
+    const store = fixture();
+
+    // Act
+    run(store, ['write', '-b', 'The body, from a flag.'], {
+      at: store.repo,
+      stdin: 'The summary, from the pipe.\n',
+    });
+
+    // Assert
+    const entry = written(store).text;
+    expect(frontmatter(entry).summary).toBe('The summary, from the pipe.');
+    expect(entry).toContain('The body, from a flag.');
+  });
+
   test(`should use one instant for both the filename and the date field`, () => {
     // Arrange
     const store = fixture();
 
     // Act
-    run(store, ['write', '-m', 'One clock read.'], { at: store.repo });
+    run(store, ['write', '-s', 'One clock read.'], { at: store.repo });
 
     // Assert
     const entry = written(store);
@@ -77,7 +106,7 @@ describe('write', () => {
     const store = fixture();
 
     // Act
-    run(store, ['write', '-m', 'Filed under the repository it was written in.'], { at: store.repo });
+    run(store, ['write', '-s', 'Filed under the repository it was written in.'], { at: store.repo });
 
     // Assert
     const fields = frontmatter(written(store).text);
@@ -90,7 +119,7 @@ describe('write', () => {
     const store = fixture();
 
     // Act
-    run(store, ['write', '-m', 'No repository here.'], { at: store.home });
+    run(store, ['write', '-s', 'No repository here.'], { at: store.home });
 
     // Assert
     expect(frontmatter(written(store).text).project).toBeUndefined();
@@ -101,7 +130,7 @@ describe('write', () => {
     const store = fixture();
 
     // Act
-    run(store, ['write', '-m', 'Round trips through list.'], { at: store.repo });
+    run(store, ['write', '-s', 'Round trips through list.'], { at: store.repo });
     const listed = rows(run(store, ['list']));
 
     // Assert
@@ -141,7 +170,7 @@ describe('write', () => {
     const store = fixture();
 
     // Act
-    run(store, ['write', '-m', 'Filed elsewhere.', '--project', 'nebula'], { at: store.repo });
+    run(store, ['write', '-s', 'Filed elsewhere.', '--project', 'nebula'], { at: store.repo });
 
     // Assert
     expect(frontmatter(written(store).text).project).toBe('nebula');
@@ -152,7 +181,7 @@ describe('write', () => {
     const store = fixture();
 
     // Act
-    run(store, ['write', '-m', 'From a session.', '--session-id', 'abc-123'], { at: store.repo });
+    run(store, ['write', '-s', 'From a session.', '--session-id', 'abc-123'], { at: store.repo });
 
     // Assert
     expect(frontmatter(written(store).text).session_id).toBe('abc-123');
@@ -163,7 +192,7 @@ describe('write', () => {
     const store = fixture();
 
     // Act
-    run(store, ['write', '-m', 'Written by a person.'], { at: store.repo });
+    run(store, ['write', '-s', 'Written by a person.'], { at: store.repo });
 
     // Assert
     expect(frontmatter(written(store).text).session_id).toBeUndefined();
@@ -174,8 +203,8 @@ describe('write', () => {
     const store = fixture();
 
     // Act
-    run(store, ['write', '-m', 'First in this second.'], { at: store.repo });
-    run(store, ['write', '-m', 'Second in this second.'], { at: store.repo });
+    run(store, ['write', '-s', 'First in this second.'], { at: store.repo });
+    run(store, ['write', '-s', 'Second in this second.'], { at: store.repo });
 
     // Assert
     const names = readdirSync(store.journalDir);
@@ -188,7 +217,7 @@ describe('write', () => {
     const store = fixture();
 
     // Act
-    const result = fails(store, ['write', '-m', 'Fine.', '--project', 'a: b'], { at: store.repo });
+    const result = fails(store, ['write', '-s', 'Fine.', '--project', 'a: b'], { at: store.repo });
 
     // Assert
     expect(result.status).toBe(2);
@@ -200,7 +229,7 @@ describe('write', () => {
     const store = fixture();
 
     // Act
-    const result = fails(store, ['write', '-m', 'x'.repeat(201)], { at: store.repo });
+    const result = fails(store, ['write', '-s', 'x'.repeat(201)], { at: store.repo });
 
     // Assert
     expect(result.status).toBe(1);
@@ -213,7 +242,7 @@ describe('write', () => {
     const store = fixture();
 
     // Act
-    const result = fails(store, ['write', '-m', 'he said "no"'], { at: store.repo });
+    const result = fails(store, ['write', '-s', 'he said "no"'], { at: store.repo });
 
     // Assert
     expect(result.status).toBe(2);

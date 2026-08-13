@@ -155,7 +155,7 @@ The CLI provides a thin interface over `ls` and `grep`:
 | `aj list --cwd .` | `grep -rl '^cwd: ~/Developer/foo' ~/agent-journal` | one directory and everything under it |
 | `aj search "rate limit"` | `grep -rli 'rate limit' ~/agent-journal` | summaries and bodies, ignoring case |
 | `aj read latest` | `cat "$(ls ~/agent-journal/*.md \| tail -1)"` | one entry in full, by name or by prefix |
-| `aj write` | `$EDITOR ~/agent-journal/$(date -u +%Y-%m-%dT%H%M%SZ).md` | add an entry yourself, or pipe one in |
+| `aj write -s "..."` | `$EDITOR ~/agent-journal/$(date -u +%Y-%m-%dT%H%M%SZ).md` | add an entry yourself, or pipe one in |
 | `aj help` | | every option |
 
 The options combine, and every one of them narrows by filename before opening anything. `list` is the default, so `aj` and `aj --since 7d` are the same as the first two rows with it spelled out.
