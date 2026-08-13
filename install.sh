@@ -67,9 +67,11 @@ if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
   orange=$(printf '\033[38;5;173m')
   dim=$(printf '\033[2m')
   reset=$(printf '\033[0m')
-  # The mark is part of the decoration, so a log file gets the sentence alone
-  # rather than a tick nothing coloured.
+  # The marks are decoration, so a log file gets the sentence alone rather than a
+  # glyph nothing coloured. The asterisk is the one Claude Code shows while it
+  # is thinking, which is what makes it read as that product rather than a bullet.
   tick=$(printf '\033[32m✔\033[0m ')
+  claude_mark=$(printf '\033[38;5;173m✻\033[0m ')
 else
   cyan=
   command_style=
@@ -77,6 +79,7 @@ else
   dim=
   reset=
   tick=
+  claude_mark=
 fi
 
 # Two rows rather than the six a full figlet alphabet needs, because an
@@ -170,25 +173,30 @@ echo "Change that with: ${command_style}agent-journal config set journal_dir${re
 
 if command -v claude > /dev/null 2>&1; then
   echo
-  echo "${orange}Claude Code${reset} found. To have sessions journal on their own, install the plugin:"
+  echo "${claude_mark}${orange}Claude Code${reset} detected"
+  echo "  To have Claude journal on its own, install the plugin:"
   echo
   echo "    ${command_style}/plugin marketplace add zirkelc/agent-plugins${reset}"
   echo "    ${command_style}/plugin install agent-journal@zirkelc${reset}"
   echo
-  # `"hooks"` is left plain: it is a key in a file, and giving it the colour that
-  # means "type this somewhere" would say the wrong thing.
-  echo "Or, without the plugin system, merge this into \"hooks\" in ${cyan}~/.claude/settings.json${reset}:"
+  echo "  Or, without the plugin system, merge this into ${cyan}~/.claude/settings.json${reset}:"
   echo
+  # The whole file rather than the fragment, because a fragment has to be placed
+  # and this can be pasted. Anyone who already has settings merges the one key.
   printf '%s' "$dim"
   cat <<EOF
-    "SessionStart": [
-      {
-        "matcher": "startup|clear|compact",
-        "hooks": [
-          { "type": "command", "command": "$data_dir/adapters/claude-code/session-start.sh", "timeout": 10 }
+    {
+      "hooks": {
+        "SessionStart": [
+          {
+            "matcher": "startup|clear|compact",
+            "hooks": [
+              { "type": "command", "command": "$data_dir/adapters/claude-code/session-start.sh", "timeout": 10 }
+            ]
+          }
         ]
       }
-    ]
+    }
 EOF
   printf '%s' "$reset"
 fi
