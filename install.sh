@@ -163,7 +163,7 @@ case ":$PATH:" in
     echo
     echo "${cyan}${bin_dir}${reset} is not on your PATH. Add this to your shell profile:"
     echo
-    echo "    ${command_style}export PATH=\"${bin_dir}:\$PATH\"${reset}"
+    echo "  ${command_style}export PATH=\"${bin_dir}:\$PATH\"${reset}"
     ;;
 esac
 
@@ -171,7 +171,7 @@ echo
 echo "Journal lives in ${cyan}${journal_dir}${reset}"
 echo "To change the location, run:"
 echo
-echo "    ${command_style}agent-journal config set journal_dir${reset} ${dim}<path>${reset}"
+echo "  ${command_style}agent-journal config set journal_dir${reset} ${dim}<path>${reset}"
 
 if command -v claude > /dev/null 2>&1; then
   echo
@@ -179,8 +179,8 @@ if command -v claude > /dev/null 2>&1; then
   echo
   echo "To have Claude journal on its own, install the plugin:"
   echo
-  echo "    ${command_style}/plugin marketplace add zirkelc/agent-plugins${reset}"
-  echo "    ${command_style}/plugin install agent-journal@zirkelc${reset}"
+  echo "  ${command_style}/plugin marketplace add zirkelc/agent-plugins${reset}"
+  echo "  ${command_style}/plugin install agent-journal@zirkelc${reset}"
   echo
   echo "Or, without the plugin system, merge this into ${cyan}~/.claude/settings.json${reset}:"
   echo
@@ -188,18 +188,18 @@ if command -v claude > /dev/null 2>&1; then
   # and this can be pasted. Anyone who already has settings merges the one key.
   printf '%s' "$dim"
   cat <<EOF
-    {
-      "hooks": {
-        "SessionStart": [
-          {
-            "matcher": "startup|clear|compact",
-            "hooks": [
-              { "type": "command", "command": "$data_dir/adapters/claude-code/session-start.sh", "timeout": 10 }
-            ]
-          }
-        ]
-      }
+  {
+    "hooks": {
+      "SessionStart": [
+        {
+          "matcher": "startup|clear|compact",
+          "hooks": [
+            { "type": "command", "command": "$data_dir/adapters/claude-code/session-start.sh", "timeout": 10 }
+          ]
+        }
+      ]
     }
+  }
 EOF
   printf '%s' "$reset"
 fi
