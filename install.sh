@@ -176,12 +176,13 @@ echo "    ${command_style}agent-journal config set journal_dir${reset} ${dim}<pa
 if command -v claude > /dev/null 2>&1; then
   echo
   echo "${claude_mark}${orange}Claude Code${reset} detected"
-  echo "  To have Claude journal on its own, install the plugin:"
+  echo
+  echo "To have Claude journal on its own, install the plugin:"
   echo
   echo "    ${command_style}/plugin marketplace add zirkelc/agent-plugins${reset}"
   echo "    ${command_style}/plugin install agent-journal@zirkelc${reset}"
   echo
-  echo "  Or, without the plugin system, merge this into ${cyan}~/.claude/settings.json${reset}:"
+  echo "Or, without the plugin system, merge this into ${cyan}~/.claude/settings.json${reset}:"
   echo
   # The whole file rather than the fragment, because a fragment has to be placed
   # and this can be pasted. Anyone who already has settings merges the one key.
