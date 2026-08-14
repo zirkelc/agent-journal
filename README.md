@@ -1,9 +1,5 @@
 <div align='center'>
-<pre>
-█▀█ █▀▀ █▀▀ █▄ █ ▀█▀     █ █▀█ █ █ █▀█ █▄ █ █▀█ █
-█▀█ █▄█ ██▄ █ ▀█  █    █▄█ █▄█ █▄█ █▀▄ █ ▀█ █▀█ █▄▄
-</pre>
-
+  <h1>Agent Journal</h1>
   <p align="center">A journal written by your agent. Autonomously.</p>
 
   <picture>
