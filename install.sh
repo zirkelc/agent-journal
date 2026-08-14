@@ -168,6 +168,11 @@ case ":$PATH:" in
 esac
 
 echo
+echo "To see all commands, run:"
+echo
+echo "  ${command_style}agent-journal help${reset}"
+
+echo
 echo "Journal lives in ${cyan}${journal_dir}${reset}"
 echo "To change the location, run:"
 echo
@@ -182,10 +187,22 @@ if command -v claude > /dev/null 2>&1; then
   echo "  ${command_style}/plugin marketplace add zirkelc/agent-plugins${reset}"
   echo "  ${command_style}/plugin install agent-journal@zirkelc${reset}"
   echo
-  echo "Or, without the plugin system, merge this into ${cyan}~/.claude/settings.json${reset}:"
+  echo "Or merge this into ${cyan}~/.claude/settings.json${reset}. The hooks key replaces the"
+  echo "plugin; the permissions key is worth having either way, so Claude writes"
+  echo "entries without stopping to ask:"
   echo
-  # The whole file rather than the fragment, because a fragment has to be placed
-  # and this can be pasted. Anyone who already has settings merges the one key.
+  # The whole file rather than a fragment, because a fragment has to be placed
+  # and this can be pasted. Anyone who already has settings merges the two keys.
+  #
+  # It has to be Edit(): Claude Code accepts a Write() path rule, warns about it
+  # at startup and never consults it, since Edit covers every file-editing tool.
+  # A single leading slash would anchor at the settings file rather than at the
+  # filesystem root, which is why the rule is written from ~ or from //.
+  case $journal_dir in
+    "$HOME"/*) allow_rule="Edit(~/${journal_dir#"$HOME"/}/**)" ;;
+    *) allow_rule="Edit(//${journal_dir#/}/**)" ;;
+  esac
+
   printf '%s' "$dim"
   cat <<EOF
   {
@@ -198,6 +215,9 @@ if command -v claude > /dev/null 2>&1; then
           ]
         }
       ]
+    },
+    "permissions": {
+      "allow": ["$allow_rule"]
     }
   }
 EOF
@@ -205,4 +225,4 @@ EOF
 fi
 
 echo
-echo "Try: ${command_style}aj${reset}"
+echo "Start a new session in your agent and ask it to write a journal entry."

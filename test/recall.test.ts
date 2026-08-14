@@ -1,7 +1,7 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
-import { type Entry, fails, fixture, rows, run, seed } from './helpers.js';
+import { type Entry, fails, fixture, output, rows, run, seed } from './helpers.js';
 
 /**
  * A week of entries across three projects, with one written outside a
@@ -193,6 +193,33 @@ describe('list', () => {
     // Assert
     expect(result.status).toBe(2);
     expect(result.stderr).toContain('not a day');
+  });
+
+  test(`should say so when the journal is empty, rather than printing nothing`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, []);
+
+    // Act
+    const result = output(store, ['list']);
+
+    // Assert
+    /** Advice, not a failure, so it goes to stderr and the exit code stays 0. */
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toContain('no entries yet');
+  });
+
+  test(`should stay silent when a filter matched nothing but the journal has entries`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ENTRIES);
+
+    // Act
+    const listed = run(store, ['list', '--date', '2019']);
+
+    // Assert
+    expect(listed).toBe('');
   });
 
   test(`should ignore files that are not entries`, () => {

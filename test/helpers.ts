@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -72,6 +72,22 @@ export function run(store: Fixture, args: Array<string>, options: RunOptions = {
     env: baseEnv(store, options.env),
     input: options.stdin ?? '',
   });
+}
+
+/** Both streams, for a run that says something without failing. */
+export function output(
+  store: Fixture,
+  args: Array<string>,
+  options: RunOptions = {},
+): { stdout: string; stderr: string; status: number | null } {
+  const result = spawnSync(store.bin, args, {
+    encoding: 'utf8',
+    cwd: options.at,
+    env: baseEnv(store, options.env),
+    input: options.stdin ?? '',
+  });
+
+  return { stdout: result.stdout, stderr: result.stderr, status: result.status };
 }
 
 /** A run that is expected to be refused, with the reason it gave. */

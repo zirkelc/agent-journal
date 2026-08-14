@@ -109,7 +109,7 @@ describe('install.sh', () => {
     const output = run(home, ['--prefix', join(home, 'opt'), '--source', ROOT]);
 
     // Assert
-    expect(output).toContain('Try: aj');
+    expect(output).toContain('ask it to write a journal entry');
     expect(existsSync(join(home, 'agent-journal'))).toBe(true);
   });
 

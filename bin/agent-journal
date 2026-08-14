@@ -570,7 +570,18 @@ if [ "$cmd" = list ] || [ "$cmd" = search ]; then
   # argument settles it. Filtering the whole list instead would be quadratic:
   # each `set -- "$@" ...` copies every argument, which on a year of entries is
   # seconds of work to learn what the shell already guaranteed.
-  [ -f "$1" ] || exit 0
+  if [ ! -f "$1" ]; then
+    # An empty journal and a filter that excluded everything both print nothing,
+    # and the difference between them is the difference between advice and noise.
+    # Worth a second glob to tell them apart: silence on the first run of a new
+    # install reads as something being broken.
+    set -- "$journal_dir"/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*.md
+    if [ ! -f "$1" ]; then
+      printf 'no entries yet in %s\n' "$journal_dir" >&2
+      printf 'your agent writes them on its own, or write one with: agent-journal write\n' >&2
+    fi
+    exit 0
+  fi
 
   render "$@"
   exit 0
