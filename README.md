@@ -87,9 +87,7 @@ The agent can recall entries on its own, just ask "What did we work on last week
 
 ## Install
 
-### Claude Code
-
-#### Plugin
+### Claude Code 
 
 Install the plugin:
 
@@ -103,25 +101,6 @@ By default, it will write to the directory `~/agent-journal/`.
 
 Run `/agent-journal:config` in Claude to change the directory.
 
-#### Manual Installation
-
-Clone the repository and merge this into `"hooks"` in `~/.claude/settings.json`:
-
-```json
-"SessionStart": [
-  {
-    "matcher": "startup|clear|compact",
-    "hooks": [
-      { 
-        "type": "command", 
-        "command": "/path/to/agent-journal/adapters/claude-code/session-start.sh", 
-        "timeout": 10 
-      }
-    ]
-  }
-]
-```
-
 #### Permissions
 
 Depending on your permission mode, Claude will ask for permission to write a journal entry. To allow journal entries in general, add this to `~/.claude/settings.json`:
@@ -133,6 +112,16 @@ Depending on your permission mode, Claude will ask for permission to write a jou
   }
 }
 ```
+
+### Manual Installation
+
+Run this command and follow the instructions:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/zirkelc/agent-journal/main/install.sh | sh
+```
+
+It will detect your agents and provide detailed instructions.
 
 ### Command line
 
@@ -155,7 +144,7 @@ The CLI provides a thin interface over `ls` and `grep`:
 | `aj list --cwd .` | `grep -rl '^cwd: ~/Developer/foo' ~/agent-journal` | one directory and everything under it |
 | `aj search "rate limit"` | `grep -rli 'rate limit' ~/agent-journal` | summaries and bodies, ignoring case |
 | `aj read latest` | `cat "$(ls ~/agent-journal/*.md \| tail -1)"` | one entry in full, by name or by prefix |
-| `aj write -s "..."` | `$EDITOR ~/agent-journal/$(date -u +%Y-%m-%dT%H%M%SZ).md` | add an entry yourself, or pipe one in |
+| `aj write --summary "..."` | `$EDITOR ~/agent-journal/$(date -u +%Y-%m-%dT%H%M%SZ).md` | add an entry yourself, or pipe one in |
 | `aj help` | | every option |
 
 The options combine, and every one of them narrows by filename before opening anything. `list` is the default, so `aj` and `aj --since 7d` are the same as the first two rows with it spelled out.

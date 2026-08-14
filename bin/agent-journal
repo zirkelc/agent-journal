@@ -63,16 +63,15 @@ help_text() {
 usage: agent-journal list   [filters]
        agent-journal search TEXT [filters]
        agent-journal read   latest | 2026-01-11T143000Z | 2026-01-11
-       agent-journal write  [-s SUMMARY] [-b BODY] [--project P] [--cwd DIR]
+       agent-journal write  [--summary S] [--body B] [--project P] [--cwd DIR]
        agent-journal config [set|unset journal_dir <path>]
        agent-journal context [--cwd DIR] [--session-id ID]
        agent-journal help
 
-write fills what the flags leave out from stdin: with -s it is the body, with
--b it is the summary, and with neither the first line is the summary and the
-rest is the body. Given nothing at all it opens $EDITOR on a template. The
-project and the directory come from where you are unless the flags say
-otherwise.
+write takes the summary and the body as flags, and anything piped in is the
+body. Without a summary it opens $EDITOR on a template, carrying any body it
+already has. The project and the directory come from where you are unless the
+flags say otherwise.
 
 filters: --date D      a prefix of the timestamp: 2026, 2026-01, 2026-01-11
          --since D     from this day on, as YYYY-MM-DD, today, or 7d
@@ -308,10 +307,11 @@ while [ $# -gt 0 ]; do
     --limit=*) limit=${1#--limit=}; shift ;;
     --all) limit=0; shift ;;
     # One flag per field, rather than one flag for "the message". An entry is a
-    # summary and a body, and a single `-m` cannot say which it meant.
-    -s | --summary) [ $# -ge 2 ] || usage; opt_summary=$2; summary_set=1; shift 2 ;;
+    # summary and a body, and a single `-m` cannot say which it meant. Spelled
+    # out like every other flag here, none of which has a short form.
+    --summary) [ $# -ge 2 ] || usage; opt_summary=$2; summary_set=1; shift 2 ;;
     --summary=*) opt_summary=${1#--summary=}; summary_set=1; shift ;;
-    -b | --body) [ $# -ge 2 ] || usage; opt_body=$2; body_set=1; shift 2 ;;
+    --body) [ $# -ge 2 ] || usage; opt_body=$2; body_set=1; shift 2 ;;
     --body=*) opt_body=${1#--body=}; body_set=1; shift ;;
     -h | --help) show_help ;;
     -*) usage ;;
@@ -697,28 +697,13 @@ if [ "$cmd" = write ]; then
   summary=$opt_summary
   body=$opt_body
 
-  # Whatever the flags did not say, stdin fills. Read once, before anything
-  # decides what it is, and not at all when both fields are already given, which
-  # is also what stops `--summary X --body Y` waiting on a pipe nobody wrote to.
-  stdin_text=
-  if [ "$summary_set" = 0 ] || [ "$body_set" = 0 ]; then
-    [ -t 0 ] || stdin_text=$(cat)
-  fi
-
-  if [ -n "$stdin_text" ]; then
-    if [ "$summary_set" = 1 ]; then
-      body=$stdin_text
-    elif [ "$body_set" = 1 ]; then
-      summary=$stdin_text
-    else
-      # The shape a commit message has, for the same reason: the first line is
-      # what gets listed, and everything under it is the detail.
-      summary=${stdin_text%%"$newline"*}
-      case $stdin_text in
-        *"$newline"*) body=${stdin_text#*"$newline"} ;;
-      esac
-    fi
-    refuse_if_unquotable summary "$summary" quoted
+  # Anything piped in is the body. Always, and nothing else, so there is one
+  # rule to remember rather than a table of which field a pipe lands in.
+  #
+  # Not read at all when --body already gave one, which is what stops
+  # `--summary X --body Y` waiting on a pipe nobody is going to write to.
+  if [ "$body_set" = 0 ] && [ ! -t 0 ]; then
+    body=$(cat)
   fi
 
   while :; do
@@ -742,14 +727,14 @@ if [ "$cmd" = write ]; then
     printf -- '---\n\n'
   } > "$draft" || exit 1
 
-  if [ -n "$summary" ]; then
+  if [ "$summary_set" = 1 ]; then
     [ -z "$body" ] || printf '%s\n' "$body" >> "$draft"
   else
     # A terminal is only needed for the fallback to `vi`, which would fight for a
     # screen it has not got. An editor the caller named is the caller's business
     # and may well be a script.
     if [ -z "${VISUAL:-}" ] && [ -z "${EDITOR:-}" ] && { [ ! -t 0 ] || [ ! -t 1 ]; }; then
-      printf 'nothing to write it from. Pipe the entry in, or use -s SUMMARY\n' >&2
+      printf 'no summary. Use --summary, or run write with no arguments to open an editor\n' >&2
       rm -rf "$draft_dir"
       exit 2
     fi
@@ -766,6 +751,10 @@ is still open. This comment goes away when you save.
 -->
 
 EOF
+
+    # A body that arrived on a pipe or a flag goes in before the editor opens,
+    # rather than being dropped for want of a summary to go with it.
+    [ -z "$body" ] || printf '%s\n' "$body" >> "$draft"
 
     # Through a shell, so that `EDITOR="code -w"` works. An editor setting is a
     # command line rather than a program name, and every other tool that opens

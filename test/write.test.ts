@@ -38,7 +38,7 @@ describe('write', () => {
     const store = fixture();
 
     // Act
-    run(store, ['write', '-s', 'Added the write command.'], { at: store.repo });
+    run(store, ['write', '--summary', 'Added the write command.'], { at: store.repo });
 
     // Assert
     const entry = written(store);
@@ -50,7 +50,7 @@ describe('write', () => {
     const store = fixture();
 
     // Act
-    run(store, ['write', '-s', 'Added the write command.'], {
+    run(store, ['write', '--summary', 'Added the write command.'], {
       at: store.repo,
       stdin: 'The detail the summary had to leave out.\n',
     });
@@ -64,7 +64,7 @@ describe('write', () => {
     const store = fixture();
 
     // Act
-    run(store, ['write', '-s', 'Both given.', '-b', 'The body, from a flag.'], { at: store.repo });
+    run(store, ['write', '--summary', 'Both given.', '--body', 'The body, from a flag.'], { at: store.repo });
 
     // Assert
     const entry = written(store).text;
@@ -72,20 +72,20 @@ describe('write', () => {
     expect(entry).toContain('---\n\nThe body, from a flag.\n');
   });
 
-  test(`should take the summary from stdin when only the body was given`, () => {
+  test(`should let the body flag win over a pipe, rather than reading both`, () => {
     // Arrange
     const store = fixture();
 
     // Act
-    run(store, ['write', '-b', 'The body, from a flag.'], {
+    run(store, ['write', '--summary', 'Both offered.', '--body', 'The body, from a flag.'], {
       at: store.repo,
-      stdin: 'The summary, from the pipe.\n',
+      stdin: 'Ignored, because --body already said.\n',
     });
 
     // Assert
     const entry = written(store).text;
-    expect(frontmatter(entry).summary).toBe('The summary, from the pipe.');
     expect(entry).toContain('The body, from a flag.');
+    expect(entry).not.toContain('Ignored');
   });
 
   test(`should use one instant for both the filename and the date field`, () => {
@@ -93,7 +93,7 @@ describe('write', () => {
     const store = fixture();
 
     // Act
-    run(store, ['write', '-s', 'One clock read.'], { at: store.repo });
+    run(store, ['write', '--summary', 'One clock read.'], { at: store.repo });
 
     // Assert
     const entry = written(store);
@@ -106,7 +106,7 @@ describe('write', () => {
     const store = fixture();
 
     // Act
-    run(store, ['write', '-s', 'Filed under the repository it was written in.'], { at: store.repo });
+    run(store, ['write', '--summary', 'Filed under the repository it was written in.'], { at: store.repo });
 
     // Assert
     const fields = frontmatter(written(store).text);
@@ -119,7 +119,7 @@ describe('write', () => {
     const store = fixture();
 
     // Act
-    run(store, ['write', '-s', 'No repository here.'], { at: store.home });
+    run(store, ['write', '--summary', 'No repository here.'], { at: store.home });
 
     // Assert
     expect(frontmatter(written(store).text).project).toBeUndefined();
@@ -130,7 +130,7 @@ describe('write', () => {
     const store = fixture();
 
     // Act
-    run(store, ['write', '-s', 'Round trips through list.'], { at: store.repo });
+    run(store, ['write', '--summary', 'Round trips through list.'], { at: store.repo });
     const listed = rows(run(store, ['list']));
 
     // Assert
@@ -138,31 +138,38 @@ describe('write', () => {
     expect(listed[0].summary).toBe('Round trips through list.');
   });
 
-  test(`should take a piped line as the whole entry`, () => {
+  test(`should refuse a piped body with no summary and no editor to ask in`, () => {
     // Arrange
     const store = fixture();
 
     // Act
-    run(store, ['write'], { at: store.repo, stdin: 'Piped straight in.\n' });
+    const result = fails(store, ['write'], {
+      at: store.repo,
+      stdin: 'A body with nothing to head it.\n',
+      env: { EDITOR: '', VISUAL: '' },
+    });
 
     // Assert
-    expect(frontmatter(written(store).text).summary).toBe('Piped straight in.');
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('no summary');
+    expect(readdirSync(store.journalDir).length).toBe(0);
   });
 
-  test(`should split a piped entry into its first line and the rest`, () => {
+  test(`should carry a piped body into the editor when the summary is missing`, () => {
     // Arrange
     const store = fixture();
 
     // Act
     run(store, ['write'], {
       at: store.repo,
-      stdin: 'The summary line.\n\nThe body, which the summary left out.\nAnd more of it.\n',
+      stdin: 'A body that arrived on a pipe.\n',
+      env: { EDITOR: editor(store, 'The editor supplied this.', '') },
     });
 
     // Assert
     const entry = written(store).text;
-    expect(frontmatter(entry).summary).toBe('The summary line.');
-    expect(entry).toContain('---\n\nThe body, which the summary left out.\nAnd more of it.\n');
+    expect(frontmatter(entry).summary).toBe('The editor supplied this.');
+    expect(entry).toContain('A body that arrived on a pipe.');
   });
 
   test(`should file the entry under a named project rather than the resolved one`, () => {
@@ -170,7 +177,7 @@ describe('write', () => {
     const store = fixture();
 
     // Act
-    run(store, ['write', '-s', 'Filed elsewhere.', '--project', 'nebula'], { at: store.repo });
+    run(store, ['write', '--summary', 'Filed elsewhere.', '--project', 'nebula'], { at: store.repo });
 
     // Assert
     expect(frontmatter(written(store).text).project).toBe('nebula');
@@ -181,7 +188,7 @@ describe('write', () => {
     const store = fixture();
 
     // Act
-    run(store, ['write', '-s', 'From a session.', '--session-id', 'abc-123'], { at: store.repo });
+    run(store, ['write', '--summary', 'From a session.', '--session-id', 'abc-123'], { at: store.repo });
 
     // Assert
     expect(frontmatter(written(store).text).session_id).toBe('abc-123');
@@ -192,7 +199,7 @@ describe('write', () => {
     const store = fixture();
 
     // Act
-    run(store, ['write', '-s', 'Written by a person.'], { at: store.repo });
+    run(store, ['write', '--summary', 'Written by a person.'], { at: store.repo });
 
     // Assert
     expect(frontmatter(written(store).text).session_id).toBeUndefined();
@@ -203,8 +210,8 @@ describe('write', () => {
     const store = fixture();
 
     // Act
-    run(store, ['write', '-s', 'First in this second.'], { at: store.repo });
-    run(store, ['write', '-s', 'Second in this second.'], { at: store.repo });
+    run(store, ['write', '--summary', 'First in this second.'], { at: store.repo });
+    run(store, ['write', '--summary', 'Second in this second.'], { at: store.repo });
 
     // Assert
     const names = readdirSync(store.journalDir);
@@ -217,7 +224,7 @@ describe('write', () => {
     const store = fixture();
 
     // Act
-    const result = fails(store, ['write', '-s', 'Fine.', '--project', 'a: b'], { at: store.repo });
+    const result = fails(store, ['write', '--summary', 'Fine.', '--project', 'a: b'], { at: store.repo });
 
     // Assert
     expect(result.status).toBe(2);
@@ -229,7 +236,7 @@ describe('write', () => {
     const store = fixture();
 
     // Act
-    const result = fails(store, ['write', '-s', 'x'.repeat(201)], { at: store.repo });
+    const result = fails(store, ['write', '--summary', 'x'.repeat(201)], { at: store.repo });
 
     // Assert
     expect(result.status).toBe(1);
@@ -242,7 +249,7 @@ describe('write', () => {
     const store = fixture();
 
     // Act
-    const result = fails(store, ['write', '-s', 'he said "no"'], { at: store.repo });
+    const result = fails(store, ['write', '--summary', 'he said "no"'], { at: store.repo });
 
     // Assert
     expect(result.status).toBe(2);
