@@ -121,33 +121,43 @@ Run this command and follow the instructions:
 curl -fsSL https://raw.githubusercontent.com/zirkelc/agent-journal/main/install.sh | sh
 ```
 
-It will detect your agents and provide detailed instructions.
+It will detect your agents and provide specific instructions. It also symlinks the `agent-journal` CLI and the shorter `aj` into `~/.local/bin` and makes them accessible from `$PATH`.
 
 ### Command line
 
-The CLI is optional and only required if you want to interact with `agent-journal` manually from your shell:
+> [!NOTE] 
+> You need to run the [manual installation](#manual-installation) to make the CLI available.
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/zirkelc/agent-journal/main/install.sh | sh
-```
+The CLI is optional and only required if you want to interact with `agent-journal` manually from your shell. 
+It provides a thin interface over `ls` and `grep` for common commands:
 
-It symlinks `agent-journal` and the shorter `aj` into `~/.local/bin` and makes them accessible from `$PATH`.
-
-The CLI provides a thin interface over `ls` and `grep`:
-
-| CLI | same as | description |
+| command | same as | description |
 | --- | --- | --- |
-| `aj list` | `ls ~/agent-journal \| tail -20` | the 20 most recent entries, one line each |
-| `aj list --date 2026-01` | `grep -h '^summary:' ~/agent-journal/2026-01-*.md` | one year, month, day or entry, by prefix |
-| `aj list --since 7d` | | a relative range, which needs date arithmetic `date` cannot do portably |
-| `aj list --project foo` | `grep -rl '^project: foo$' ~/agent-journal` | one project, across all its worktrees |
-| `aj list --cwd .` | `grep -rl '^cwd: ~/Developer/foo' ~/agent-journal` | one directory and everything under it |
-| `aj search "rate limit"` | `grep -rli 'rate limit' ~/agent-journal` | summaries and bodies, ignoring case |
-| `aj read latest` | `cat "$(ls ~/agent-journal/*.md \| tail -1)"` | one entry in full, by name or by prefix |
-| `aj write --summary "..."` | `$EDITOR ~/agent-journal/$(date -u +%Y-%m-%dT%H%M%SZ).md` | add an entry yourself, or pipe one in |
-| `aj help` | | every option |
+| `aj list` | `ls ~/agent-journal \| tail -20` | the most recent entries, one line each |
+| `aj search TEXT` | `grep -rli 'rate limit' ~/agent-journal` | summaries and bodies, ignoring case |
+| `aj read ID` | `cat "$(ls ~/agent-journal/*.md \| tail -1)"` | one entry in full |
+| `aj write` | `$EDITOR ~/agent-journal/$(date -u +%Y-%m-%dT%H%M%SZ).md` | add an entry yourself |
+| `aj config` | `cat ~/.config/agent-journal/config` | read and change the settings |
+| `aj context` | | the instruction an adapter injects at session start |
+| `aj help` | | every command and option |
 
-The options combine, and every one of them narrows by filename before opening anything. `list` is the default, so `aj` and `aj --since 7d` are the same as the first two rows with it spelled out.
+`list` is the default command if not given, so `aj` and `aj list` are the same. 
+
+Entries are listed oldest first, so the newest is nearest the prompt.
+
+`list` and `search` take the same filters:
+
+| filter | value | description |
+| --- | --- | --- |
+| `--date` | `2026`, `2026-01`, `2026-01-11`, `2026-01-11T143000Z` | a prefix of the timestamp, at any granularity |
+| `--since` | `2026-01-11`, `today`, `7d` | from this day on |
+| `--until` | same forms | up to this day |
+| `--project` | a project name | entries filed under one project, across all its worktrees |
+| `--cwd` | a directory, or `.` for here | one directory and everything under it |
+| `--limit` | a number, default `20` | how many of the most recent to print |
+| `--all` | | no limit |
+
+Run `aj help` for the usage help.
 
 ### Other agents
 
