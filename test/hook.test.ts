@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
-import { context, fields, fixture, HOOK, hook } from './helpers.ts';
+import { context, fields, fixture, HOOK, hook, tilde } from './helpers.ts';
 
 describe('output', () => {
   test(`should deliver the rules as SessionStart context`, () => {
@@ -160,5 +160,61 @@ describe('failure', () => {
 
     // Assert
     expect(result).toBe(``);
+  });
+});
+
+describe('the agent it reports', () => {
+  test(`should name the agent, and the model when the payload carries one`, () => {
+    // Arrange
+    const store = fixture();
+    const payload = JSON.stringify({
+      session_id: 'abc-123',
+      cwd: store.repo,
+      hook_event_name: 'SessionStart',
+      source: 'startup',
+      model: 'claude-opus-5',
+    });
+
+    // Act
+    const result = fields(hook(store, { stdin: payload })!.hookSpecificOutput.additionalContext);
+
+    // Assert
+    /** The product name is already in the agent, so `claude/claude-opus-5` would say it twice. */
+    expect(result.agent).toBe('claude/opus-5');
+  });
+
+  test(`should name the agent alone when the payload carries no model`, () => {
+    // Arrange
+    const store = fixture();
+    const payload = JSON.stringify({
+      session_id: 'abc-123',
+      cwd: store.repo,
+      hook_event_name: 'SessionStart',
+    });
+
+    // Act
+    const result = fields(hook(store, { stdin: payload })!.hookSpecificOutput.additionalContext);
+
+    // Assert
+    /** Documented as not guaranteed, so its absence is ordinary rather than a fault. */
+    expect(result.agent).toBe('claude');
+  });
+
+  test(`should keep the fields apart when the payload has neither id nor model`, () => {
+    // Arrange
+    const store = fixture();
+    const payload = JSON.stringify({ cwd: store.repo, hook_event_name: 'SessionStart' });
+
+    // Act
+    const result = fields(hook(store, { stdin: payload })!.hookSpecificOutput.additionalContext);
+
+    // Assert
+    /**
+     * The three values are read positionally, so an empty one in the middle is
+     * where the next field would slide into its place.
+     */
+    expect(result.agent).toBe('claude');
+    expect(result.session_id).toBe(undefined);
+    expect(result.cwd).toBe(tilde(store, store.repo));
   });
 });

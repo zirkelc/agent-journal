@@ -4,10 +4,10 @@ by whichever adapter is installed. Edit this file to change it; nothing
 needs to be copied anywhere.
 
 This comment is stripped before injection. `__JOURNAL_DIR__`, `__PROJECT__`,
-`__CWD__` and `__SESSION_ID__` are replaced with what the session resolved to, so
-every path and command below is runnable as written. A line whose placeholder
-resolves to nothing is dropped whole, which is how an agent with no session id
-produces no line claiming one.
+`__CWD__`, `__SESSION_ID__` and `__AGENT__` are replaced with what the session
+resolved to, so every path and command below is runnable as written. A line whose
+placeholder resolves to nothing is dropped whole, which is how an agent with no
+session id produces no line claiming one.
 
 The opening paragraph is framing rather than instruction: `additionalContext` and
 its equivalents arrive as ambient information, so without being told otherwise
@@ -57,6 +57,7 @@ date: 2026-01-11T14:30:00Z
 project: my-lib
 summary: "Shipped the v1.2 sync path on prepared statements, with rollback when a batch fails. Not deployed, waiting on Monday's validation."
 cwd: ~/Developer/oss/my-lib
+agent: __AGENT__
 session_id: 4eb89b17-6f7f-4264-95d4-ea5313ef277e
 ---
 
@@ -74,12 +75,14 @@ Exactly these fields, in this order, on every entry:
 - `project`: the repository the work belongs to, named after its main checkout so that every worktree of it files under one name. Omit the field when none is given below, which means the session is not in a repository at all; a bare directory is not a project, and `cwd` still records where the work happened.
 - `summary`: one line, always double-quoted, 200 characters at most. This is what makes a directory of entries scannable, so it has to stand on its own: what happened and what it means, never a topic tag. "Fixed the auth bug" is a tag. "Token refresh raced the retry and logged users out, so it is serialized behind a mutex now" is a summary.
 - `cwd`: the directory the session is working in, written with `~` for home. This is the only place a worktree is recorded, since `project` deliberately collapses them.
+- `agent`: which agent wrote the entry, and which model it was running as. Together with `session_id` this is what says where the work can be picked back up, since a session id is only meaningful to the tool that issued it. Omit the field if none is given below.
 - `session_id`: the session this entry came from, which is what joins it back to the full transcript. Omit the field if no id is given below.
 
 ### Current session
 
 - `project`: `__PROJECT__`
 - `cwd`: `__CWD__`
+- `agent`: `__AGENT__`
 - `session_id`: `__SESSION_ID__`
 
 Copy those verbatim. They are already resolved, so do not derive them again. If the work happened in a different repository than the one above, or in one when no `project` is listed at all, name that repository by its main checkout, never by a worktree's own directory.

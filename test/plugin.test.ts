@@ -5,20 +5,33 @@ import { describe, expect, test } from 'vitest';
 import { ROOT } from './helpers.js';
 
 /**
- * The manifest is only read by Claude Code, at install time, on someone else's
+ * A manifest is only read by its agent, at install time, on someone else's
  * machine. Nothing here runs it, so a path that has moved or a mode that was
  * lost in a commit is invisible until an install fails. These cases are that
  * missing feedback.
  */
-const MANIFEST = join(ROOT, '.claude-plugin', 'plugin.json');
+type Agent = {
+  name: string;
+  manifest: string;
+  /** The only variable that agent substitutes, and so the only one a path may use. */
+  rootVar: string;
+};
 
-function manifest(): Record<string, any> {
-  return JSON.parse(readFileSync(MANIFEST, 'utf8'));
-}
+const AGENTS: Array<Agent> = [
+  {
+    name: 'Claude Code',
+    manifest: join('.claude-plugin', 'plugin.json'),
+    rootVar: 'CLAUDE_PLUGIN_ROOT',
+  },
+  {
+    name: 'Codex',
+    manifest: join('.codex-plugin', 'plugin.json'),
+    rootVar: 'PLUGIN_ROOT',
+  },
+];
 
-/** A path the manifest gives, which is relative to the plugin root. */
-function resolve(path: string): string {
-  return join(ROOT, path);
+function read(path: string): Record<string, any> {
+  return JSON.parse(readFileSync(join(ROOT, path), 'utf8'));
 }
 
 function isExecutable(path: string): boolean {
@@ -30,10 +43,10 @@ function isExecutable(path: string): boolean {
   }
 }
 
-describe('the plugin manifest', () => {
+describe.each(AGENTS)('the $name plugin', (agent) => {
   test(`should be valid JSON with the fields a marketplace lists it by`, () => {
     // Arrange, Act
-    const plugin = manifest();
+    const plugin = read(agent.manifest);
 
     // Assert
     expect(plugin.name).toBe('agent-journal');
@@ -42,37 +55,24 @@ describe('the plugin manifest', () => {
     expect(plugin.license).toBe('MIT');
   });
 
-  test(`should point at files that exist`, () => {
+  test(`should ship a hook and nothing else`, () => {
     // Arrange
-    const plugin = manifest();
-
-    // Act
-    const paths = [plugin.hooks, ...(plugin.commands ?? [])];
+    const plugin = read(agent.manifest);
 
     // Assert
-    expect(paths.length).toBe(2);
-    for (const path of paths) {
-      expect(statSync(resolve(path)).isFile()).toBe(true);
-    }
+    expect(statSync(join(ROOT, plugin.hooks)).isFile()).toBe(true);
+    /**
+     * The settings are one `config set` away and every agent has a shell, so
+     * neither plugin carries a command for it. A skill comes back when there is
+     * something worth a skill.
+     */
+    expect(plugin.commands).toBeUndefined();
+    expect(plugin.skills).toBeUndefined();
   });
 
-  test(`should describe every command it ships`, () => {
+  test(`should name a hook script that exists and can be run`, () => {
     // Arrange
-    const plugin = manifest();
-
-    // Assert
-    for (const path of plugin.commands ?? []) {
-      const front = readFileSync(resolve(path), 'utf8');
-      expect(front.startsWith('---\n')).toBe(true);
-      expect(front).toMatch(/^description: \S/m);
-    }
-  });
-});
-
-describe('the hooks it registers', () => {
-  test(`should name a script that exists and can be run`, () => {
-    // Arrange
-    const hooks = JSON.parse(readFileSync(resolve(manifest().hooks), 'utf8'));
+    const hooks = read(read(agent.manifest).hooks);
 
     // Act
     const commands = Object.values<Array<any>>(hooks.hooks)
@@ -83,10 +83,9 @@ describe('the hooks it registers', () => {
     // Assert
     expect(commands.length).toBe(1);
     for (const command of commands) {
-      /** The only variable Claude Code substitutes, and the only one a path may use. */
-      expect(command.startsWith('${CLAUDE_PLUGIN_ROOT}/')).toBe(true);
+      expect(command.startsWith(`\${${agent.rootVar}}/`)).toBe(true);
 
-      const script = join(ROOT, command.replace('${CLAUDE_PLUGIN_ROOT}/', ''));
+      const script = join(ROOT, command.replace(`\${${agent.rootVar}}/`, ''));
       expect(statSync(script).isFile()).toBe(true);
       expect(isExecutable(script)).toBe(true);
     }
@@ -94,7 +93,7 @@ describe('the hooks it registers', () => {
 
   test(`should fire on the events that begin a context`, () => {
     // Arrange
-    const hooks = JSON.parse(readFileSync(resolve(manifest().hooks), 'utf8'));
+    const hooks = read(read(agent.manifest).hooks);
 
     // Act
     const sessionStart = hooks.hooks.SessionStart;
@@ -107,6 +106,60 @@ describe('the hooks it registers', () => {
      * instruction it was given, so injecting it again would only spend context.
      */
     expect(sessionStart[0].matcher).toBe('startup|clear|compact');
+  });
+});
+
+describe('the Codex marketplace', () => {
+  test(`should offer this repository as the plugin it holds`, () => {
+    // Arrange, Act
+    const market = read(join('.agents', 'plugins', 'marketplace.json'));
+
+    // Assert
+    expect(market.name).toBe('zirkelc');
+    expect(market.plugins.length).toBe(1);
+    const [entry] = market.plugins;
+    expect(entry.name).toBe('agent-journal');
+    /** The repository root, which is where `.codex-plugin/plugin.json` is. */
+    expect(entry.source).toEqual({ source: 'local', path: './' });
+  });
+});
+
+describe('the two adapters', () => {
+  function deliver(directory: string): string {
+    return execFileSync(join(ROOT, 'adapters', directory, 'session-start.sh'), {
+      encoding: 'utf8',
+      input: JSON.stringify({ session_id: 'shared-1', cwd: ROOT, source: 'startup' }),
+      env: { ...process.env, CLAUDE_PLUGIN_ROOT: ROOT, PLUGIN_ROOT: ROOT },
+    });
+  }
+
+  /**
+   * They share `common.sh`, so the same payload has to come out the same apart
+   * from the one thing each is meant to answer differently. Comparing the rest
+   * is what stops one drifting when the other is fixed.
+   */
+  test(`should encode the same session identically but for the agent it names`, () => {
+    // Arrange
+    const claude = deliver('claude-code');
+    const codex = deliver('codex');
+
+    // Act
+    const withoutAgent = (rendered: string) => rendered.replaceAll(/agent`?: `?\w+/g, 'agent: X');
+
+    // Assert
+    expect(withoutAgent(claude)).toBe(withoutAgent(codex));
+    expect(claude).not.toBe(codex);
+  });
+
+  test(`should each name themselves`, () => {
+    // Arrange, Act
+    const rendered = (out: string) => JSON.parse(out).hookSpecificOutput;
+
+    // Assert
+    expect(rendered(deliver('claude-code')).hookEventName).toBe('SessionStart');
+    expect(rendered(deliver('claude-code')).additionalContext).toContain('`agent`: `claude`');
+    expect(rendered(deliver('codex')).additionalContext).toContain('`agent`: `codex`');
+    expect(rendered(deliver('codex')).additionalContext).toContain('shared-1');
   });
 });
 

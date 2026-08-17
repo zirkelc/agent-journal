@@ -199,3 +199,29 @@ describe('this session', () => {
     expect(fields(result).project).toBe(`repo`);
   });
 });
+
+describe('the agent', () => {
+  test(`should record which agent and model the session is`, () => {
+    // Arrange
+    const store = fixture();
+
+    // Act
+    const result = fields(run(store, ['context', '--cwd', store.repo, '--agent', 'claude/opus-5']));
+
+    // Assert
+    expect(result.agent).toBe('claude/opus-5');
+  });
+
+  test(`should take the whole line out when no agent is given`, () => {
+    // Arrange
+    const store = fixture();
+
+    // Act
+    const rendered = run(store, ['context', '--cwd', store.repo]);
+
+    // Assert
+    /** A label with nothing after it would read as a field the model must invent. */
+    expect(fields(rendered).agent).toBe(undefined);
+    expect(rendered).not.toContain('agent:');
+  });
+});

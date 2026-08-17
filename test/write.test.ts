@@ -300,3 +300,39 @@ describe('write', () => {
     expect(readdirSync(store.journalDir).length).toBe(0);
   });
 });
+
+describe('the agent it records', () => {
+  test(`should record the agent it was told about`, () => {
+    // Arrange
+    const store = fixture();
+
+    // Act
+    run(store, ['write', '--summary', 'From an agent.', '--agent', 'codex/gpt-5.1'], { at: store.repo });
+
+    // Assert
+    expect(frontmatter(written(store).text).agent).toBe('codex/gpt-5.1');
+  });
+
+  test(`should leave the agent out when a person wrote the entry`, () => {
+    // Arrange
+    const store = fixture();
+
+    // Act
+    run(store, ['write', '--summary', 'By hand.'], { at: store.repo });
+
+    // Assert
+    expect(frontmatter(written(store).text).agent).toBeUndefined();
+  });
+
+  test(`should refuse an agent that would break the frontmatter`, () => {
+    // Arrange
+    const store = fixture();
+
+    // Act
+    const result = fails(store, ['write', '--summary', 'Fine.', '--agent', 'a: b'], { at: store.repo });
+
+    // Assert
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('colon');
+  });
+});

@@ -34,6 +34,17 @@ export function fixture(instructions?: string): Fixture {
 
   mkdirSync(join(root, 'bin'), { recursive: true });
   copyFileSync(join(ROOT, 'bin', 'agent-journal'), bin);
+
+  /**
+   * The adapters and the `install` command are reached from the plugin root, so
+   * a fixture that omits them is a fixture where those paths silently do
+   * nothing. They are copied rather than symlinked so a case is free to replace
+   * one.
+   */
+  mkdirSync(join(root, 'adapters'), { recursive: true });
+  copyFileSync(join(ROOT, 'adapters', 'common.sh'), join(root, 'adapters', 'common.sh'));
+  mkdirSync(join(root, 'lib'), { recursive: true });
+  copyFileSync(join(ROOT, 'lib', 'install.sh'), join(root, 'lib', 'install.sh'));
   writeFileSync(
     join(root, 'INSTRUCTIONS.md'),
     instructions ?? readFileSync(join(ROOT, 'INSTRUCTIONS.md'), 'utf8'),

@@ -17,5 +17,5 @@
     "recall",
     "sessions"
   ],
-  "hooks": "./adapters/claude-code/hooks.json"
+  "hooks": "./adapters/codex/hooks.json"
 }

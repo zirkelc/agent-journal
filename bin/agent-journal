@@ -63,10 +63,15 @@ help_text() {
 usage: agent-journal list   [filters]
        agent-journal search TEXT [filters]
        agent-journal read   latest | 2026-01-11T143000Z | 2026-01-11
-       agent-journal write  [--summary S] [--body B] [--project P] [--cwd DIR]
+       agent-journal write  [--summary S] [--body B] [--project P] [--cwd DIR] [--agent A]
        agent-journal config [set|unset journal_dir <path>]
-       agent-journal context [--cwd DIR] [--session-id ID]
+       agent-journal context [--cwd DIR] [--session-id ID] [--agent A]
+       agent-journal install [claude|codex] [--all] [--dry-run]
        agent-journal help
+
+install with no agent named lists the ones found on this machine and what to
+type for each. Naming one registers this plugin with it, by running that
+agent's own plugin commands.
 
 write takes the summary and the body as flags, and anything piped in is the
 body. Without a summary it opens $EDITOR on a template, carrying any body it
@@ -270,6 +275,7 @@ fi
 cwd=
 cwd_set=0
 session_id=
+agent=
 
 date_filter=
 since=
@@ -280,6 +286,8 @@ opt_summary=
 summary_set=0
 opt_body=
 body_set=0
+all_set=0
+dry_run=0
 
 arg1=
 arg2=
@@ -295,6 +303,11 @@ while [ $# -gt 0 ]; do
     --cwd=*) cwd=${1#--cwd=}; cwd_set=1; shift ;;
     --session-id) [ $# -ge 2 ] || usage; session_id=$2; shift 2 ;;
     --session-id=*) session_id=${1#--session-id=}; shift ;;
+    # Which agent is running, and which model it is running as, in the form
+    # `name` or `name/model`. Only an adapter knows this, so only an adapter
+    # passes it, and an entry written without one simply has no such field.
+    --agent) [ $# -ge 2 ] || usage; agent=$2; shift 2 ;;
+    --agent=*) agent=${1#--agent=}; shift ;;
     --date) [ $# -ge 2 ] || usage; date_filter=$2; shift 2 ;;
     --date=*) date_filter=${1#--date=}; shift ;;
     --since) [ $# -ge 2 ] || usage; since=$2; shift 2 ;;
@@ -305,7 +318,10 @@ while [ $# -gt 0 ]; do
     --project=*) project_filter=${1#--project=}; shift ;;
     --limit) [ $# -ge 2 ] || usage; limit=$2; shift 2 ;;
     --limit=*) limit=${1#--limit=}; shift ;;
-    --all) limit=0; shift ;;
+    # Two readings again: for the query commands it lifts the limit, and for
+    # `install` it means every agent found rather than one named.
+    --all) limit=0; all_set=1; shift ;;
+    --dry-run) dry_run=1; shift ;;
     # One flag per field, rather than one flag for "the message". An entry is a
     # summary and a body, and a single `-m` cannot say which it meant. Spelled
     # out like every other flag here, none of which has a short form.
@@ -378,6 +394,20 @@ if [ "$cmd" = config ]; then
   # anything tries to write an entry into it and no hook has a side effect.
   read_config "$config_file"
   mkdir -p "$(expand_home "${cfg_journal_dir:-$default_journal_dir}")" || exit 1
+  exit 0
+fi
+
+# ---------------------------------------------------------------- install
+
+# In its own file, sourced only when it is asked for. It is the longest thing
+# here and the least often run, and `context` sits in front of every session, so
+# it is worth keeping the two apart.
+if [ "$cmd" = install ]; then
+  [ -n "$root" ] && [ -r "$root/lib/install.sh" ] || {
+    printf 'cannot find lib/install.sh next to this script\n' >&2
+    exit 1
+  }
+  . "$root/lib/install.sh"
   exit 0
 fi
 
@@ -686,6 +716,7 @@ if [ "$cmd" = write ]; then
   refuse_if_unquotable summary "$opt_summary" quoted
   refuse_if_unquotable project "$project_filter" bare
   refuse_if_unquotable 'session id' "$session_id" bare
+  refuse_if_unquotable agent "$agent" bare
 
   mkdir -p "$journal_dir" || exit 1
 
@@ -723,6 +754,7 @@ if [ "$cmd" = write ]; then
     [ -z "$project" ] || printf 'project: %s\n' "$project"
     printf 'summary: "%s"\n' "$summary"
     printf 'cwd: %s\n' "$(abbrev_home "$cwd")"
+    [ -z "$agent" ] || printf 'agent: %s\n' "$agent"
     [ -z "$session_id" ] || printf 'session_id: %s\n' "$session_id"
     printf -- '---\n\n'
   } > "$draft" || exit 1
@@ -825,14 +857,16 @@ awk \
   -v journal_dir="$journal_dir" \
   -v project="$project" \
   -v cwd="$(abbrev_home "$cwd")" \
-  -v session_id="$session_id" '
+  -v session_id="$session_id" \
+  -v agent="$agent" '
   BEGIN {
-    keys = "journal_dir project cwd session_id"
+    keys = "journal_dir project cwd session_id agent"
     n = split(keys, key, " ")
     value["journal_dir"] = journal_dir
     value["project"] = project
     value["cwd"] = cwd
     value["session_id"] = session_id
+    value["agent"] = agent
 
     # In a gsub replacement `&` means the matched text and `\` escapes, so a
     # value containing either would substitute itself back in mangled.

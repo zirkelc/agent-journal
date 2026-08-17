@@ -29,7 +29,9 @@ usage() {
 usage: install.sh [--prefix DIR] [--dir DIR] [--source DIR]
 
   --prefix DIR   install under DIR instead of ~/.local
-  --dir DIR      where journal entries go, instead of the default
+  --dir DIR      where journal entries go, on a first install. An existing
+                 setting is never changed by installing; use
+                 `agent-journal config set journal_dir <path>` for that
   --source DIR   install from a local checkout instead of cloning
 EOF
   exit 2
@@ -62,24 +64,17 @@ if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
   # so it gets a colour of its own rather than bold, which a terminal renders
   # too close to ordinary text to pick out.
   command_style=$(printf '\033[1;33m')
-  # 256-colour 173 is the closest terminals get to Claude's orange, and it is
-  # used for nothing else here, so the word always means the same product.
-  orange=$(printf '\033[38;5;173m')
   dim=$(printf '\033[2m')
   reset=$(printf '\033[0m')
-  # The marks are decoration, so a log file gets the sentence alone rather than a
-  # glyph nothing coloured. The asterisk is the one Claude Code shows while it
-  # is thinking, which is what makes it read as that product rather than a bullet.
+  # Decoration, so a log file gets the sentence alone rather than a glyph nothing
+  # coloured. The per-agent marks live with the agents, in `lib/install.sh`.
   tick=$(printf '\033[32m✔\033[0m ')
-  claude_mark=$(printf '\033[38;5;173m✻\033[0m ')
 else
   cyan=
   command_style=
-  orange=
   dim=
   reset=
   tick=
-  claude_mark=
 fi
 
 # Two rows rather than the six a full figlet alphabet needs, because an
@@ -113,7 +108,7 @@ if [ -n "$source_dir" ]; then
   mkdir -p "$data_dir"
   # Named rather than copied wholesale, so a developer's node_modules and .git
   # do not become part of an install.
-  for item in bin INSTRUCTIONS.md adapters .claude-plugin README.md LICENSE; do
+  for item in bin lib INSTRUCTIONS.md adapters .claude-plugin .codex-plugin .agents README.md LICENSE; do
     [ -e "$source_dir/$item" ] || continue
     cp -R "$source_dir/$item" "$data_dir/"
   done
@@ -139,15 +134,31 @@ mkdir -p "$bin_dir"
 ln -sf "$data_dir/bin/agent-journal" "$bin_dir/agent-journal"
 ln -sf "$data_dir/bin/agent-journal" "$bin_dir/aj"
 
-# Whatever is already configured, or the default, unless --dir said otherwise. A
-# re-install therefore leaves a directory somebody chose alone.
 installed=$data_dir/bin/agent-journal
-journal_dir=${journal_dir:-$("$installed" config | sed -n 's/^journal_dir=//p')}
 
-# `config set` owns the file format and creates the directory, so the installer
-# never has to know either. Handed the default it writes no key at all and only
-# makes the directory, which is what keeps the default free to change later.
-"$installed" config set journal_dir "$journal_dir"
+# An existing setting is never changed by installing, and wins over `--dir`.
+# One config file serves every agent on the machine and every entry already
+# written, so repointing it would hide a whole journal at once, and the usual
+# reason to run this script is to update an install that already works.
+#
+# `config` reports where the value came from, which is the only way to tell a
+# directory somebody chose from the default that ships with it.
+requested_dir=$journal_dir
+settings=$("$installed" config)
+journal_dir=$(printf '%s\n' "$settings" | sed -n 's/^journal_dir=//p')
+journal_dir_from=$(printf '%s\n' "$settings" | sed -n 's/^journal_dir_from=//p')
+
+if [ "$journal_dir_from" = config ]; then
+  configured_already=1
+else
+  configured_already=0
+  [ -z "$requested_dir" ] || journal_dir=$requested_dir
+
+  # `config set` owns the file format and creates the directory, so the installer
+  # never has to know either. Handed the default it writes no key at all and only
+  # makes the directory, which is what keeps the default free to change later.
+  "$installed" config set journal_dir "$journal_dir"
+fi
 
 # ---------------------------------------------------------------- report
 
@@ -173,56 +184,27 @@ echo
 echo "  ${command_style}agent-journal help${reset}"
 
 echo
-echo "Journal lives in ${cyan}${journal_dir}${reset}"
+if [ "$configured_already" = 1 ]; then
+  echo "Journal already set to ${cyan}${journal_dir}${reset}, left as it is"
+
+  # Report the flag that was not applied. Someone who passed --dir and heard
+  # nothing back would assume the journal had moved, and would only find out
+  # later, after writing entries somewhere they are not looking.
+  if [ -n "$requested_dir" ] && [ "$requested_dir" != "$journal_dir" ]; then
+    echo "${dim}--dir ${requested_dir} was not applied. Change it deliberately with the command below.${reset}"
+  fi
+else
+  echo "Journal lives in ${cyan}${journal_dir}${reset}"
+fi
 echo "To change the location, run:"
 echo
 echo "  ${command_style}agent-journal config set journal_dir${reset} ${dim}<path>${reset}"
 
-if command -v claude > /dev/null 2>&1; then
-  echo
-  echo "${claude_mark}${orange}Claude Code${reset} detected"
-  echo
-  echo "To have Claude journal on its own, install the plugin:"
-  echo
-  echo "  ${command_style}/plugin marketplace add zirkelc/agent-plugins${reset}"
-  echo "  ${command_style}/plugin install agent-journal@zirkelc${reset}"
-  echo
-  echo "Or merge this into ${cyan}~/.claude/settings.json${reset}. The hooks key replaces the"
-  echo "plugin; the permissions key is worth having either way, so Claude writes"
-  echo "entries without stopping to ask:"
-  echo
-  # The whole file rather than a fragment, because a fragment has to be placed
-  # and this can be pasted. Anyone who already has settings merges the two keys.
-  #
-  # It has to be Edit(): Claude Code accepts a Write() path rule, warns about it
-  # at startup and never consults it, since Edit covers every file-editing tool.
-  # A single leading slash would anchor at the settings file rather than at the
-  # filesystem root, which is why the rule is written from ~ or from //.
-  case $journal_dir in
-    "$HOME"/*) allow_rule="Edit(~/${journal_dir#"$HOME"/}/**)" ;;
-    *) allow_rule="Edit(//${journal_dir#/}/**)" ;;
-  esac
-
-  printf '%s' "$dim"
-  cat <<EOF
-  {
-    "hooks": {
-      "SessionStart": [
-        {
-          "matcher": "startup|clear|compact",
-          "hooks": [
-            { "type": "command", "command": "$data_dir/adapters/claude-code/session-start.sh", "timeout": 10 }
-          ]
-        }
-      ]
-    },
-    "permissions": {
-      "allow": ["$allow_rule"]
-    }
-  }
-EOF
-  printf '%s' "$reset"
-fi
-
+# Which agents are here, and what to type for each. Printed by running the copy
+# just installed rather than repeated here, so this script and the command it
+# installs can never disagree about how to wire an agent up.
+#
+# It still only prints. Nothing about this installer touches an agent's
+# configuration; `agent-journal install <agent>` does that, when asked.
 echo
-echo "Start a new session in your agent and ask it to write a journal entry."
+AGENT_JOURNAL_HEADER=0 "$installed" install
