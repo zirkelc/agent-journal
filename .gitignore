@@ -1,3 +1,8 @@
 node_modules/
 *.log
 .DS_Store
+
+# Launch material: screenshots and the copy that goes with them. Anchored to the
+# root so the images the README uses, under assets/, are still tracked.
+/*.png
+/tweets.md
