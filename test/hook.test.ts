@@ -14,7 +14,7 @@ describe('output', () => {
 
     // Assert
     expect(result?.hookSpecificOutput.hookEventName).toBe(`SessionStart`);
-    expect(result?.hookSpecificOutput.additionalContext).toContain(`EVERY session, you MUST write`);
+    expect(result?.hookSpecificOutput.additionalContext).toContain(`### When to write`);
   });
 
   /**

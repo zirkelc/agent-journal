@@ -23,21 +23,28 @@ Keep it agent-neutral: no product names, and no tool names beyond the file
 writing one, which every agent has.
 -->
 
-The following is a standing instruction for this session, injected by `agent-journal` from the user's configuration. It is a requirement, not background reading: the journal is how work survives past the session that did it.
+The following is a standing instruction for this session, injected by `agent-journal` from the user's configuration.
 
 ## Journal
 
-EVERY session, you MUST write at least one journal entry. Write it without asking permission. Only the main conversation writes entries; sub-agents never do.
+Every session, you should write at least one journal entry. Write it without asking permission. Only the main conversation writes entries; sub-agents never do.
 
 ### When to write
 
+When the session contains important context that is worth remembering:
+
 - At each significant milestone (bug fixed, feature done, refactor complete)
 - At each a-ha moment or pivotal decision
-- When the user signals end of session ("good night", "we're done", "I'm off")
+- At the end of session (e.g. departure signals like "good night", "we're done", "I'm off"; "thanks", "ok", "done" are acknowledgment, NOT end of session)
 
-"thanks", "ok", "done" are acknowledgment, NOT end of session. Only explicit departure signals count.
+Once there is something worth remebering, a little noise is better than missed episodes. Multiple entries per session is normal.
 
-A little noise is better than missed episodes. Multiple entries per session is normal.
+### When NOT to write
+
+Some sessions contain nothing worth remembering: greetings, a question answered from what you already knew, a couple of commands that changed nothing. Do note write an entry and do not announce it.
+
+Never write an entry about the entry: "Created the required journal entry for this session" and "Session opened, no task has been requested yet" tell a future reader only that a session happened. 
+If a summary would mean nothing to someone reading it in a year, there is nothing to write yet.
 
 ### Writing an entry
 
