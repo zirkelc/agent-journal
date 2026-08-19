@@ -1,0 +1,194 @@
+<!--
+  Source for assets/codex-dark.png and assets/codex-light.png. Render both:
+
+    C="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+    F="--headless --disable-gpu --hide-scrollbars --default-background-color=00000000"
+    "$C" $F --force-device-scale-factor=2 --window-size=1252,790 \
+      --screenshot=assets/codex-dark.png  "file://$PWD/assets/codex.html"
+    "$C" $F --force-device-scale-factor=2 --window-size=1252,790 \
+      --screenshot=assets/codex-light.png "file://$PWD/assets/codex.html?light"
+
+  Same rules as session.html: the window is sized to the longest line so the png
+  carries no dead space, and the ground stays transparent.
+
+  Codex draws a transcript rather than a stream of tool calls, so the parts that
+  differ from the Claude Code shot are its own: the boxed banner, the full-width
+  band behind each user turn, and the rules between turns.
+-->
+<title>agent-journal — codex</title>
+
+<script>
+  /* The theme is chosen by the render, not by the reader: these become two
+     static images that a <picture> element picks between. */
+  if (location.search.indexOf('light') !== -1) document.documentElement.className = 'light';
+</script>
+
+<style>
+  :root {
+    --chrome:  #202027;
+    --ground:  #21242b;
+    --band:    #2f333c;
+    --text:    #e4e4e7;
+    --dim:     #9a9ba6;
+    --dimmer:  #70717c;
+    --green:   #3fb950;
+    --cyan:    #56b6c2;
+    --rule:    #2a2a33;
+    --edge:    #464a55;
+    --shadow:  0 10px 26px -12px rgba(0, 0, 0, 0.55);
+  }
+
+  /* A real light terminal, not the dark one inverted: the accents are darkened
+     until they hold their own against white, rather than reused. */
+  :root.light {
+    --chrome:  #ededf2;
+    --ground:  #fcfcfd;
+    --band:    #eceef2;
+    --text:    #1f2024;
+    --dim:     #5f606a;
+    --dimmer:  #85868f;
+    --green:   #1a7f37;
+    --cyan:    #0e7490;
+    --rule:    #d9d9e0;
+    --edge:    #c3c4cd;
+    --shadow:  0 10px 26px -14px rgba(20, 20, 35, 0.30);
+  }
+
+  body {
+    background: transparent;
+    color: var(--text);
+    margin: 0;
+    /* Just enough room for the shadow, since the padding becomes transparent
+       pixels in the png and every one of them shrinks the terminal in the
+       README, which scales the image to the column width. */
+    padding: 16px;
+    font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Monaco, "Cascadia Code", monospace;
+    font-size: 13px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .shot { width: calc(148ch + 34px); margin: 0 auto; }
+
+  .window {
+    background: var(--ground);
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: var(--shadow);
+  }
+
+  .titlebar {
+    background: var(--chrome);
+    border-bottom: 1px solid var(--rule);
+    padding: 9px 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .dot { width: 11px; height: 11px; border-radius: 50%; }
+  .dot.r { background: #ec6a5e; }
+  .dot.y { background: #f4bf4f; }
+  .dot.g { background: #61c554; }
+  .titlebar .name { margin-left: 8px; color: var(--dimmer); font-size: 12px; }
+
+  /* No padding: a user turn is a band that reaches both edges, so the rows
+     supply their own inset instead. */
+  .screen { padding: 14px 0 0; }
+
+  pre { margin: 0; font: inherit; white-space: pre; color: var(--text); }
+  .row { padding: 0 16px; }
+
+  /* One user turn, lit slightly against the ground and reaching both edges. */
+  .turn {
+    background: var(--band);
+    padding: 10px 16px;
+    margin: 14px 0;
+  }
+  .turn .chev { color: var(--dimmer); }
+
+  .banner {
+    display: inline-block;
+    border: 1px solid var(--edge);
+    border-radius: 6px;
+    padding: 8px 14px;
+    margin: 0 0 4px 8px;
+  }
+  .brand { font-weight: 600; }
+
+  .dim    { color: var(--dim); }
+  .dimmer { color: var(--dimmer); }
+  .cyan   { color: var(--cyan); }
+  .bullet { color: var(--dim); }
+  .strong { font-weight: 600; }
+  .em     { font-style: italic; }
+  .gap    { display: block; height: 1.62em; }
+
+  hr {
+    border: 0;
+    border-top: 1px solid var(--rule);
+    margin: 14px 16px;
+  }
+
+  .composer {
+    background: var(--band);
+    padding: 10px 16px;
+    margin-top: 14px;
+    color: var(--dimmer);
+  }
+  /* A question half asked, so the shot ends on the thing the journal is for
+     rather than on an empty box. */
+  .typed { color: var(--text); }
+  .caret {
+    display: inline-block;
+    width: 8px;
+    height: 1.05em;
+    background: var(--dim);
+    vertical-align: text-bottom;
+    margin-left: 2px;
+  }
+  .status { padding: 6px 16px 10px; color: var(--dimmer); }
+</style>
+
+<div class="shot">
+  <div class="window">
+    <div class="titlebar">
+      <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+      <span class="name">agent-journal — codex</span>
+    </div>
+
+    <div class="screen">
+      <div class="row"><pre><span class="green" style="color: var(--green)">→</span>  <span class="dim">~</span> codex</pre></div>
+
+      <div class="row"><div class="banner"><pre><span class="dim">&gt;_</span> <span class="brand">OpenAI Codex</span> <span class="dimmer">(v0.147.0)</span>
+<span class="gap"></span><span class="dim">model:     </span>gpt-5.6-terra   <span class="dimmer">/model to change</span>
+<span class="dim">directory: </span>~</pre></div></div>
+
+      <div class="turn"><pre><span class="chev">›</span> Hi</pre></div>
+
+      <div class="row"><pre><span class="bullet">•</span> SessionStart hook (completed)
+  hook context: The following is a standing instruction for this session, injected by `agent-journal` from the user's configuration.
+<span class="gap"></span>    <span class="dimmer">… +93 lines (ctrl + t to view transcript)</span>
+<span class="bullet">•</span> Hi - how can I help you?</pre></div>
+
+      <div class="turn"><pre><span class="chev">›</span> what did we work on yesterday?</pre></div>
+
+      <div class="row"><pre><span class="bullet">•</span> I'll check yesterday's journal entries.
+<span class="gap"></span><span class="bullet">•</span> <span class="strong">Explored</span>
+  └ <span class="dim">Search</span> ^(date|summary|project|cwd): <span class="dim">in</span> 2026-08-18*.md</pre></div>
+
+      <hr />
+
+      <div class="row"><pre><span class="bullet">•</span> Yesterday you worked extensively on <span class="strong">Flyweight</span>:
+<span class="gap"></span>- Diagnosed Azure Foundry stalls in auxiliary LLM calls and shipped a 5-second first-attempt cap/failover to OpenAI (<span class="cyan">d95bf9c20</span>).
+- Investigated durable-execution "ghost" continuations; upgraded the SDK from 1.1.0 to 2.3.0, verified the issue was resolved, and shipped PR #2587.
+- Initially added an AsyncLocalStorage logger isolation fix, then reverted it because the SDK upgrade made it unnecessary.
+- Split retry work: streaming stayed on PR #2560, while metadata generation moved to <span class="cyan">retryableGenerateText</span> on a new branch.</pre></div>
+
+      <hr />
+
+      <div class="composer"><pre><span class="chev">›</span> <span class="typed">why did we pick the 5 second cap?</span><span class="caret"></span></pre></div>
+      <div class="status"><pre>gpt-5.6-terra default · ~</pre></div>
+    </div>
+  </div>
+</div>
