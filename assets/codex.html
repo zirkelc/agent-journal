@@ -4,9 +4,9 @@
     C="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
     F="--headless --disable-gpu --hide-scrollbars --default-background-color=00000000"
     "$C" $F --force-device-scale-factor=2 --window-size=1252,790 \
-      --screenshot=assets/codex-dark.png  "file://$PWD/assets/codex.html"
+      --screenshot=assets/codex-dark.png  "file://$(realpath assets/codex.html)"
     "$C" $F --force-device-scale-factor=2 --window-size=1252,790 \
-      --screenshot=assets/codex-light.png "file://$PWD/assets/codex.html?light"
+      --screenshot=assets/codex-light.png "file://$(realpath assets/codex.html)?light"
 
   Same rules as session.html: the window is sized to the longest line so the png
   carries no dead space, and the ground stays transparent.

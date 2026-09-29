@@ -348,7 +348,7 @@ case $limit in
   '' | *[!0-9]*) printf '%s: --limit takes a number\n' "$limit" >&2; exit 2 ;;
 esac
 
-[ -n "$cwd" ] || cwd=$PWD
+[ -n "$cwd" ] || cwd=$(pwd)
 # Entries record this path, and one that reads `.` records nothing at all. An
 # adapter passes an absolute path, but a shell invocation is where the mistake
 # would be made and it costs one line to make it impossible.
