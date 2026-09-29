@@ -15,6 +15,11 @@ type Agent = {
   manifest: string;
   /** The only variable that agent substitutes, and so the only one a path may use. */
   rootVar: string;
+  /**
+   * Whether the hook command wraps the path in double quotes, so a plugin root
+   * with a space in it stays one word when the shell runs it.
+   */
+  quoted: boolean;
 };
 
 const AGENTS: Array<Agent> = [
@@ -22,11 +27,13 @@ const AGENTS: Array<Agent> = [
     name: 'Claude Code',
     manifest: join('.claude-plugin', 'plugin.json'),
     rootVar: 'CLAUDE_PLUGIN_ROOT',
+    quoted: true,
   },
   {
     name: 'Codex',
     manifest: join('.codex-plugin', 'plugin.json'),
     rootVar: 'PLUGIN_ROOT',
+    quoted: false,
   },
 ];
 
@@ -82,10 +89,13 @@ describe.each(AGENTS)('the $name plugin', (agent) => {
 
     // Assert
     expect(commands.length).toBe(1);
+    const quote = agent.quoted ? '"' : '';
+    const prefix = `${quote}\${${agent.rootVar}}/`;
     for (const command of commands) {
-      expect(command.startsWith(`\${${agent.rootVar}}/`)).toBe(true);
+      expect(command.startsWith(prefix)).toBe(true);
+      expect(command.endsWith(quote)).toBe(true);
 
-      const script = join(ROOT, command.replace(`\${${agent.rootVar}}/`, ''));
+      const script = join(ROOT, command.slice(prefix.length, command.length - quote.length));
       expect(statSync(script).isFile()).toBe(true);
       expect(isExecutable(script)).toBe(true);
     }

@@ -26,6 +26,7 @@ Nothing leaves your machine.
 
 - **No server, no account, no API requests.** The plugin runs locally. It makes no network requests.
 - **No hidden tool calls.** Entries are written by the model's own file-writing tool, in your session, in front of you. Nothing runs in the background and nothing runs between sessions.
+- **A read-only hook.** At session start, a shell script in [`adapters/`](adapters/) reads `~/.config/agent-journal/config` and runs `git rev-parse` to name the project. It writes no files.
 - **Your own files.** Entries are plain markdown in a directory you choose. Delete one and it is gone.
 
 Everything stays between you and your model.
