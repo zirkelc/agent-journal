@@ -29,7 +29,8 @@ root=${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$self")/../.." 2>/dev/null && pwd)}
 
 journal_read_payload
 
-[ -n "$cwd" ] || cwd=${CLAUDE_PROJECT_DIR:-$PWD}
+# With neither, the core falls back to the directory it runs in.
+[ -n "$cwd" ] || cwd=${CLAUDE_PROJECT_DIR:-}
 
 # The payload may carry the model, and is documented not to promise it, so the
 # entry records whatever arrived and nothing when nothing did.

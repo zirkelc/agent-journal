@@ -40,8 +40,7 @@ root=${PLUGIN_ROOT:-$(cd "$(dirname "$self")/../.." 2>/dev/null && pwd)}
 
 journal_read_payload
 
-[ -n "$cwd" ] || cwd=$PWD
-
+# Without a cwd in the payload, the core falls back to the directory it runs in.
 out=$("$root/bin/agent-journal" context \
   --cwd "$cwd" \
   --session-id "$session_id" \

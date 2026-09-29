@@ -251,6 +251,7 @@ export function hook(store: Fixture, options: RunOptions = {}): Record<string, a
 
   const out = execFileSync(HOOK, [], {
     encoding: 'utf8',
+    cwd: options.at,
     input: payload,
     env: baseEnv(store, { CLAUDE_PLUGIN_ROOT: store.root, ...options.env }),
   });

@@ -61,6 +61,18 @@ describe('output', () => {
     expect(fields(result)[`project`]).toBe(`repo`);
   });
 
+  test(`should fall back to the directory it runs in when the payload carries no cwd`, () => {
+    // Arrange
+    const store = fixture();
+    const payload = JSON.stringify({ session_id: 'no-cwd', hook_event_name: 'SessionStart' });
+
+    // Act
+    const result = hook(store, { stdin: payload, at: store.repo, env: { CLAUDE_PROJECT_DIR: '' } });
+
+    // Assert
+    expect(fields(result!.hookSpecificOutput.additionalContext)[`project`]).toBe(`repo`);
+  });
+
   test(`should read the fields out of pretty-printed JSON`, () => {
     // Arrange
     const store = fixture();
