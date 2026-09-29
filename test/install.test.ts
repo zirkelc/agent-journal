@@ -17,6 +17,17 @@ import { type Fixture, fails, fixture, output as capture, ROOT, run as runBin } 
 
 const INSTALLER = join(ROOT, 'install.sh');
 
+/**
+ * `agent-journal install` is about other people's software, so every case here
+ * builds the machine it expects: a PATH with only what the shell needs, a home
+ * with no agent's directory in it, and fake launchers for the agents a case
+ * wants to be present.
+ *
+ * `CODEX_HOME` is cleared explicitly. It is set for real on some machines, and
+ * a case about an absent Codex would otherwise pass or fail by accident.
+ */
+const BARE_PATH = '/usr/bin:/bin:/usr/sbin:/sbin';
+
 type Install = {
   home: string;
   prefix: string;
@@ -53,6 +64,9 @@ function run(home: string, args: Array<string>): string {
       ...process.env,
       HOME: home,
       XDG_CONFIG_HOME: join(home, 'config'),
+      /** The installer ends by detecting agents, so no real one may leak in. */
+      PATH: BARE_PATH,
+      CODEX_HOME: '',
     },
   });
 }
@@ -119,7 +133,7 @@ describe('install.sh', () => {
     const output = run(home, ['--prefix', join(home, 'opt'), '--source', ROOT]);
 
     // Assert
-    expect(output).toContain('ask it to write a journal entry');
+    expect(output).toContain('agent-journal write');
     expect(existsSync(join(home, 'agent-journal'))).toBe(true);
   });
 
@@ -222,17 +236,6 @@ describe('install.sh', () => {
     );
   });
 });
-
-/**
- * `agent-journal install` is about other people's software, so every case here
- * builds the machine it expects: a PATH with only what the shell needs, a home
- * with no agent's directory in it, and fake launchers for the agents a case
- * wants to be present.
- *
- * `CODEX_HOME` is cleared explicitly. It is set for real on some machines, and
- * a case about an absent Codex would otherwise pass or fail by accident.
- */
-const BARE_PATH = '/usr/bin:/bin:/usr/sbin:/sbin';
 
 /** A launcher that records that it ran, so a case can tell printing from doing. */
 function launcher(store: Fixture, name: string): string {
