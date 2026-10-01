@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Agent Journal app mockup, combined</title>
+<style>
+  :root {
+    --bg: #e9e9ec; --win: #ffffff; --side: #f2f2f4; --line: #e3e3e6; --text: #1d1d1f; --mute: #86868b;
+    --accent: #0a84ff; --sel: #dcebff; --chip: #eef0f3; --code: #f5f5f7; --card: #fafafa; --heat: 10,132,255;
+  }
+  .dark {
+    --bg: #111113; --win: #1e1e20; --side: #252528; --line: #343438; --text: #ececee; --mute: #8e8e93;
+    --sel: #1d3a5f; --chip: #2c2c30; --code: #2a2a2d; --card: #232326;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 13px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif; background: var(--bg); color: var(--text); }
+  .bar { display: flex; gap: 8px; align-items: center; padding: 14px 24px; }
+  .bar button { border: 1px solid var(--line); background: var(--win); color: var(--text); border-radius: 7px; padding: 5px 12px; font: inherit; cursor: pointer; }
+  .bar .note { color: var(--mute); margin-left: 8px; }
+  .win { margin: 0 24px 24px; height: 780px; background: var(--win); border-radius: 12px; border: 1px solid var(--line); box-shadow: 0 20px 50px rgba(0,0,0,.18); display: flex; overflow: hidden; }
+  .side { width: 248px; flex: none; background: var(--side); border-right: 1px solid var(--line); padding: 12px 10px; overflow: auto; }
+  .lights { display: flex; gap: 8px; padding: 2px 6px 14px; }
+  .lights i { width: 12px; height: 12px; border-radius: 50%; display: block; }
+  .lights i:nth-child(1) { background: #ff5f57; } .lights i:nth-child(2) { background: #febc2e; } .lights i:nth-child(3) { background: #28c840; }
+  .sec { font-size: 11px; font-weight: 600; color: var(--mute); padding: 12px 8px 4px; display: flex; align-items: center; }
+  .sec .clear { margin-left: auto; font-weight: 400; color: var(--accent); cursor: pointer; }
+  .item { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 6px; cursor: pointer; }
+  .item .n { margin-left: auto; color: var(--mute); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .item.sel { background: var(--sel); }
+  .item.sub { color: var(--mute); font-size: 12px; padding-top: 6px; }
+  .item.ind { padding-left: 22px; }
+  .ico { width: 16px; text-align: center; color: var(--accent); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; display: inline-block; }
+  .seg { display: inline-flex; background: var(--chip); border-radius: 7px; padding: 2px; }
+  .seg span { padding: 2px 10px; border-radius: 5px; cursor: pointer; color: var(--mute); }
+  .seg span.on { background: var(--win); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.15); }
+  .seg.full { display: flex; } .seg.full span { flex: 1; text-align: center; padding: 2px 0; font-size: 12px; }
+
+  /* calendar picker */
+  .cal { margin: 4px 0 4px; }
+  .cal .hd { display: flex; align-items: center; padding: 10px 4px 6px; font-weight: 600; }
+  .cal .hd .t { flex: 1; text-align: center; cursor: pointer; border-radius: 6px; padding: 1px 0; }
+  .cal .hd .t.sel { background: var(--accent); color: #fff; }
+  .cal .hd .nav { width: 22px; text-align: center; cursor: pointer; color: var(--mute); }
+  .days { display: grid; grid-template-columns: 22px repeat(7, 1fr); gap: 2px 0; text-align: center; font-size: 11px; }
+  .days .wd { color: var(--mute); padding-bottom: 2px; }
+  .days .wn { color: var(--mute); font-size: 9px; line-height: 26px; cursor: pointer; border-radius: 5px; }
+  .days .wn:hover { color: var(--accent); }
+  .days .d { line-height: 26px; cursor: pointer; position: relative; }
+  .days .d.out { color: var(--mute); opacity: .45; }
+  .days .d.future { color: var(--mute); }
+  .days .d i { position: absolute; left: 50%; bottom: 2px; width: 14px; height: 3px; margin-left: -7px; border-radius: 2px; }
+  .days .d.inrange { background: var(--sel); }
+  .days .d.rs { border-radius: 6px 0 0 6px; } .days .d.re { border-radius: 0 6px 6px 0; } .days .d.rs.re { border-radius: 6px; }
+  .days .d.today b { font-weight: 700; color: var(--accent); }
+  .days .d.pick { background: var(--accent); color: #fff; border-radius: 6px; }
+  .days .d.pick b { color: #fff; }
+  .months { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .months div { border-radius: 8px; padding: 6px 4px 5px; text-align: center; cursor: pointer; background: var(--win); border: 1px solid var(--line); }
+  .months div small { display: block; color: var(--mute); font-size: 10px; }
+  .months div i { display: block; height: 3px; border-radius: 2px; margin: 4px 8px 0; }
+  .months div.sel { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .months div.sel small { color: #ffffffcc; }
+  .months div.future { opacity: .45; }
+  .weekl .wd2 { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 6px; cursor: pointer; }
+  .weekl .wd2 .bar2 { flex: 1; height: 6px; border-radius: 3px; background: var(--chip); overflow: hidden; }
+  .weekl .wd2 .bar2 i { display: block; height: 100%; background: var(--accent); }
+  .weekl .wd2 .n { width: 18px; text-align: right; color: var(--mute); font-size: 11px; }
+  .weekl .wd2.sel { background: var(--sel); }
+  .weekl .wd2 .l { width: 62px; }
+
+  .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .tool { height: 52px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid var(--line); }
+  .tool h2 { font-size: 15px; margin: 0; font-weight: 600; white-space: nowrap; }
+  .tool .sub { color: var(--mute); white-space: nowrap; }
+  .btn { border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; color: var(--text); background: var(--win); cursor: pointer; white-space: nowrap; }
+  .btn.ghost { color: var(--mute); border-style: dashed; }
+  .grow { flex: 1; }
+  .search { display: flex; align-items: center; gap: 6px; background: var(--chip); border-radius: 8px; padding: 4px 4px 4px 8px; width: 280px; color: var(--mute); }
+  .search .seg { margin-left: auto; background: transparent; }
+  .search .seg span { font-size: 11px; padding: 1px 7px; }
+  .filters { display: flex; gap: 6px; padding: 7px 14px; border-bottom: 1px solid var(--line); align-items: center; }
+  .pop { border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; font-size: 12px; background: var(--win); cursor: default; white-space: nowrap; }
+  .pop.on { background: var(--sel); border-color: transparent; color: var(--accent); }
+  .pop b { font-weight: 600; }
+  .row { display: flex; flex: 1; min-height: 0; }
+  .list { width: 340px; flex: none; border-right: 1px solid var(--line); overflow: auto; }
+  .day { position: sticky; top: 0; background: var(--win); font-size: 11px; font-weight: 600; color: var(--mute); padding: 10px 14px 4px; border-bottom: 1px solid var(--line); z-index: 1; }
+  .ent { padding: 9px 14px; border-bottom: 1px solid var(--line); cursor: pointer; }
+  .ent.sel { background: var(--sel); }
+  .meta { display: flex; gap: 8px; font-size: 11px; color: var(--mute); margin-bottom: 2px; align-items: center; }
+  .ent .sum { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .proj { font-weight: 600; }
+  .detail { flex: 1; overflow: auto; padding: 22px 30px; min-width: 0; }
+  .detail h1 { font-size: 20px; margin: 0 0 4px; font-weight: 650; line-height: 1.3; }
+  .kv { display: grid; grid-template-columns: 90px 1fr; gap: 3px 10px; font-size: 12px; margin: 14px 0 18px; padding: 10px 12px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
+  .kv b { color: var(--mute); font-weight: 500; }
+  .md p { margin: 0 0 10px; } .md h3 { font-size: 14px; margin: 16px 0 6px; } .md ul { padding-left: 20px; margin: 0 0 10px; }
+  .md code, pre, .kv code { font: 12px/1.5 "SF Mono", ui-monospace, Menlo, monospace; background: var(--code); border-radius: 4px; padding: 1px 4px; }
+  pre { padding: 12px; white-space: pre-wrap; margin: 0; }
+  .raw { display: none; } .showraw .raw { display: block; } .showraw .md { display: none; }
+  .feed { flex: 1; overflow: auto; padding: 4px 0 30px; }
+  .feed .inner { max-width: 780px; margin: 0 auto; padding: 0 28px; }
+  .fday { font-size: 13px; font-weight: 650; margin: 20px 0 8px; display: flex; gap: 8px; align-items: baseline; }
+  .fday small { color: var(--mute); font-weight: 400; }
+  .card { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; background: var(--card); }
+  .card .sum { font-weight: 600; margin-bottom: 6px; }
+  .digest { border: 1px dashed var(--accent); border-radius: 10px; padding: 10px 14px; margin: 16px 0 4px; color: var(--mute); display: flex; gap: 10px; align-items: center; }
+  .empty { color: var(--mute); text-align: center; padding: 60px 20px; }
+</style>
+</head>
+<body>
+<div class="bar">
+  <button id="theme">Dark</button>
+  <span class="note">Combined mockup. Click the calendar (day, week number, month title), switch Year / Month / Week, switch List / Feed, toggle Rendered / Raw.</span>
+</div>
+
+<div class="win">
+  <div class="side">
+    <div class="lights"><i></i><i></i><i></i></div>
+    <div class="item" data-quick="all"><span class="ico">◉</span>All entries<span class="n">2,599</span></div>
+    <div class="item" data-quick="today"><span class="ico">☀</span>Today<span class="n">3</span></div>
+    <div class="item" data-quick="week"><span class="ico">▦</span>This week<span class="n">28</span></div>
+    <div class="item" data-quick="month"><span class="ico">▤</span>This month<span class="n">3</span></div>
+
+    <div class="sec">Calendar</div>
+    <div class="seg full" id="gran"><span data-g="year">Year</span><span data-g="month" class="on">Month</span><span data-g="week">Week</span></div>
+    <div class="cal" id="cal"></div>
+
+    <div class="sec">Filters<span class="clear" title="Save the current filter">+ Save</span></div>
+    <div class="item"><span class="ico">⏚</span>nebula, decisions<span class="n">22</span></div>
+    <div class="item"><span class="ico">⏚</span>codex, mornings<span class="n">17</span></div>
+    <div class="item sub">▾ Project</div>
+    <div class="item ind"><span class="dot" style="background:#ff9f0a"></span>nebula<span class="n">412</span></div>
+    <div class="item ind"><span class="dot" style="background:#30d158"></span>agent-journal<span class="n">128</span></div>
+    <div class="item ind"><span class="dot" style="background:#bf5af2"></span>my-lib<span class="n">97</span></div>
+    <div class="item ind"><span class="dot" style="background:#64d2ff"></span>dotfiles<span class="n">41</span></div>
+    <div class="item sub">▾ Agent</div>
+    <div class="item ind"><span class="ico">✳</span>claude<span class="n">2,203</span></div>
+    <div class="item ind"><span class="ico">◎</span>codex<span class="n">396</span></div>
+    <div class="item sub">▸ Directory</div>
+  </div>
+
+  <div class="main">
+    <div class="tool">
+      <span class="btn" data-step="-1">‹</span><span class="btn" data-step="1">›</span>
+      <h2 id="ptitle"></h2><span class="sub" id="psub"></span>
+      <div class="grow"></div>
+      <span class="seg" id="mode"><span data-m="list" class="on">List</span><span data-m="feed">Feed</span></span>
+      <div class="search">⌕ <span>Search</span><span class="seg"><span class="on">Text</span><span title="later">✦ Agent</span></span></div>
+    </div>
+    <div class="filters">
+      <span class="pop">Project <b>Any</b> ▾</span>
+      <span class="pop">Agent <b>Any</b> ▾</span>
+      <span class="pop">cwd <b>Any</b> ▾</span>
+      <span class="pop">Time of day <b>Any</b> ▾</span>
+      <span class="btn ghost">+ Filter</span>
+      <div class="grow"></div>
+      <span class="seg rr"><span class="on">Rendered</span><span>Raw</span></span>
+    </div>
+    <div class="row" id="content"></div>
+  </div>
+</div>
+
+<script>
+const TODAY = new Date(2026, 9, 1);
+const P = { nebula: '#ff9f0a', 'agent-journal': '#30d158', 'my-lib': '#bf5af2', dotfiles: '#64d2ff' };
+const E = [
+  { d: '2026-10-01', t: '14:12', p: 'nebula', a: 'claude/opus-5', cwd: '~/Developer/nebula', s: 'Token refresh raced the retry and logged users out, so it is serialized behind a mutex now. Deployed to staging.',
+    b: 'The refresh call and the retry both read the old token and both wrote a new one. The second write invalidated the first, which logged the user out.\n\n### Decision\n\n- Serialize refresh behind a single `Mutex` per session\n- Keep the retry, but make it wait on the refresh\n\nRejected a token version counter: it needs a schema change on the auth table.' },
+  { d: '2026-10-01', t: '11:40', p: 'agent-journal', a: 'claude/opus-5', cwd: '~/Developer/agent-journal', s: 'Read the working directory with pwd instead of $PWD, because a hook can start with a stale $PWD after a worktree move.',
+    b: 'Codex starts the hook with `$PWD` inherited from the launcher. After `git worktree move` it points at a path that no longer exists.' },
+  { d: '2026-10-01', t: '09:05', p: 'my-lib', a: 'codex/gpt-5', cwd: '~/Developer/oss/my-lib', s: 'Released v1.4.0 with ESM-only output. The CJS shim is gone and the bundle is 38% smaller.',
+    b: 'Dropped the dual build. Two downstream issues expected, both have a migration note in the changelog.' },
+  { d: '2026-09-30', t: '17:22', p: 'nebula', a: 'claude/opus-5', cwd: '~/Developer/nebula.worktrees/fix-auth', s: 'Found that staging logouts only happen with two tabs open. Reproduced with a script, root cause still open.',
+    b: 'Repro: open two tabs, wait 15 minutes, click in both within one second.' },
+  { d: '2026-09-30', t: '10:03', p: 'dotfiles', a: 'codex/gpt-5', cwd: '~/dotfiles', s: 'Moved the git aliases into a separate include file so that work and personal machines share them.',
+    b: 'Added `[include] path = ~/.config/git/aliases`.' },
+  { d: '2026-09-29', t: '15:48', p: 'agent-journal', a: 'claude/opus-5', cwd: '~/Developer/agent-journal', s: 'Added the plugin icon and the social preview image. The README now shows the light or dark screenshot by color scheme.',
+    b: 'Used `<picture>` with `prefers-color-scheme`.' },
+  { d: '2026-09-22', t: '16:30', p: 'nebula', a: 'claude/opus-5', cwd: '~/Developer/nebula', s: 'Split the billing worker out of the API process, so a slow invoice run no longer delays requests.',
+    b: 'The worker now reads from the same queue. Deploys stay together for now.' },
+  { d: '2026-09-15', t: '08:50', p: 'my-lib', a: 'codex/gpt-5', cwd: '~/Developer/oss/my-lib', s: 'Decided to drop Node 18 in the next major, because three dependencies already require Node 20.',
+    b: 'Announced in the discussions tab. No code change yet.' },
+  { d: '2026-08-27', t: '13:14', p: 'agent-journal', a: 'claude/opus-5', cwd: '~/Developer/agent-journal', s: 'Added the Codex adapter. Codex asks the user to trust a hook first, and until then it skips the hook without a message.',
+    b: 'Documented the `/hooks` step in the README.' },
+];
+
+/** Fake activity per day, so the calendar shows a realistic density without real data. */
+const activity = d => {
+  if (d > TODAY) return 0;
+  const x = Math.sin(d.getFullYear() * 400 + d.getMonth() * 31 + d.getDate()) * 10_000;
+  const r = x - Math.floor(x);
+  return d.getDay() % 6 === 0 ? Math.floor(r * 6) : Math.floor(r * 28);
+};
+const heat = n => n === 0 ? 'transparent' : `rgba(var(--heat),${Math.min(.2 + n / 30, 1)})`;
+const MON = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
+const monday = d => addDays(d, -((d.getDay() + 6) % 7));
+const weekNo = d => { const t = addDays(monday(d), 3); const y = new Date(t.getFullYear(), 0, 4); return 1 + Math.round((t - monday(y)) / 6_048e5); };
+const same = (a, b) => iso(a) === iso(b);
+
+/** The selected period, and the period the picker shows. */
+let gran = 'month';
+let view = new Date(2026, 9, 1);
+let sel = { kind: 'week', start: monday(TODAY) };
+let mode = 'list';
+let pick = 0;
+
+function range(s) {
+  const a = s.start;
+  if (s.kind === 'day') return [a, a];
+  if (s.kind === 'week') return [a, addDays(a, 6)];
+  if (s.kind === 'month') return [a, new Date(a.getFullYear(), a.getMonth() + 1, 0)];
+  if (s.kind === 'year') return [a, new Date(a.getFullYear(), 11, 31)];
+  return [new Date(2000, 0, 1), new Date(2100, 0, 1)];
+}
+const inRange = (d, [a, b]) => iso(d) >= iso(a) && iso(d) <= iso(b);
+
+function title() {
+  const s = sel, a = s.start, [, b] = range(s);
+  const f = d => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  if (s.kind === 'day') return [a.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }), `${a.getFullYear()}`];
+  if (s.kind === 'week') return [`Week ${weekNo(a)}`, `${f(a)} – ${f(b)}, ${b.getFullYear()}`];
+  if (s.kind === 'month') return [`${MON[a.getMonth()]} ${a.getFullYear()}`, ''];
+  if (s.kind === 'year') return [`${a.getFullYear()}`, ''];
+  return ['All entries', ''];
+}
+
+function calendar() {
+  const r = range(sel);
+  let h = '';
+  if (gran === 'year') {
+    const y = view.getFullYear();
+    h += `<div class="hd"><span class="nav" data-nav="-1">‹</span><span class="t ${sel.kind === 'year' && sel.start.getFullYear() === y ? 'sel' : ''}" data-pick="year:${y}-01-01">${y}</span><span class="nav" data-nav="1">›</span></div><div class="months">`;
+    for (let m = 0; m < 12; m++) {
+      const first = new Date(y, m, 1);
+      let n = 0; for (let d = first; d.getMonth() === m; d = addDays(d, 1)) n += activity(d);
+      const on = sel.kind === 'month' && same(sel.start, first);
+      h += `<div class="${on ? 'sel' : ''} ${first > TODAY ? 'future' : ''}" data-pick="month:${iso(first)}">${MON[m].slice(0, 3)}<small>${n ? n.toLocaleString('en-US') : '–'}</small><i style="background:${on ? '#fff8' : heat(n / 25)}"></i></div>`;
+    }
+    h += '</div>';
+  } else if (gran === 'month') {
+    const first = new Date(view.getFullYear(), view.getMonth(), 1);
+    const on = sel.kind === 'month' && same(sel.start, first);
+    h += `<div class="hd"><span class="nav" data-nav="-1">‹</span><span class="t ${on ? 'sel' : ''}" data-pick="month:${iso(first)}">${MON[view.getMonth()]} ${view.getFullYear()}</span><span class="nav" data-nav="1">›</span></div>`;
+    h += '<div class="days"><span></span>' + 'MTWTFSS'.split('').map(x => `<span class="wd">${x}</span>`).join('');
+    let d = monday(first);
+    for (let w = 0; w < 6; w++) {
+      h += `<span class="wn" data-pick="week:${iso(d)}">${weekNo(d)}</span>`;
+      for (let i = 0; i < 7; i++, d = addDays(d, 1)) {
+        const n = activity(d), ir = sel.kind !== 'all' && inRange(d, r);
+        const cls = ['d', d.getMonth() !== view.getMonth() && 'out', d > TODAY && 'future', same(d, TODAY) && 'today',
+          sel.kind === 'day' && ir && 'pick', sel.kind !== 'day' && ir && 'inrange', ir && (same(d, r[0]) || i === 0) && 'rs', ir && (same(d, r[1]) || i === 6) && 're'].filter(Boolean).join(' ');
+        h += `<span class="${cls}" data-pick="day:${iso(d)}"><b>${d.getDate()}</b><i style="background:${sel.kind === 'day' && ir ? 'transparent' : heat(n)}"></i></span>`;
+      }
+      if (d.getMonth() !== view.getMonth() && d > first) break;
+    }
+    h += '</div>';
+  } else {
+    const m = monday(view), e = addDays(m, 6);
+    const on = sel.kind === 'week' && same(sel.start, m);
+    h += `<div class="hd"><span class="nav" data-nav="-1">‹</span><span class="t ${on ? 'sel' : ''}" data-pick="week:${iso(m)}">Week ${weekNo(m)}</span><span class="nav" data-nav="1">›</span></div><div class="weekl">`;
+    for (let i = 0; i < 7; i++) {
+      const d = addDays(m, i), n = activity(d);
+      h += `<div class="wd2 ${sel.kind === 'day' && same(sel.start, d) ? 'sel' : ''}" data-pick="day:${iso(d)}"><span class="l">${d.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric' })}</span><span class="bar2"><i style="width:${n / 28 * 100}%"></i></span><span class="n">${n || ''}</span></div>`;
+    }
+    h += '</div>';
+  }
+  document.getElementById('cal').innerHTML = h;
+  document.querySelectorAll('#gran span').forEach(s => s.classList.toggle('on', s.dataset.g === gran));
+}
+
+const fmt = d => new Date(d + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+const md = s => s.split('\n\n').map(x => x.startsWith('### ') ? `<h3>${x.slice(4)}</h3>` : x.startsWith('- ') ? `<ul>${x.split('\n').map(l => `<li>${l.slice(2)}</li>`).join('')}</ul>` : `<p>${x.replace(/</g, '&lt;')}</p>`).join('').replace(/`([^`]+)`/g, '<code>$1</code>');
+const raw = e => `---\ndate: ${e.d}T${e.t}:00Z\nproject: ${e.p}\nsummary: "${e.s}"\ncwd: ${e.cwd}\nagent: ${e.a}\nsession_id: 4eb89b17-6f7f-4264-95d4-ea5313ef277e\n---\n\n${e.b}`.replace(/</g, '&lt;');
+const body = e => `<div class="md">${md(e.b)}</div><pre class="raw">${raw(e)}</pre>`;
+const dot = p => `<span class="dot" style="background:${P[p]}"></span>`;
+
+function content() {
+  const r = range(sel);
+  const list = E.filter(e => inRange(new Date(e.d + 'T12:00:00'), r));
+  const [t, s] = title();
+  document.getElementById('ptitle').textContent = t;
+  document.getElementById('psub').textContent = [s, `${list.length} ${list.length === 1 ? 'entry' : 'entries'}`].filter(Boolean).join(' · ');
+  document.querySelectorAll('[data-quick]').forEach(q => q.classList.remove('sel'));
+  const c = document.getElementById('content');
+  if (!list.length) { c.innerHTML = '<div class="empty grow">No entries in this period.</div>'; return; }
+  pick = Math.min(pick, list.length - 1);
+  if (mode === 'list') {
+    let last = '', h = '';
+    list.forEach((e, i) => {
+      if (e.d !== last) { h += `<div class="day">${fmt(e.d).toUpperCase()}</div>`; last = e.d; }
+      h += `<div class="ent ${i === pick ? 'sel' : ''}" data-i="${i}"><div class="meta"><span>${e.t}</span>${dot(e.p)}<span class="proj">${e.p}</span><span>${e.a.split('/')[0]}</span></div><div class="sum">${e.s}</div></div>`;
+    });
+    const e = list[pick];
+    c.innerHTML = `<div class="list">${h}</div><div class="detail"><div class="meta" style="font-size:12px">${fmt(e.d)} · ${e.t}<div class="grow"></div><span class="btn">Open in editor</span></div>
+      <h1>${e.s}</h1><div class="kv"><b>project</b><span>${dot(e.p)} ${e.p}</span><b>agent</b><span>${e.a}</span><b>cwd</b><code>${e.cwd}</code><b>session</b><code>4eb89b17-6f7f… ⧉</code></div>${body(e)}</div>`;
+  } else {
+    const unit = { day: 'day', week: 'week', month: 'month', year: 'year', all: 'selection' }[sel.kind];
+    let last = '', h = sel.kind === 'all' ? '' : `<div class="digest">✦ <span><b style="color:var(--text)">Digest</b> · summarize this ${unit} with a local model, or with an agent you enable in Settings</span><div class="grow"></div><span class="btn">Summarize ${unit}</span></div>`;
+    list.forEach(e => {
+      if (e.d !== last) { h += `<div class="fday">${fmt(e.d)}<small>${list.filter(x => x.d === e.d).length} entries</small></div>`; last = e.d; }
+      h += `<div class="card"><div class="meta"><span>${e.t}</span>${dot(e.p)}<span class="proj">${e.p}</span><span>${e.a}</span><span>${e.cwd}</span></div><div class="sum">${e.s}</div>${body(e)}</div>`;
+    });
+    c.innerHTML = `<div class="feed"><div class="inner">${h}</div></div>`;
+  }
+  document.querySelectorAll('#mode span').forEach(s => s.classList.toggle('on', s.dataset.m === mode));
+}
+
+function render() { calendar(); content(); }
+
+function step(n) {
+  const a = sel.start;
+  if (sel.kind === 'day') sel = { kind: 'day', start: addDays(a, n) };
+  if (sel.kind === 'week') sel = { kind: 'week', start: addDays(a, 7 * n) };
+  if (sel.kind === 'month') sel = { kind: 'month', start: new Date(a.getFullYear(), a.getMonth() + n, 1) };
+  if (sel.kind === 'year') sel = { kind: 'year', start: new Date(a.getFullYear() + n, 0, 1) };
+  view = sel.start;
+  pick = 0;
+  render();
+}
+
+document.addEventListener('click', ev => {
+  const t = ev.target;
+  const g = t.closest('[data-g]');
+  if (g) { gran = g.dataset.g; render(); return; }
+  const nav = t.closest('[data-nav]');
+  if (nav) {
+    const n = +nav.dataset.nav;
+    view = gran === 'year' ? new Date(view.getFullYear() + n, 0, 1) : gran === 'month' ? new Date(view.getFullYear(), view.getMonth() + n, 1) : addDays(view, 7 * n);
+    calendar(); return;
+  }
+  const p = t.closest('[data-pick]');
+  if (p) {
+    const [kind, d] = p.dataset.pick.split(':');
+    sel = { kind, start: new Date(d + 'T00:00:00') };
+    /** Picking a month in the year grid opens that month, like a calendar app drilling down. */
+    if (gran === 'year' && kind === 'month') { gran = 'month'; view = sel.start; }
+    pick = 0; render(); return;
+  }
+  const q = t.closest('[data-quick]');
+  if (q) {
+    const k = q.dataset.quick;
+    sel = k === 'all' ? { kind: 'all', start: TODAY } : k === 'today' ? { kind: 'day', start: TODAY } : k === 'week' ? { kind: 'week', start: monday(TODAY) } : { kind: 'month', start: new Date(2026, 9, 1) };
+    view = TODAY; pick = 0; render(); q.classList.add('sel'); return;
+  }
+  const st = t.closest('[data-step]');
+  if (st) { step(+st.dataset.step); return; }
+  const m = t.closest('[data-m]');
+  if (m) { mode = m.dataset.m; content(); return; }
+  const i = t.closest('[data-i]');
+  if (i) { pick = +i.dataset.i; content(); return; }
+  const s = t.closest('.rr span');
+  if (s) {
+    const isRaw = s.textContent === 'Raw';
+    document.body.classList.toggle('showraw', isRaw);
+    document.querySelectorAll('.rr span').forEach(c => c.classList.toggle('on', (c.textContent === 'Raw') === isRaw));
+  }
+  if (t.id === 'theme') {
+    const d = document.documentElement.classList.toggle('dark');
+    t.textContent = d ? 'Light' : 'Dark';
+  }
+});
+
+if (matchMedia('(prefers-color-scheme: dark)').matches) { document.documentElement.classList.add('dark'); document.getElementById('theme').textContent = 'Light'; }
+render();
+document.querySelector('[data-quick="week"]').classList.add('sel');
+
+/** `#feed`, `#year`, `#weekgran`, `#dark` and `#day` set an initial state, for screenshots. */
+for (const h of location.hash.slice(1).split(',')) {
+  if (h === 'dark') document.querySelector('#theme').click();
+  if (h === 'feed') document.querySelector('[data-m="feed"]').click();
+  if (h === 'year') document.querySelector('[data-g="year"]').click();
+  if (h === 'weekgran') document.querySelector('[data-g="week"]').click();
+  if (h === 'day') document.querySelector('[data-pick="day:2026-09-30"]').click();
+}
+</script>
+</body>
+</html>

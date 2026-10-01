@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Agent Journal app mockups</title>
+<style>
+  :root {
+    --bg: #e9e9ec; --win: #ffffff; --side: #f2f2f4; --line: #e3e3e6; --text: #1d1d1f; --mute: #86868b;
+    --accent: #0a84ff; --sel: #dcebff; --selstrong: #0a84ff; --chip: #eef0f3; --code: #f5f5f7; --card: #fafafa;
+  }
+  .dark {
+    --bg: #111113; --win: #1e1e20; --side: #252528; --line: #343438; --text: #ececee; --mute: #8e8e93;
+    --accent: #0a84ff; --sel: #1d3a5f; --chip: #2c2c30; --code: #2a2a2d; --card: #232326;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 13px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif; background: var(--bg); color: var(--text); }
+  .bar { display: flex; gap: 8px; align-items: center; padding: 14px 24px; }
+  .bar button { border: 1px solid var(--line); background: var(--win); color: var(--text); border-radius: 7px; padding: 5px 12px; font: inherit; cursor: pointer; }
+  .bar button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .bar .note { color: var(--mute); margin-left: 12px; }
+  .win { margin: 0 24px 24px; height: 760px; background: var(--win); border-radius: 12px; border: 1px solid var(--line); box-shadow: 0 20px 50px rgba(0,0,0,.18); display: flex; overflow: hidden; }
+  .side { width: 228px; flex: none; background: var(--side); border-right: 1px solid var(--line); padding: 12px 10px; overflow: auto; }
+  .lights { display: flex; gap: 8px; padding: 2px 6px 14px; }
+  .lights i { width: 12px; height: 12px; border-radius: 50%; display: block; }
+  .lights i:nth-child(1) { background: #ff5f57; } .lights i:nth-child(2) { background: #febc2e; } .lights i:nth-child(3) { background: #28c840; }
+  .sec { font-size: 11px; font-weight: 600; color: var(--mute); padding: 12px 8px 4px; }
+  .item { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 6px; cursor: default; }
+  .item .n { margin-left: auto; color: var(--mute); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .item.sel { background: var(--sel); }
+  .item.ind { padding-left: 24px; } .item.ind2 { padding-left: 40px; }
+  .ico { width: 16px; text-align: center; color: var(--accent); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .tool { height: 52px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid var(--line); }
+  .tool h2 { font-size: 15px; margin: 0; font-weight: 600; }
+  .tool .sub { color: var(--mute); }
+  .search { display: flex; align-items: center; gap: 6px; background: var(--chip); border-radius: 8px; padding: 5px 8px; min-width: 260px; color: var(--mute); }
+  .tok { background: var(--accent); color: #fff; border-radius: 5px; padding: 0 6px; font-size: 12px; }
+  .seg { display: inline-flex; background: var(--chip); border-radius: 7px; padding: 2px; }
+  .seg span { padding: 2px 10px; border-radius: 5px; cursor: pointer; color: var(--mute); }
+  .seg span.on { background: var(--win); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.15); }
+  .grow { flex: 1; }
+  .btn { border: 1px solid var(--line); border-radius: 6px; padding: 3px 9px; color: var(--text); background: var(--win); }
+  .btn.ghost { color: var(--mute); border-style: dashed; }
+  .row { display: flex; flex: 1; min-height: 0; }
+  .list { width: 340px; flex: none; border-right: 1px solid var(--line); overflow: auto; }
+  .day { position: sticky; top: 0; background: var(--win); font-size: 11px; font-weight: 600; color: var(--mute); padding: 10px 14px 4px; border-bottom: 1px solid var(--line); }
+  .ent { padding: 9px 14px; border-bottom: 1px solid var(--line); cursor: pointer; }
+  .ent.sel { background: var(--sel); }
+  .ent .meta { display: flex; gap: 8px; font-size: 11px; color: var(--mute); margin-bottom: 2px; }
+  .ent .sum { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .proj { font-weight: 600; }
+  .detail { flex: 1; overflow: auto; padding: 22px 30px; min-width: 0; }
+  .detail h1 { font-size: 20px; margin: 0 0 4px; font-weight: 650; line-height: 1.3; }
+  .kv { display: grid; grid-template-columns: 90px 1fr; gap: 3px 10px; font-size: 12px; margin: 14px 0 18px; padding: 10px 12px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
+  .kv b { color: var(--mute); font-weight: 500; }
+  .kv code { font-size: 11px; }
+  .md p { margin: 0 0 10px; } .md h3 { font-size: 14px; margin: 16px 0 6px; } .md ul { padding-left: 20px; margin: 0 0 10px; }
+  .md code, pre { font: 12px/1.5 "SF Mono", ui-monospace, Menlo, monospace; background: var(--code); border-radius: 4px; padding: 1px 4px; }
+  pre { padding: 12px; white-space: pre-wrap; margin: 0; }
+  .raw { display: none; } .showraw .raw { display: block; } .showraw .md { display: none; }
+  .v { display: none; } .v.on { display: flex; }
+  /* B */
+  .cal { padding: 4px 6px 8px; }
+  .cal .hd { display: flex; justify-content: space-between; font-weight: 600; padding: 0 2px 6px; }
+  .cal table { width: 100%; border-collapse: collapse; font-size: 11px; text-align: center; }
+  .cal th { color: var(--mute); font-weight: 500; padding: 2px 0; }
+  .cal td { padding: 2px 0; }
+  .cal td span { display: inline-block; width: 24px; height: 24px; line-height: 24px; border-radius: 6px; }
+  .cal tr.wk td span { background: var(--sel); }
+  .cal td.wn { color: var(--mute); font-size: 9px; }
+  .h0 span { color: var(--mute); } .h1 span { box-shadow: inset 0 -3px 0 rgba(10,132,255,.25); } .h2 span { box-shadow: inset 0 -3px 0 rgba(10,132,255,.55); } .h3 span { box-shadow: inset 0 -3px 0 rgba(10,132,255,.95); }
+  .cal td.today span { background: var(--accent); color: #fff; }
+  .feed { flex: 1; overflow: auto; padding: 8px 0 30px; }
+  .feed .inner { max-width: 760px; margin: 0 auto; padding: 0 28px; }
+  .fday { font-size: 13px; font-weight: 650; margin: 22px 0 8px; display: flex; gap: 8px; align-items: baseline; }
+  .fday small { color: var(--mute); font-weight: 400; }
+  .card { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; background: var(--card); }
+  .card .meta { display: flex; gap: 8px; font-size: 11px; color: var(--mute); margin-bottom: 4px; align-items: center; }
+  .card .sum { font-weight: 600; margin-bottom: 6px; }
+  .card .md { color: var(--text); opacity: .9; }
+  .digest { border: 1px dashed var(--accent); border-radius: 10px; padding: 12px 14px; margin: 16px 0 4px; color: var(--mute); display: flex; gap: 10px; align-items: center; }
+  .chips { display: flex; gap: 6px; padding: 8px 14px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  .chip { background: var(--chip); border-radius: 12px; padding: 2px 10px; font-size: 12px; }
+  .chip.on { background: var(--sel); color: var(--accent); }
+  .chk { display: flex; align-items: center; gap: 8px; padding: 3px 8px; }
+  .chk input { margin: 0; }
+  /* C */
+  table.grid { width: 100%; border-collapse: collapse; font-size: 12px; }
+  table.grid th { text-align: left; font-weight: 500; color: var(--mute); padding: 6px 10px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--win); }
+  table.grid td { padding: 5px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 0; }
+  table.grid tr:nth-child(even) td { background: var(--card); }
+  table.grid tr.sel td { background: var(--accent); color: #fff; }
+  .tablewrap { flex: 1; overflow: auto; }
+  .insp { height: 300px; flex: none; border-top: 1px solid var(--line); overflow: auto; padding: 16px 24px; }
+  .filters { display: flex; gap: 6px; padding: 8px 14px; border-bottom: 1px solid var(--line); align-items: center; }
+  .pop { border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; font-size: 12px; background: var(--win); }
+  .pop b { font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="bar">
+  <button data-v="a" class="on">A · Three panes</button>
+  <button data-v="b">B · Timeline</button>
+  <button data-v="c">C · Table</button>
+  <button id="theme">Dark</button>
+  <span class="note" id="note"></span>
+</div>
+
+<!-- ============================== A ============================== -->
+<div class="win v on" id="a">
+  <div class="side">
+    <div class="lights"><i></i><i></i><i></i></div>
+    <div class="item"><span class="ico">◉</span>All entries<span class="n">2,599</span></div>
+    <div class="item sel"><span class="ico">☀</span>Today<span class="n">6</span></div>
+    <div class="item"><span class="ico">▦</span>This week<span class="n">31</span></div>
+    <div class="item"><span class="ico">▤</span>This month<span class="n">6</span></div>
+    <div class="sec">Calendar</div>
+    <div class="item">▾ 2026<span class="n">2,599</span></div>
+    <div class="item ind">▾ October<span class="n">6</span></div>
+    <div class="item ind2">Week 40<span class="n">31</span></div>
+    <div class="item ind">▸ September<span class="n">604</span></div>
+    <div class="item ind">▸ August<span class="n">571</span></div>
+    <div class="item ind">▸ July<span class="n">498</span></div>
+    <div class="sec">Projects</div>
+    <div class="item"><span class="dot" style="background:#ff9f0a"></span>nebula<span class="n">412</span></div>
+    <div class="item"><span class="dot" style="background:#30d158"></span>agent-journal<span class="n">128</span></div>
+    <div class="item"><span class="dot" style="background:#bf5af2"></span>my-lib<span class="n">97</span></div>
+    <div class="item"><span class="dot" style="background:#64d2ff"></span>dotfiles<span class="n">41</span></div>
+    <div class="sec">Agents</div>
+    <div class="item"><span class="ico">✳</span>claude<span class="n">2,203</span></div>
+    <div class="item"><span class="ico">◎</span>codex<span class="n">396</span></div>
+  </div>
+  <div class="list">
+    <div class="tool" style="border:0"><div class="search">⌕ <span>Search, or type project:</span></div></div>
+    <div id="a-list"></div>
+  </div>
+  <div class="main">
+    <div class="tool"><div class="grow"></div><span class="seg rr"><span class="on">Rendered</span><span>Raw</span></span><span class="btn">Open in editor</span></div>
+    <div class="detail" id="a-detail"></div>
+  </div>
+</div>
+
+<!-- ============================== B ============================== -->
+<div class="win v" id="b">
+  <div class="side">
+    <div class="lights"><i></i><i></i><i></i></div>
+    <div class="cal">
+      <div class="hd"><span>‹</span><span>October 2026</span><span>›</span></div>
+      <table>
+        <tr><th></th><th>M</th><th>T</th><th>W</th><th>T</th><th>F</th><th>S</th><th>S</th></tr>
+        <tr class="wk"><td class="wn">40</td><td class="h3"><span>28</span></td><td class="h2"><span>29</span></td><td class="h3"><span>30</span></td><td class="today"><span>1</span></td><td class="h0"><span>2</span></td><td class="h0"><span>3</span></td><td class="h0"><span>4</span></td></tr>
+        <tr><td class="wn">41</td><td class="h0"><span>5</span></td><td class="h0"><span>6</span></td><td class="h0"><span>7</span></td><td class="h0"><span>8</span></td><td class="h0"><span>9</span></td><td class="h0"><span>10</span></td><td class="h0"><span>11</span></td></tr>
+        <tr><td class="wn">42</td><td class="h0"><span>12</span></td><td class="h0"><span>13</span></td><td class="h0"><span>14</span></td><td class="h0"><span>15</span></td><td class="h0"><span>16</span></td><td class="h0"><span>17</span></td><td class="h0"><span>18</span></td></tr>
+        <tr><td class="wn">43</td><td class="h0"><span>19</span></td><td class="h0"><span>20</span></td><td class="h0"><span>21</span></td><td class="h0"><span>22</span></td><td class="h0"><span>23</span></td><td class="h0"><span>24</span></td><td class="h0"><span>25</span></td></tr>
+        <tr><td class="wn">44</td><td class="h0"><span>26</span></td><td class="h0"><span>27</span></td><td class="h0"><span>28</span></td><td class="h0"><span>29</span></td><td class="h0"><span>30</span></td><td class="h0"><span>31</span></td><td></td></tr>
+      </table>
+    </div>
+    <div class="sec">Projects</div>
+    <label class="chk"><input type="checkbox" checked>nebula<span class="n grow" style="text-align:right;color:var(--mute);font-size:11px">14</span></label>
+    <label class="chk"><input type="checkbox" checked>agent-journal<span class="grow" style="text-align:right;color:var(--mute);font-size:11px">9</span></label>
+    <label class="chk"><input type="checkbox" checked>my-lib<span class="grow" style="text-align:right;color:var(--mute);font-size:11px">5</span></label>
+    <label class="chk"><input type="checkbox">dotfiles<span class="grow" style="text-align:right;color:var(--mute);font-size:11px">3</span></label>
+    <div class="sec">Agents</div>
+    <label class="chk"><input type="checkbox" checked>claude</label>
+    <label class="chk"><input type="checkbox" checked>codex</label>
+    <div class="sec">Directory</div>
+    <label class="chk"><input type="checkbox" checked>~/Developer/…</label>
+  </div>
+  <div class="main">
+    <div class="tool">
+      <span class="btn">‹</span><span class="btn">›</span>
+      <h2>Week 40</h2><span class="sub">Sep 28 – Oct 4, 2026 · 28 entries</span>
+      <div class="grow"></div>
+      <span class="seg"><span>Day</span><span class="on">Week</span><span>Month</span></span>
+      <div class="search" style="min-width:200px">⌕ Search</div>
+      <span class="seg rr"><span class="on">Rendered</span><span>Raw</span></span>
+    </div>
+    <div class="feed"><div class="inner" id="b-feed"></div></div>
+  </div>
+</div>
+
+<!-- ============================== C ============================== -->
+<div class="win v" id="c">
+  <div class="side">
+    <div class="lights"><i></i><i></i><i></i></div>
+    <div class="item"><span class="ico">◉</span>All entries<span class="n">2,599</span></div>
+    <div class="item sel"><span class="ico">▦</span>Last 7 days<span class="n">31</span></div>
+    <div class="sec">Saved searches</div>
+    <div class="item"><span class="ico">⌕</span>nebula, decisions<span class="n">22</span></div>
+    <div class="item"><span class="ico">⌕</span>codex this month<span class="n">17</span></div>
+    <div class="sec">Calendar</div>
+    <div class="item">▸ 2026</div>
+    <div class="sec">Projects</div>
+    <div class="item"><span class="dot" style="background:#ff9f0a"></span>nebula<span class="n">412</span></div>
+    <div class="item"><span class="dot" style="background:#30d158"></span>agent-journal<span class="n">128</span></div>
+    <div class="item"><span class="dot" style="background:#bf5af2"></span>my-lib<span class="n">97</span></div>
+  </div>
+  <div class="main">
+    <div class="tool">
+      <span class="seg"><span class="on">Text</span><span title="later">✦ Agent</span></span>
+      <div class="search grow"><span class="tok">project: nebula</span> retry</div>
+    </div>
+    <div class="filters">
+      <span class="pop">Date <b>Last 7 days</b> ▾</span>
+      <span class="pop">Project <b>nebula</b> ▾</span>
+      <span class="pop">Agent <b>Any</b> ▾</span>
+      <span class="pop">cwd <b>Any</b> ▾</span>
+      <span class="pop">Time <b>Any</b> ▾</span>
+      <span class="btn ghost">+ Filter</span>
+      <div class="grow"></div><span class="sub" style="color:var(--mute)">8 of 2,599</span>
+    </div>
+    <div class="tablewrap">
+      <table class="grid"><thead><tr><th style="width:96px">Date</th><th style="width:64px">Time</th><th style="width:110px">Project</th><th style="width:110px">Agent</th><th>Summary</th></tr></thead><tbody id="c-rows"></tbody></table>
+    </div>
+    <div class="insp" id="c-detail"></div>
+  </div>
+</div>
+
+<script>
+const P = { nebula: '#ff9f0a', 'agent-journal': '#30d158', 'my-lib': '#bf5af2', dotfiles: '#64d2ff' };
+const E = [
+  { d: '2026-10-01', t: '14:12', p: 'nebula', a: 'claude/opus-5', cwd: '~/Developer/nebula', s: 'Token refresh raced the retry and logged users out, so it is serialized behind a mutex now. Deployed to staging.',
+    b: 'The refresh call and the retry both read the old token and both wrote a new one. The second write invalidated the first, which logged the user out.\n\n### Decision\n\n- Serialize refresh behind a single `Mutex` per session\n- Keep the retry, but make it wait on the refresh\n\nRejected a token version counter: it needs a schema change on the auth table.' },
+  { d: '2026-10-01', t: '11:40', p: 'agent-journal', a: 'claude/opus-5', cwd: '~/Developer/agent-journal', s: 'Read the working directory with pwd instead of $PWD, because a hook can start with a stale $PWD after a worktree move.',
+    b: 'Codex starts the hook with `$PWD` inherited from the launcher. After `git worktree move` it points at a path that no longer exists.' },
+  { d: '2026-10-01', t: '09:05', p: 'my-lib', a: 'codex/gpt-5', cwd: '~/Developer/oss/my-lib', s: 'Released v1.4.0 with ESM-only output. The CJS shim is gone and the bundle is 38% smaller.',
+    b: 'Dropped the dual build. Two downstream issues expected, both have a migration note in the changelog.' },
+  { d: '2026-09-30', t: '17:22', p: 'nebula', a: 'claude/opus-5', cwd: '~/Developer/nebula.worktrees/fix-auth', s: 'Found that staging logouts only happen with two tabs open. Reproduced with a script, root cause still open.',
+    b: 'Repro: open two tabs, wait 15 minutes, click in both within one second.' },
+  { d: '2026-09-30', t: '10:03', p: 'dotfiles', a: 'codex/gpt-5', cwd: '~/dotfiles', s: 'Moved the git aliases into a separate include file so that work and personal machines share them.',
+    b: 'Added `[include] path = ~/.config/git/aliases`.' },
+  { d: '2026-09-29', t: '15:48', p: 'agent-journal', a: 'claude/opus-5', cwd: '~/Developer/agent-journal', s: 'Added the plugin icon and the social preview image. The README now shows the light or dark screenshot by color scheme.',
+    b: 'Used `<picture>` with `prefers-color-scheme`.' },
+];
+const fmt = d => new Date(d + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+const md = s => s.split('\n\n').map(x => x.startsWith('### ') ? `<h3>${x.slice(4)}</h3>` : x.startsWith('- ') ? `<ul>${x.split('\n').map(l => `<li>${l.slice(2)}</li>`).join('')}</ul>` : `<p>${x}</p>`).join('').replace(/`([^`]+)`/g, '<code>$1</code>');
+const raw = e => `---\ndate: ${e.d}T${e.t}:00Z\nproject: ${e.p}\nsummary: "${e.s}"\ncwd: ${e.cwd}\nagent: ${e.a}\nsession_id: 4eb89b17-6f7f-4264-95d4-ea5313ef277e\n---\n\n${e.b}`.replace(/</g, '&lt;');
+const body = e => `<div class="md">${md(e.b)}</div><pre class="raw">${raw(e)}</pre>`;
+const dot = p => `<span class="dot" style="background:${P[p]};display:inline-block"></span>`;
+let sel = 0;
+
+function detail(e, big) {
+  return `<div class="meta" style="color:var(--mute);font-size:12px">${fmt(e.d)} · ${e.t}</div>
+    <h1 style="${big ? '' : 'font-size:15px'}">${e.s}</h1>
+    <div class="kv"><b>project</b><span>${dot(e.p)} ${e.p}</span><b>agent</b><span>${e.a}</span><b>cwd</b><code>${e.cwd}</code><b>session</b><code>4eb89b17-6f7f… ⧉</code></div>${body(e)}`;
+}
+function render() {
+  let last = '', h = '';
+  E.forEach((e, i) => {
+    if (e.d !== last) { h += `<div class="day">${fmt(e.d).toUpperCase()}</div>`; last = e.d; }
+    h += `<div class="ent ${i === sel ? 'sel' : ''}" data-i="${i}"><div class="meta"><span>${e.t}</span>${dot(e.p)}<span class="proj">${e.p}</span><span>${e.a.split('/')[0]}</span></div><div class="sum">${e.s}</div></div>`;
+  });
+  document.getElementById('a-list').innerHTML = h;
+  document.getElementById('a-detail').innerHTML = detail(E[sel], true);
+
+  last = ''; h = `<div class="digest">✦ <span><b style="color:var(--text)">Weekly digest</b> · an installed agent summarizes these 28 entries (later)</span><div class="grow"></div><span class="btn">Summarize week</span></div>`;
+  E.forEach(e => {
+    if (e.d !== last) { h += `<div class="fday">${fmt(e.d)}<small>${E.filter(x => x.d === e.d).length} entries</small></div>`; last = e.d; }
+    h += `<div class="card"><div class="meta"><span>${e.t}</span>${dot(e.p)}<span class="proj">${e.p}</span><span>${e.a}</span><span>${e.cwd}</span></div><div class="sum">${e.s}</div>${body(e)}</div>`;
+  });
+  document.getElementById('b-feed').innerHTML = h;
+
+  document.getElementById('c-rows').innerHTML = E.map((e, i) => `<tr class="${i === sel ? 'sel' : ''}" data-i="${i}"><td>${e.d}</td><td>${e.t}</td><td>${e.p}</td><td>${e.a}</td><td>${e.s}</td></tr>`).join('');
+  document.getElementById('c-detail').innerHTML = `<div style="display:flex"><div class="grow"></div><span class="seg rr"><span class="${document.body.classList.contains('showraw') ? '' : 'on'}">Rendered</span><span class="${document.body.classList.contains('showraw') ? 'on' : ''}">Raw</span></span></div>` + detail(E[sel], false);
+}
+const notes = {
+  a: 'Mail / Notes style. Sidebar picks a period or facet, list shows summaries, right pane shows one entry.',
+  b: 'Diary style. Calendar picks a day/week/month, you read the whole period as one feed. Digest sits on top.',
+  c: 'Finder / database style. Table with sortable columns and a filter bar for every frontmatter field.',
+};
+document.addEventListener('click', ev => {
+  const v = ev.target.closest('[data-v]');
+  if (v) {
+    document.querySelectorAll('[data-v]').forEach(b => b.classList.toggle('on', b === v));
+    document.querySelectorAll('.v').forEach(w => w.classList.toggle('on', w.id === v.dataset.v));
+    document.getElementById('note').textContent = notes[v.dataset.v];
+  }
+  const r = ev.target.closest('[data-i]');
+  if (r) { sel = +r.dataset.i; render(); }
+  const s = ev.target.closest('.rr span');
+  if (s) {
+    const isRaw = s.textContent === 'Raw';
+    document.body.classList.toggle('showraw', isRaw);
+    document.querySelectorAll('.rr').forEach(g => [...g.children].forEach(c => c.classList.toggle('on', (c.textContent === 'Raw') === isRaw)));
+  }
+  if (ev.target.id === 'theme') {
+    const d = document.documentElement.classList.toggle('dark');
+    ev.target.textContent = d ? 'Light' : 'Dark';
+  }
+});
+if (matchMedia('(prefers-color-scheme: dark)').matches) { document.documentElement.classList.add('dark'); document.getElementById('theme').textContent = 'Light'; }
+document.getElementById('note').textContent = notes.a;
+render();
+/** `#b`, `#c-dark` or `#a-light` opens one variant in one theme, for screenshots. */
+const [hv, ht] = location.hash.slice(1).split('-');
+if (ht) { document.documentElement.classList.toggle('dark', ht === 'dark'); document.getElementById('theme').textContent = ht === 'dark' ? 'Light' : 'Dark'; }
+if (hv) document.querySelector(`[data-v="${hv}"]`)?.click();
+</script>
+</body>
+</html>
