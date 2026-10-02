@@ -36,6 +36,24 @@ jobs:
       - name: Test
         run: pnpm test
 
+  # The macOS app. The tests cover everything below the views, and the bundle
+  # step proves the app still builds and packs its resources and the CLI. The
+  # timing bounds in the tests only hold in an optimized build, so the tests run
+  # in release with testing enabled.
+  app:
+    name: App
+    runs-on: macos-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v6
+      - name: Test
+        run: swift test -c release -Xswiftc -enable-testing
+      - name: Bundle
+        run: ./scripts/bundle.sh release
+
   # Parsing every script catches the branches the tests never take: an error path
   # with a bashism in it is invisible until the day it runs. dash is the smallest
   # POSIX shell and is `/bin/sh` on Debian and Ubuntu, so it rejects what bash in

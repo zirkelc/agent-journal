@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Agent Journal search scope</title>
+<style>
+  :root { --bg: #161618; --win: #1f1f22; --bar: #2a2a2d; --line: #3a3a3e; --text: #ececee; --mute: #8e8e93; --accent: #0a84ff; --sel: rgba(10,132,255,.18); --surface: #1e1e1e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 22px 26px 30px; font: 13px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; background: var(--bg); color: var(--text); }
+  h1 { font-size: 15px; margin: 0 0 4px; }
+  p.note { color: var(--mute); margin: 0 0 18px; max-width: 980px; }
+  .opt { margin-bottom: 22px; }
+  .opt h2 { font-size: 12px; font-weight: 600; margin: 0 0 6px; }
+  .opt h2 span { color: var(--mute); font-weight: 400; }
+  .win { background: var(--win); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; width: 1100px; }
+  .tool { height: 46px; display: flex; align-items: center; gap: 12px; padding: 0 14px; background: var(--bar); border-bottom: 1px solid var(--line); }
+  .tool .t b { display: block; font-size: 13px; } .tool .t small { color: var(--mute); }
+  .grow { flex: 1; }
+  .search { width: 420px; height: 28px; border-radius: 8px; border: 1.5px solid rgba(10,132,255,.8); background: var(--surface); display: flex; align-items: center; gap: 8px; padding: 0 10px; }
+  .search .q { flex: 1; }
+  .search .x { color: var(--mute); }
+  .filters { height: 40px; display: flex; align-items: center; gap: 6px; padding: 0 12px; border-bottom: 1px solid var(--line); }
+  .pill { border: 1px solid var(--line); border-radius: 6px; padding: 2px 9px; color: var(--mute); white-space: nowrap; }
+  .pill b { color: var(--text); }
+  .pill.on { background: var(--sel); border-color: transparent; color: var(--accent); }
+  .pill.on b { color: var(--accent); }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; padding: 2px; gap: 2px; }
+  .seg span { padding: 1px 9px; border-radius: 4px; color: var(--mute); white-space: nowrap; }
+  .seg span.on { background: var(--sel); color: var(--accent); }
+  .label { color: var(--mute); }
+  .tok { border: 1px solid var(--line); border-radius: 5px; padding: 0 6px; font-size: 12px; color: var(--mute); white-space: nowrap; }
+  .tok b { color: var(--text); font-weight: 600; }
+  .list { padding: 8px 14px 12px; }
+  .hdr { display: flex; align-items: center; gap: 8px; color: var(--mute); font-size: 12px; padding: 4px 0 8px; }
+  .hdr a { color: var(--accent); text-decoration: none; }
+  .row { padding: 6px 0; border-bottom: 1px solid #2c2c30; }
+  .row small { color: var(--mute); }
+  .row mark { background: rgba(255,214,10,.4); color: inherit; border-radius: 2px; }
+  .side { color: var(--mute); }
+</style>
+</head>
+<body>
+<h1>Search scope: three placements</h1>
+<p class="note">Same situation in each: the sidebar picked the project <b>nebula</b>, the calendar is on <b>Week 40</b>, and you typed <b>test</b>. While search text is present the search covers all time by default; the switch limits it to the period the calendar shows. Without search text the switch is not shown and the period applies as today.</p>
+
+<div class="opt">
+  <h2>A · Scope switch in the filter bar <span>appears at the start of the bar while you search; the title says what the list shows</span></h2>
+  <div class="win">
+    <div class="tool"><span>‹ ›</span><span class="t"><b>Search: “test”</b><small>All time · 23 entries</small></span><span class="grow"></span>
+      <span class="search">⌕ <span class="q">test</span><span class="x">⊗</span></span><span class="grow"></span></div>
+    <div class="filters"><span class="seg"><span class="on">All time</span><span>Week 40</span></span><span style="width:8px"></span><span class="pill on">Project <b>nebula</b> ⌄</span><span class="pill">Agent <b>Any</b> ⌄</span><span class="pill">Directory <b>Any</b> ⌄</span><span class="pill">Time <b>Any</b> ⌄</span></div>
+    <div class="list"><div class="row"><small>Sep 30 · nebula</small><br>Added a <mark>test</mark> for the retry path …</div><div class="row"><small>Aug 12 · nebula</small><br>Flaky <mark>test</mark> in the billing worker …</div></div>
+  </div>
+</div>
+
+<div class="opt">
+  <h2>B · Scope inside the search field <span>a small token at the end of the field; click it to switch. Compact, but easy to overlook</span></h2>
+  <div class="win">
+    <div class="tool"><span>‹ ›</span><span class="t"><b>Week 40</b><small>Sep 28 – Oct 4 · 23 results</small></span><span class="grow"></span>
+      <span class="search">⌕ <span class="q">test</span><span class="tok">in <b>All time</b> ⌄</span><span class="x">⊗</span></span><span class="grow"></span></div>
+    <div class="filters"><span class="pill on">Project <b>nebula</b> ⌄</span><span class="pill">Agent <b>Any</b> ⌄</span><span class="pill">Directory <b>Any</b> ⌄</span><span class="pill">Time <b>Any</b> ⌄</span></div>
+    <div class="list"><div class="row"><small>Sep 30 · nebula</small><br>Added a <mark>test</mark> for the retry path …</div></div>
+  </div>
+</div>
+
+<div class="opt">
+  <h2>C · Result line above the list <span>like Mail: says where it searched, with a link to the other scope</span></h2>
+  <div class="win">
+    <div class="tool"><span>‹ ›</span><span class="t"><b>Week 40</b><small>Sep 28 – Oct 4</small></span><span class="grow"></span>
+      <span class="search">⌕ <span class="q">test</span><span class="x">⊗</span></span><span class="grow"></span></div>
+    <div class="filters"><span class="pill on">Project <b>nebula</b> ⌄</span><span class="pill">Agent <b>Any</b> ⌄</span><span class="pill">Directory <b>Any</b> ⌄</span><span class="pill">Time <b>Any</b> ⌄</span></div>
+    <div class="list"><div class="hdr">23 results for “test” in <b style="color:var(--text)">all time</b> · <a href="#">Only Week 40 (2)</a></div><div class="row"><small>Sep 30 · nebula</small><br>Added a <mark>test</mark> for the retry path …</div></div>
+  </div>
+</div>
+</body>
+</html>

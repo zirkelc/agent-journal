@@ -189,6 +189,22 @@ Entries are listed oldest first, so the newest is nearest the prompt.
 
 Run `aj help` for the usage help.
 
+### macOS app
+
+> [!NOTE]
+> The app is in development. For now you build it from source, which needs Xcode or the Swift 6 toolchain on macOS 15 or later.
+
+The app shows your journal in a window: a calendar to pick a day, week, month or year, filters for project, agent, directory, time of day and any other frontmatter field, and full-text search over summaries and bodies. Each entry shows as rendered Markdown or as the raw file. Filters you use often can be saved in the sidebar.
+
+```sh
+app/scripts/bundle.sh
+open "app/build/Agent Journal.app"
+```
+
+The app reads the entries directly from the journal directory and updates when an agent writes a new one. It changes settings through its own copy of the CLI, so the app and your agents always use the same directory.
+
+The app makes one kind of network request: it loads the avatar of a project's GitHub owner, which it finds in the project's local git config. Nothing from your journal is sent. You can turn the avatars off in the settings.
+
 ## Configuration
 
 The config lives in `~/.config/agent-journal/config` and you can edit the file directly:

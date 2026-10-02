@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Agent Journal filter pickers</title>
+<style>
+  :root { --bg: #e9e9ec; --win: #fff; --line: #e3e3e6; --text: #1d1d1f; --mute: #86868b; --accent: #0a84ff; --sel: #dcebff; --chip: #f2f2f4; --code: #f5f5f7; }
+  .dark { --bg: #111113; --win: #26262a; --line: #3a3a3e; --text: #ececee; --mute: #8e8e93; --sel: #1d3a5f; --chip: #303034; --code: #2a2a2d; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px 24px 40px; font: 13px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; background: var(--bg); color: var(--text); }
+  h1 { font-size: 15px; margin: 0 0 4px; }
+  p.note { color: var(--mute); margin: 0 0 18px; max-width: 900px; }
+  .bar { display: flex; gap: 6px; margin-bottom: 8px; }
+  .pill { border: 1px solid var(--line); border-radius: 6px; padding: 3px 9px; background: var(--win); }
+  .pill b { font-weight: 600; }
+  .pill.on { background: var(--sel); border-color: transparent; color: var(--accent); }
+  .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; max-width: 1240px; }
+  .cell h2 { font-size: 12px; color: var(--mute); font-weight: 600; margin: 0 0 8px; text-transform: uppercase; letter-spacing: .04em; }
+  .pop { background: var(--win); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 12px 34px rgba(0,0,0,.18); overflow: hidden; position: relative; }
+  .pop:before { content: ""; position: absolute; top: -7px; left: 40px; width: 12px; height: 12px; background: var(--win); border-left: 1px solid var(--line); border-top: 1px solid var(--line); transform: rotate(45deg); }
+  .head { padding: 10px 12px; border-bottom: 1px solid var(--line); display: flex; gap: 8px; align-items: center; }
+  .field { flex: 1; background: var(--chip); border-radius: 7px; padding: 5px 9px; color: var(--mute); }
+  .foot { padding: 8px 12px; border-top: 1px solid var(--line); display: flex; align-items: center; gap: 8px; color: var(--mute); font-size: 12px; }
+  .foot .grow { flex: 1; }
+  .btn { border: 1px solid var(--line); border-radius: 6px; padding: 2px 10px; color: var(--text); background: var(--win); font-size: 12px; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .rows { max-height: 300px; overflow: auto; padding: 4px 6px; }
+  .row { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 7px; }
+  .row.sel { background: var(--sel); }
+  .row .n { margin-left: auto; color: var(--mute); font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; }
+  .row small { display: block; color: var(--mute); font-size: 11px; }
+  .chk { width: 14px; height: 14px; border-radius: 4px; border: 1px solid var(--line); flex: none; display: grid; place-items: center; font-size: 10px; color: #fff; }
+  .chk.on { background: var(--accent); border-color: var(--accent); }
+  .mono { width: 28px; height: 28px; border-radius: 7px; display: grid; place-items: center; font-weight: 700; color: #fff; flex: none; font-size: 13px; }
+  .spark { display: flex; align-items: flex-end; gap: 1px; height: 18px; width: 54px; }
+  .spark i { flex: 1; background: var(--accent); opacity: .55; border-radius: 1px; }
+  /* columns */
+  .cols { display: grid; grid-template-columns: repeat(3, 1fr); height: 280px; }
+  .col { border-right: 1px solid var(--line); overflow: auto; padding: 4px; }
+  .col:last-child { border-right: 0; }
+  .col .row { padding: 4px 6px; gap: 6px; }
+  .col .row .chev { color: var(--mute); font-size: 10px; }
+  .col .row.path { background: var(--chip); }
+  .crumbs { color: var(--mute); font-size: 12px; }
+  .crumbs b { color: var(--text); font-weight: 600; }
+  /* time */
+  .time { padding: 14px 16px 6px; }
+  .hist { display: flex; align-items: flex-end; gap: 2px; height: 90px; position: relative; }
+  .hist i { flex: 1; background: var(--chip); border-radius: 2px 2px 0 0; }
+  .hist i.in { background: var(--accent); opacity: .8; }
+  .axis { display: flex; justify-content: space-between; color: var(--mute); font-size: 10px; margin-top: 4px; }
+  .range { position: relative; height: 22px; margin: 10px 0 6px; }
+  .range .track { position: absolute; top: 9px; left: 0; right: 0; height: 4px; border-radius: 2px; background: var(--chip); }
+  .range .fill { position: absolute; top: 9px; height: 4px; background: var(--accent); }
+  .range .knob { position: absolute; top: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.35); margin-left: -9px; }
+  .presets { display: flex; gap: 6px; flex-wrap: wrap; padding: 4px 16px 12px; }
+  .preset { border: 1px solid var(--line); border-radius: 12px; padding: 2px 10px; font-size: 12px; }
+  .preset.on { background: var(--sel); border-color: transparent; color: var(--accent); }
+  .times { display: flex; gap: 8px; align-items: center; padding: 0 16px 10px; color: var(--mute); }
+  .times .t { border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; color: var(--text); font-variant-numeric: tabular-nums; }
+  .sub { padding-left: 46px; }
+  .tag { font-size: 10px; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; color: var(--mute); margin-left: 6px; }
+</style>
+</head>
+<body>
+<h1>Filter pickers</h1>
+<p class="note">Each pill in the filter bar opens a panel attached to it, with a control made for that kind of value. A click on a row selects it alone, Shift- or Command-click adds it, the same as in the sidebar. Apply is live, so the list behind the panel updates while you pick; Esc or a click outside closes it.</p>
+
+<div class="grid">
+
+  <!-- Project -->
+  <div class="cell">
+    <h2>Project</h2>
+    <div class="bar"><span class="pill on">Project <b>nebula</b> ⌄</span></div>
+    <div class="pop">
+      <div class="head"><span class="field">⌕ Filter projects</span><span class="btn">Recent ⌄</span></div>
+      <div class="rows">
+        <div class="row sel"><span class="mono" style="background:#bf5af2">N</span><span>nebula<small>github.com/flyweight/nebula</small></span><span class="spark"><i style="height:30%"></i><i style="height:60%"></i><i style="height:45%"></i><i style="height:90%"></i><i style="height:70%"></i><i style="height:100%"></i></span><span class="n">1,628<small>today</small></span></div>
+        <div class="row"><span class="mono" style="background:#ff453a">A</span><span>ai-retry<small>github.com/zirkelc/ai-retry</small></span><span class="spark"><i style="height:80%"></i><i style="height:40%"></i><i style="height:20%"></i><i style="height:10%"></i><i style="height:30%"></i><i style="height:50%"></i></span><span class="n">145<small>yesterday</small></span></div>
+        <div class="row"><span class="mono" style="background:#64d2ff">S</span><span>spellbee<small>github.com/zirkelc/spellbee</small></span><span class="spark"><i style="height:10%"></i><i style="height:90%"></i><i style="height:60%"></i><i style="height:5%"></i><i style="height:0%"></i><i style="height:0%"></i></span><span class="n">100<small>Aug 30</small></span></div>
+        <div class="row"><span class="mono" style="background:#30d158">A</span><span>agent-journal<small>github.com/zirkelc/agent-journal</small></span><span class="spark"><i style="height:0%"></i><i style="height:0%"></i><i style="height:20%"></i><i style="height:40%"></i><i style="height:70%"></i><i style="height:100%"></i></span><span class="n">38<small>today</small></span></div>
+        <div class="row"><span class="mono" style="background:#8e8e93">.</span><span>.claude<small>no remote</small></span><span class="spark"><i style="height:30%"></i><i style="height:30%"></i><i style="height:30%"></i><i style="height:30%"></i><i style="height:30%"></i><i style="height:30%"></i></span><span class="n">86<small>Sep 28</small></span></div>
+      </div>
+      <div class="foot">The remote is read from the project's local git config. No network.<span class="grow"></span><span class="btn">Clear</span></div>
+    </div>
+  </div>
+
+  <!-- Directory -->
+  <div class="cell">
+    <h2>Directory</h2>
+    <div class="bar"><span class="pill on">Directory <b>api-v2</b> ⌄</span></div>
+    <div class="pop">
+      <div class="head"><span class="crumbs">~ › Developer › nebula › packages › <b>api-v2</b></span><span style="flex:1"></span><span class="field" style="flex:0 0 180px">⌕ Find a folder</span></div>
+      <div class="cols">
+        <div class="col">
+          <div class="row path"><span>📁</span>Developer<span class="n">2,489</span><span class="chev">›</span></div>
+          <div class="row"><span>📁</span>orca<span class="n">25</span><span class="chev">›</span></div>
+          <div class="row"><span>📁</span>MJ<span class="n">5</span><span class="chev">›</span></div>
+          <div class="row"><span>📁</span>.claude<span class="n">3</span><span class="chev">›</span></div>
+        </div>
+        <div class="col">
+          <div class="row path"><span>📁</span>nebula<span class="n">760</span><span class="chev">›</span></div>
+          <div class="row"><span>📁</span>nebula.worktrees<span class="n">938</span><span class="chev">›</span></div>
+          <div class="row"><span>📁</span>spellbee<span class="n">100</span></div>
+          <div class="row"><span>📁</span>ai-retry<span class="n">73</span></div>
+          <div class="row"><span>📁</span>oss<span class="n">61</span><span class="chev">›</span></div>
+        </div>
+        <div class="col">
+          <div class="row"><span class="chk"></span>nebula itself<span class="n">451</span></div>
+          <div class="row sel"><span class="chk on">✓</span>packages/api-v2<span class="n">68</span></div>
+          <div class="row"><span class="chk"></span>packages/app-chat<span class="n">41</span></div>
+          <div class="row"><span class="chk"></span>packages/app-shopify<span class="n">22</span></div>
+        </div>
+      </div>
+      <div class="foot">Columns like Finder. Selecting a folder includes everything below it.<span class="grow"></span><span class="btn">Clear</span></div>
+    </div>
+  </div>
+
+  <!-- Time -->
+  <div class="cell">
+    <h2>Time of day</h2>
+    <div class="bar"><span class="pill on">Time <b>22:00 – 05:00</b> ⌄</span></div>
+    <div class="pop">
+      <div class="time">
+        <div class="hist">
+          <i style="height:30%" class="in"></i><i style="height:18%" class="in"></i><i style="height:8%" class="in"></i><i style="height:4%" class="in"></i><i style="height:2%" class="in"></i><i style="height:2%"></i><i style="height:4%"></i><i style="height:12%"></i><i style="height:35%"></i><i style="height:60%"></i><i style="height:80%"></i><i style="height:75%"></i><i style="height:55%"></i><i style="height:70%"></i><i style="height:95%"></i><i style="height:100%"></i><i style="height:85%"></i><i style="height:70%"></i><i style="height:45%"></i><i style="height:35%"></i><i style="height:40%"></i><i style="height:50%"></i><i style="height:45%" class="in"></i><i style="height:38%" class="in"></i>
+        </div>
+        <div class="axis"><span>0</span><span>3</span><span>6</span><span>9</span><span>12</span><span>15</span><span>18</span><span>21</span><span>24</span></div>
+        <div class="range"><span class="track"></span><span class="fill" style="left:0;width:21%"></span><span class="fill" style="left:91.6%;right:0"></span><span class="knob" style="left:21%"></span><span class="knob" style="left:91.6%"></span></div>
+      </div>
+      <div class="times">From <span class="t">22:00</span> to <span class="t">05:00</span> <span style="flex:1"></span> 214 entries</div>
+      <div class="presets"><span class="preset">Morning</span><span class="preset">Afternoon</span><span class="preset">Evening</span><span class="preset on">Night</span><span class="preset">Weekends</span></div>
+      <div class="foot">The bars show when you write, under the other filters. The range can wrap past midnight.<span class="grow"></span><span class="btn">Clear</span></div>
+    </div>
+  </div>
+
+  <!-- Agent -->
+  <div class="cell">
+    <h2>Agent</h2>
+    <div class="bar"><span class="pill">Agent <b>Any</b> ⌄</span></div>
+    <div class="pop">
+      <div class="rows">
+        <div class="row"><span class="mono" style="background:#d97757">✳</span><span>Claude Code<small>claude</small></span><span class="n">2,203</span></div>
+        <div class="row sub"><span class="chk"></span>opus-5<span class="n">1,840</span></div>
+        <div class="row sub"><span class="chk"></span>sonnet-5<span class="n">363</span></div>
+        <div class="row"><span class="mono" style="background:#1f2024">◎</span><span>Codex<small>codex</small></span><span class="n">396</span></div>
+        <div class="row sub"><span class="chk"></span>gpt-5.6-terra<span class="n">2</span></div>
+        <div class="row"><span class="mono" style="background:#8e8e93">?</span><span>Not recorded<small>entries without an agent field</small><span class="tag">older entries</span></span><span class="n">2,601</span></div>
+      </div>
+      <div class="foot">Grouped by agent, then by model.<span class="grow"></span><span class="btn">Clear</span></div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
