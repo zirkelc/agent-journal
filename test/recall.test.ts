@@ -130,6 +130,27 @@ describe('list', () => {
     expect(listed[0].project).toBe('a b');
   });
 
+  test(`should list an entry saved with CRLF line endings`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ENTRIES);
+    writeFileSync(
+      join(store.journalDir, '2026-08-10T120000Z.md'),
+      ['---', 'date: 2026-08-10T12:00:00Z', 'project: nebula', 'summary: "Saved on Windows."', '---', '', 'A CRLF body.', ''].join('\r\n'),
+    );
+
+    // Act
+    const listed = rows(run(store, ['list', '--project', 'nebula']));
+    const found = rows(run(store, ['search', 'crlf body']));
+
+    // Assert
+    expect(listed.map((row) => row.summary)).toEqual([
+      'Moved per-turn context into a data part, which took cache reuse from 62% to 95%.',
+      'Saved on Windows.',
+    ]);
+    expect(found.map((row) => row.id)).toEqual(['2026-08-10T120000Z']);
+  });
+
   test(`should filter by project`, () => {
     // Arrange
     const store = fixture();
@@ -407,6 +428,66 @@ describe('read', () => {
     expect(shown.split('\n')[1]).toBe(
       '2026-08-03T091500Z  nebula        Moved per-turn context into a data part, which took cache reuse from 62% to 95%.',
     );
+  });
+
+  test(`should count only the matches it can list`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ENTRIES);
+    writeFileSync(join(store.journalDir, '2026-08-03T120000Z.md'), 'No frontmatter here.\n');
+    writeFileSync(join(store.journalDir, '2026-08-03T130000Z.md'), '---\nproject: nebula\nsummary: "Later."\n---\n');
+
+    // Act
+    const result = fails(store, ['read', '2026-08-03']);
+
+    // Assert
+    expect(result.stderr).toContain('matches 2 entries');
+    expect(rows(result.stderr).map((row) => row.id)).toEqual(['2026-08-03T091500Z', '2026-08-03T130000Z']);
+  });
+
+  test(`should not print a file that is not an entry`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ENTRIES);
+    writeFileSync(join(store.journalDir, 'README.md'), '# Journal\n');
+    writeFileSync(join(store.journalDir, '2026-08-11T120000Z.md'), 'No frontmatter here.\n');
+
+    // Act
+    const readme = fails(store, ['read', 'README']);
+    const bare = fails(store, ['read', '2026-08-11']);
+
+    // Assert
+    expect(readme.stderr).toContain('no entry matches');
+    expect(bare.stderr).toContain('no entry matches');
+  });
+
+  test(`should skip a newer file that is not an entry for latest`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ENTRIES);
+    writeFileSync(join(store.journalDir, '2026-08-11T120000Z.md'), 'No frontmatter here.\n');
+
+    // Act
+    const entry = run(store, ['read', 'latest']);
+
+    // Assert
+    expect(entry).toContain('date: 2026-08-09T17:30:00Z');
+  });
+
+  test(`should read an entry saved with CRLF line endings`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, []);
+    writeFileSync(
+      join(store.journalDir, '2026-08-10T120000Z.md'),
+      ['---', 'summary: "Saved on Windows."', '---', ''].join('\r\n'),
+    );
+
+    // Act
+    const entry = run(store, ['read', '2026-08-10']);
+
+    // Assert
+    expect(entry).toContain('Saved on Windows.');
   });
 
   test(`should fail when nothing matches`, () => {

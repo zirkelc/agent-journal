@@ -112,6 +112,7 @@ show_help() {
 newline='
 '
 tab=$(printf '\t')
+cr=$(printf '\r')
 
 # ---------------------------------------------------------------- config
 
@@ -523,6 +524,10 @@ render() {
       fm = 0; had = 0; proj = ""; summary = ""; dir = ""; body = ""
     }
 
+    # An entry saved with CRLF endings is still an entry. Without this its first
+    # line is not `---`, and every value would carry the carriage return.
+    { sub(/\r$/, "") }
+
     FNR == 1 && $0 == "---" { fm = 1; had = 1; next }
 
     fm == 1 {
@@ -679,6 +684,22 @@ fi
 
 # ---------------------------------------------------------------- read
 
+# Whether a file is an entry, by the rule `list` applies: a name in the shape of
+# an entry, and frontmatter from the first line. `read` checks it so the two
+# commands agree on what is in the journal, and an ambiguous id never counts a
+# file that it then cannot show.
+is_entry() {
+  case ${1##*/} in
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*.md) ;;
+    *) return 1 ;;
+  esac
+  [ -f "$1" ] || return 1
+  first=
+  IFS= read -r first <"$1" || :
+  [ "${first%"$cr"}" = --- ]
+}
+
+
 if [ "$cmd" = read ]; then
   [ "$argc" -le 1 ] || usage
   id=$arg1
@@ -687,7 +708,7 @@ if [ "$cmd" = read ]; then
   if [ "$id" = latest ]; then
     entry=
     for candidate in "$journal_dir"/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*.md; do
-      [ -f "$candidate" ] || continue
+      is_entry "$candidate" || continue
       entry=$candidate
     done
     [ -n "$entry" ] || {
@@ -698,13 +719,14 @@ if [ "$cmd" = read ]; then
     exit 0
   fi
 
-  matches=0
-  entry=
+  # Collected rather than counted, so the list an ambiguous id prints is the
+  # same set of files the count came from.
+  set --
   for candidate in "$journal_dir"/"$id"*.md; do
-    [ -f "$candidate" ] || continue
-    matches=$((matches + 1))
-    entry=$candidate
+    is_entry "$candidate" || continue
+    set -- "$@" "$candidate"
   done
+  matches=$#
 
   if [ "$matches" = 0 ]; then
     printf 'no entry matches %s\n' "$id" >&2
@@ -720,11 +742,11 @@ if [ "$cmd" = read ]; then
     # The matches go to stderr with the message, so stdout stays empty for a
     # caller that expected an entry, and the layout follows stderr instead.
     layout_for 2
-    render "$journal_dir"/"$id"*.md >&2
+    render "$@" >&2
     exit 1
   fi
 
-  cat "$entry"
+  cat "$1"
   exit 0
 fi
 
