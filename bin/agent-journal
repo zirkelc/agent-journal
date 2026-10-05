@@ -76,12 +76,13 @@ agent's own plugin commands.
 write takes the summary and the body as flags, and anything piped in is the
 body. Without a summary it opens $EDITOR on a template, carrying any body it
 already has. The project and the directory come from where you are unless the
-flags say otherwise.
+flags say otherwise. --project . names the repository of --cwd, and fails
+outside one.
 
 filters: --date D      a prefix of the timestamp: 2026, 2026-01, 2026-01-11
          --since D     from this day on, as YYYY-MM-DD, today, or 7d
          --until D     up to this day, same forms
-         --project P   entries filed under one project
+         --project P   entries filed under one project, or . for the current project
          --cwd DIR     entries from a directory and everything under it
          --limit N     how many of the most recent to print, default 20
          --all         no limit
@@ -253,6 +254,15 @@ resolve_project() {
   # a substitute for one: it would file `Downloads` as a project and dilute the
   # one field whose job is grouping. Left empty, which drops the line and takes
   # the field out of the entry. `cwd` still records where the work happened.
+}
+
+# `--project .` where there is no project to name. Each command decides which
+# directory `.` means, so only the failure is shared. Carrying on is not an
+# option: an empty project filter means no filter at all, and would list every
+# project under the name of this one.
+no_project_here() {
+  printf '%s is not in a repository, so --project . has no project to name\n' "$(abbrev_home "$1")" >&2
+  exit 1
 }
 
 # ---------------------------------------------------------------- arguments
@@ -600,6 +610,18 @@ if [ "$cmd" = list ] || [ "$cmd" = search ]; then
     [ "$argc" -eq 0 ] || usage
   fi
 
+  # `.` is the project of the directory this runs in, resolved exactly as the
+  # session-start hook resolves it, so a caller never repeats the git logic and
+  # risks a different answer. Not the project of `--cwd`: here that is a filter,
+  # and resolving from it would tie the project to one worktree when it is meant
+  # to cover all of them.
+  if [ "$project_filter" = . ]; then
+    here=$(pwd)
+    resolve_project "$here"
+    [ -n "$project" ] || no_project_here "$here"
+    project_filter=$project
+  fi
+
   # The filenames are the instant each entry records, so the shell's own ordering
   # is chronological and a `--date` prefix is a date range the glob applies for
   # free: the entries it excludes are never opened.
@@ -738,17 +760,28 @@ if [ "$cmd" = write ]; then
     esac
   }
 
+  # `.` asks for the project derived from `--cwd`, the one an entry is filed
+  # under when no project is given at all. Here `--cwd` is where the session is,
+  # not a filter. It takes the derived name as it is, so it is not checked like
+  # a name that was typed.
+  dot=0
+  if [ "$project_filter" = . ]; then
+    dot=1
+    project_filter=
+  fi
+
   refuse_if_unquotable summary "$opt_summary" quoted
   refuse_if_unquotable project "$project_filter" bare
   refuse_if_unquotable 'session id' "$session_id" bare
   refuse_if_unquotable agent "$agent" bare
 
-  mkdir -p "$journal_dir" || exit 1
-
   resolve_project "$cwd"
+  [ "$dot" = 0 ] || [ -n "$project" ] || no_project_here "$cwd"
   # Derived from where the session is, unless it was named. The same flag filters
   # the other commands, and here it says which project the entry belongs to.
   [ -z "$project_filter" ] || project=$project_filter
+
+  mkdir -p "$journal_dir" || exit 1
 
   summary=$opt_summary
   body=$opt_body

@@ -4,6 +4,16 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+/**
+ * Git reads these to decide which repository it is in, ahead of the directory it
+ * is given. A test run started by a git hook inherits them, and every git call
+ * here, in the tests and in the CLI under test, would then act on the
+ * developer's own repository. Removed once, for every test file.
+ */
+for (const key of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR', 'GIT_OBJECT_DIRECTORY']) {
+  delete process.env[key];
+}
+
 export const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 export const HOOK = join(ROOT, 'adapters', 'claude-code', 'session-start.sh');
 
@@ -57,6 +67,29 @@ export function fixture(instructions?: string): Fixture {
   return { root, bin, home, journalDir: join(home, 'agent-journal'), repo };
 }
 
+/**
+ * A linked worktree of the fixture repository, on a branch of its own. It needs
+ * a commit to branch from, so an empty one is made first, which also lets a test
+ * call this more than once.
+ */
+export function worktree(store: Fixture, name: string): string {
+  const git = (...args: Array<string>) =>
+    execFileSync('git', ['-C', store.repo, ...args], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: 'test',
+        GIT_AUTHOR_EMAIL: 'test@example.com',
+        GIT_COMMITTER_NAME: 'test',
+        GIT_COMMITTER_EMAIL: 'test@example.com',
+      },
+    });
+  git('commit', '-q', '--allow-empty', '-m', 'seed');
+  const tree = join(store.home, name);
+  git('worktree', 'add', '-q', '-b', name, tree);
+  return tree;
+}
+
 type RunOptions = {
   cwd?: string;
   /** The directory the process itself is started in, for relative-path cases. */
@@ -70,6 +103,11 @@ function baseEnv(store: Fixture, extra: Record<string, string> = {}): NodeJS.Pro
   return {
     ...process.env,
     HOME: store.home,
+    /**
+     * Stops git looking above the fixture, so a temp directory inside some
+     * checkout still counts as outside a repository.
+     */
+    GIT_CEILING_DIRECTORIES: store.home,
     /** Point config resolution at the fixture, so the developer's own config never leaks in. */
     XDG_CONFIG_HOME: join(store.home, 'config'),
     ...extra,

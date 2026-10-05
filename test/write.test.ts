@@ -1,7 +1,8 @@
+import { execFileSync } from 'node:child_process';
 import { chmodSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
-import { type Fixture, fails, fixture, frontmatter, rows, run, tilde } from './helpers.js';
+import { type Fixture, fails, fixture, frontmatter, rows, run, tilde, worktree } from './helpers.js';
 
 /**
  * A stand-in for `$EDITOR`: it fills the summary in and appends a body, the way
@@ -112,6 +113,47 @@ describe('write', () => {
     const fields = frontmatter(written(store).text);
     expect(fields.project).toBe('repo');
     expect(fields.cwd).toBe(tilde(store, store.repo));
+  });
+
+  test(`should file under the repository when the project is given as a dot`, () => {
+    // Arrange
+    const store = fixture();
+    const tree = worktree(store, 'wt-feature');
+
+    // Act
+    run(store, ['write', '--summary', 'Named by a dot.', '--project', '.'], { at: tree });
+
+    // Assert
+    expect(frontmatter(written(store).text).project).toBe('repo');
+  });
+
+  test(`should take the project of --cwd for a dot, not of where it runs`, () => {
+    // Arrange
+    const store = fixture();
+    const other = join(store.home, 'other');
+    execFileSync('git', ['init', '-q', other]);
+
+    // Act
+    run(store, ['write', '--summary', 'Run from elsewhere.', '--project', '.', '--cwd', store.repo], { at: other });
+
+    // Assert
+    const entry = frontmatter(written(store).text);
+    expect(entry.project).toBe('repo');
+    expect(entry.cwd).toBe(tilde(store, store.repo));
+  });
+
+  test(`should fail for a dot when --cwd is outside a repository`, () => {
+    // Arrange
+    const store = fixture();
+
+    // Act
+    const result = fails(store, ['write', '--summary', 'Nowhere.', '--project', '.', '--cwd', store.home], {
+      at: store.repo,
+    });
+
+    // Assert
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('not in a repository');
   });
 
   test(`should leave the project out when the work is outside a repository`, () => {

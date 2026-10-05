@@ -1,7 +1,7 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
-import { type Entry, fails, fixture, output, rows, run, seed } from './helpers.js';
+import { type Entry, fails, fixture, output, rows, run, seed, worktree } from './helpers.js';
 
 /**
  * A week of entries across three projects, with one written outside a
@@ -419,5 +419,80 @@ describe('the bare form', () => {
     // Assert
     expect(result.status).toBe(2);
     expect(result.stderr).toContain('usage: agent-journal');
+  });
+});
+
+describe('the current project', () => {
+  /**
+   * The fixture repository is named `repo`, so that is what the session-start
+   * hook files its entries under, from the main checkout and every worktree.
+   */
+  const REPO_ENTRIES: Array<Entry> = [
+    { stem: '2026-08-03T091500Z', project: 'repo', summary: 'From the main checkout.', cwd: '~/repo' },
+    { stem: '2026-08-05T140000Z', project: 'nebula', summary: 'Another project.', cwd: '~/nebula' },
+    { stem: '2026-08-07T081000Z', project: 'repo', summary: 'From a worktree.', cwd: '~/wt-feature' },
+  ];
+
+  test(`should list every entry of the repository from inside a worktree`, () => {
+    // Arrange
+    const store = fixture();
+    const tree = worktree(store, 'wt-feature');
+    seed(store, REPO_ENTRIES);
+
+    // Act
+    const listed = rows(run(store, ['list', '--project', '.'], { at: tree }));
+
+    // Assert
+    expect(listed.map((row) => row.summary)).toEqual(['From the main checkout.', 'From a worktree.']);
+  });
+
+  test(`should resolve the same project for search`, () => {
+    // Arrange
+    const store = fixture();
+    const tree = worktree(store, 'wt-feature');
+    seed(store, REPO_ENTRIES);
+
+    // Act
+    const listed = rows(run(store, ['search', 'from', '--project', '.'], { at: tree }));
+
+    // Assert
+    expect(listed.map((row) => row.summary)).toEqual(['From the main checkout.', 'From a worktree.']);
+  });
+
+  test(`should still narrow by directory when given a cwd as well`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, REPO_ENTRIES);
+
+    // Act
+    const listed = rows(run(store, ['list', '--project', '.', '--cwd', '~/wt-feature'], { at: store.repo }));
+
+    // Assert
+    expect(listed.map((row) => row.summary)).toEqual(['From a worktree.']);
+  });
+
+  test(`should fail outside a repository rather than list everything`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, REPO_ENTRIES);
+
+    // Act
+    const result = fails(store, ['list', '--project', '.'], { at: store.home });
+
+    // Assert
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('not in a repository');
+  });
+
+  test(`should leave a command that takes no project alone`, () => {
+    // Arrange
+    const store = fixture();
+
+    // Act
+    const result = output(store, ['config', '--project', '.'], { at: store.home });
+
+    // Assert
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('journal_dir=');
   });
 });

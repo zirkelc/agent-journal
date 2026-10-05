@@ -1,8 +1,7 @@
-import { execFileSync } from 'node:child_process';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
-import { configure, context, fields, fixture, run, tilde } from './helpers.ts';
+import { configure, context, fields, fixture, run, tilde, worktree } from './helpers.ts';
 
 describe('the rules', () => {
   test(`should frame the rules as a standing instruction rather than as background`, () => {
@@ -106,22 +105,7 @@ describe('this session', () => {
   test(`should keep the repository name inside a worktree`, () => {
     // Arrange
     const store = fixture();
-    writeFileSync(join(store.repo, 'seed.txt'), 'seed\n');
-    const git = (...args: Array<string>) =>
-      execFileSync('git', ['-C', store.repo, ...args], {
-        encoding: 'utf8',
-        env: {
-          ...process.env,
-          GIT_AUTHOR_NAME: 'test',
-          GIT_AUTHOR_EMAIL: 'test@example.com',
-          GIT_COMMITTER_NAME: 'test',
-          GIT_COMMITTER_EMAIL: 'test@example.com',
-        },
-      });
-    git('add', '-A');
-    git('commit', '-qm', 'seed');
-    const tree = join(store.home, 'wt-feature');
-    git('worktree', 'add', '-q', '-b', 'feature', tree);
+    const tree = worktree(store, 'wt-feature');
 
     // Act
     const result = fields(context(store, { cwd: tree }));

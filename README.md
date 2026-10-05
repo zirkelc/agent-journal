@@ -180,10 +180,12 @@ Entries are listed oldest first, so the newest is nearest the prompt. Each line 
 | `--date` | `2026`, `2026-01`, `2026-01-11`, `2026-01-11T143000Z` | a prefix of the timestamp, at any granularity |
 | `--since` | `2026-01-11`, `today`, `7d` | from this day on |
 | `--until` | same forms | up to this day |
-| `--project` | a project name | entries filed under one project, across all its worktrees |
+| `--project` | a project name, or `.` for here | entries filed under one project, across all its worktrees. `.` names the repository of the current directory the same way the session-start hook does, and fails outside a repository |
 | `--cwd` | a directory, or `.` for here | one directory and everything under it |
 | `--limit` | a number, default `20` | how many of the most recent to print |
 | `--all` | | no limit |
+
+`aj write` also takes `--project .`. There it names the repository of `--cwd`, the directory the entry records, and also fails outside a repository.
 
 `aj install` with no agent named lists the ones found on this machine, with the command to wire up each. Naming one (`aj install codex`) runs that agent's own plugin commands for you. It writes nothing into any agent's configuration.
 
