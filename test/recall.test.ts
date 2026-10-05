@@ -672,3 +672,94 @@ describe('in a terminal', () => {
     );
   });
 });
+
+/**
+ * The complete output, byte for byte, so a change to how entries are found and
+ * read cannot change what is printed. Each case combines a filter with a limit,
+ * because the limit has to apply to the matches, not to the files.
+ */
+describe('the exact output', () => {
+  test(`should print every entry down a pipe`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ENTRIES);
+
+    // Act
+    const listed = run(store, ['list']);
+
+    // Assert
+    expect(listed).toBe(
+      [
+        '2026-08-03T091500Z\tnebula\tMoved per-turn context into a data part, which took cache reuse from 62% to 95%.',
+        '2026-08-05T140000Z\tcheckout-api\tMade full jitter the default on the retry backoff.',
+        '2026-08-07T081000Z\t\tSummarised an episode into the required JSON shape.',
+        '2026-08-09T173000Z\tcheckout-api\tSplit the checkout form into two steps.',
+        '',
+      ].join('\n'),
+    );
+  });
+
+  test(`should keep the most recent matches of a filter, not of all entries`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ENTRIES);
+
+    // Act
+    const listed = run(store, ['list', '--project', 'nebula', '--limit', '1']);
+
+    // Assert
+    expect(listed).toBe(
+      '2026-08-03T091500Z\tnebula\tMoved per-turn context into a data part, which took cache reuse from 62% to 95%.\n',
+    );
+  });
+
+  test(`should keep the most recent matches of a search, in order`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ENTRIES);
+
+    // Act
+    const listed = run(store, ['search', 'the', '--limit', '2']);
+
+    // Assert
+    expect(listed).toBe(
+      [
+        '2026-08-07T081000Z\t\tSummarised an episode into the required JSON shape.',
+        '2026-08-09T173000Z\tcheckout-api\tSplit the checkout form into two steps.',
+        '',
+      ].join('\n'),
+    );
+  });
+
+  test(`should apply a range before the limit`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ENTRIES);
+
+    // Act
+    const listed = run(store, ['list', '--until', '2026-08-06', '--limit', '1']);
+
+    // Assert
+    expect(listed).toBe('2026-08-05T140000Z\tcheckout-api\tMade full jitter the default on the retry backoff.\n');
+  });
+
+  test(`should print every entry aligned in a terminal`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ENTRIES);
+
+    // Act
+    const shown = terminal(store, ['list', '--limit', '3'], { env: { NO_COLOR: '1' } });
+
+    // Assert
+    expect(shown).toBe(
+      [
+        '2026-08-05T140000Z  checkout-api  Made full jitter the default on the retry backoff.',
+        '2026-08-07T081000Z                Summarised an episode into the required JSON shape.',
+        '2026-08-09T173000Z  checkout-api  Split the checkout form into two steps.',
+        '',
+      ].join('\n'),
+    );
+  });
+});
+

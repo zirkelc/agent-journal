@@ -480,10 +480,12 @@ layout_for() {
 # only in whether `query` is set, and `read` borrows it to show what an ambiguous
 # id matched, so the format is defined once.
 #
-# Reads whole files rather than stopping at the frontmatter, because `nextfile`
-# is not in POSIX awk and the entries are small: a year of them is a few
-# megabytes, which is less than `grep` already crosses to answer the same
-# question.
+# The files come oldest first, as the glob sorts them, and are read newest first,
+# so a limit stops the reading as soon as it has enough matches rather than
+# after the whole journal. A range is checked on the name, before the file is
+# opened. Without a query only the frontmatter is read, because that is all a
+# line shows. awk opens the files itself, from `ARGV` in `BEGIN`, because its
+# own input loop only runs forward and cannot stop one file early in POSIX.
 render() {
   awk \
     -v query="${query:-}" \
@@ -495,11 +497,56 @@ render() {
     -v tty="$tty" \
     -v color="$color" \
     -v cols="$cols" '
-    function emit(   day) {
-      if (!had) return
+    # Reads one file and keeps it when it passes the filters. Matches are kept
+    # newest first, the order they are found in.
+    function scan(file,   stem, day, line, first, fm, proj, dir, summary, body) {
+      stem = file
+      sub(/.*\//, "", stem)
+      sub(/\.md$/, "", stem)
       day = substr(stem, 1, 10)
       if (since != "" && day < since) return
       if (until != "" && day > until) return
+
+      first = 1; fm = 0; proj = ""; dir = ""; summary = ""; body = ""
+      while ((getline line < file) > 0) {
+        # An entry saved with CRLF endings is still an entry. Without this its
+        # first line is not `---`, and every value would carry the return.
+        # Compared rather than matched, as below: this runs on every line of
+        # every entry, and a regex costs several times a string comparison.
+        if (substr(line, length(line)) == "\r") line = substr(line, 1, length(line) - 1)
+        if (first) {
+          first = 0
+          if (line != "---") break
+          fm = 1
+          continue
+        }
+        if (fm == 1) {
+          if (line == "---") {
+            fm = 2
+            if (q == "") break
+            continue
+          }
+          if (substr(line, 1, 8) == "project:") {
+            proj = substr(line, 9)
+            sub(/^[ \t]*/, "", proj)
+          } else if (substr(line, 1, 4) == "cwd:") {
+            dir = substr(line, 5)
+            sub(/^[ \t]*/, "", dir)
+          } else if (substr(line, 1, 8) == "summary:") {
+            line = substr(line, 9)
+            sub(/^[ \t]*/, "", line)
+            # The one quoted field, and the quotes are punctuation rather than value.
+            if (substr(line, 1, 1) == "\"") line = substr(line, 2)
+            if (substr(line, length(line), 1) == "\"") line = substr(line, 1, length(line) - 1)
+            summary = line
+          }
+          continue
+        }
+        body = body " " line
+      }
+      close(file)
+
+      if (fm == 0) return
       if (project != "" && proj != project) return
       if (cwdf != "" && index(dir, cwdf) != 1) return
       if (q != "" && index(tolower(summary " " body), q) == 0) return
@@ -513,47 +560,15 @@ render() {
       what[n] = summary
     }
 
-    BEGIN { q = tolower(query) }
-
-    FILENAME != cur {
-      if (cur != "") emit()
-      cur = FILENAME
-      stem = FILENAME
-      sub(/.*\//, "", stem)
-      sub(/\.md$/, "", stem)
-      fm = 0; had = 0; proj = ""; summary = ""; dir = ""; body = ""
-    }
-
-    # An entry saved with CRLF endings is still an entry. Without this its first
-    # line is not `---`, and every value would carry the carriage return.
-    { sub(/\r$/, "") }
-
-    FNR == 1 && $0 == "---" { fm = 1; had = 1; next }
-
-    fm == 1 {
-      if ($0 == "---") { fm = 2; next }
-      line = $0
-      if (sub(/^project:[ \t]*/, "", line)) { proj = line; next }
-      if (sub(/^cwd:[ \t]*/, "", line)) { dir = line; next }
-      if (sub(/^summary:[ \t]*/, "", line)) {
-        # The one quoted field, and the quotes are punctuation rather than value.
-        if (substr(line, 1, 1) == "\"") line = substr(line, 2)
-        if (substr(line, length(line), 1) == "\"") line = substr(line, 1, length(line) - 1)
-        summary = line
-        next
+    BEGIN {
+      q = tolower(query)
+      for (a = ARGC - 1; a >= 1; a--) {
+        if (limit > 0 && n >= limit) break
+        scan(ARGV[a])
       }
-      next
-    }
-
-    q != "" { body = body " " $0 }
-
-    END {
-      emit()
-      first = 1
-      if (limit > 0 && n > limit) first = n - limit + 1
 
       if (!tty) {
-        for (i = first; i <= n; i++) {
+        for (i = n; i >= 1; i--) {
           # A tab in either field would add a column. `write` refuses one in
           # the project, but an entry written by hand is never checked.
           proj = who[i]
@@ -567,10 +582,10 @@ render() {
 
       # Measured over the rows that will be printed, not over everything that
       # matched: one long project name in January should not indent all of today.
-      for (i = first; i <= n; i++)
+      for (i = 1; i <= n; i++)
         if (length(who[i]) > width) width = length(who[i])
 
-      for (i = first; i <= n; i++) {
+      for (i = n; i >= 1; i--) {
         pad = who[i]
         while (length(pad) < width) pad = pad " "
         text = what[i]
@@ -583,6 +598,7 @@ render() {
         else
           printf "%s  %s  %s\n", id[i], pad, text
       }
+      exit
     }
   ' "$@"
 }
