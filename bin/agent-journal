@@ -497,18 +497,27 @@ render() {
     -v tty="$tty" \
     -v color="$color" \
     -v cols="$cols" '
+    # Whether an entry passes the filters that its frontmatter decides.
+    function wanted(proj, dir) {
+      if (project != "" && proj != project) return 0
+      if (cwdf != "" && index(dir, cwdf) != 1) return 0
+      return 1
+    }
+
     # Reads one file and keeps it when it passes the filters. Matches are kept
-    # newest first, the order they are found in.
-    function scan(file,   stem, day, line, first, fm, proj, dir, summary, body) {
+    # newest first, the order they are found in. Returns 1 once the file is
+    # older than `since`, because every file after it is older still.
+    function scan(file,   stem, day, line, got, first, fm, proj, dir, summary, found, tail, text) {
+      if (file in skip) return 0
       stem = file
       sub(/.*\//, "", stem)
       sub(/\.md$/, "", stem)
       day = substr(stem, 1, 10)
-      if (since != "" && day < since) return
-      if (until != "" && day > until) return
+      if (since != "" && day < since) return 1
+      if (until != "" && day > until) return 0
 
-      first = 1; fm = 0; proj = ""; dir = ""; summary = ""; body = ""
-      while ((getline line < file) > 0) {
+      first = 1; fm = 0; proj = ""; dir = ""; summary = ""; found = 0
+      while ((got = (getline line < file)) > 0) {
         # An entry saved with CRLF endings is still an entry. Without this its
         # first line is not `---`, and every value would carry the return.
         # Compared rather than matched, as below: this runs on every line of
@@ -523,7 +532,16 @@ render() {
         if (fm == 1) {
           if (line == "---") {
             fm = 2
-            if (q == "") break
+            # Everything a line shows is known now, so the body is read only
+            # for a query, and only for an entry the other filters keep.
+            if (q == "" || !wanted(proj, dir)) break
+            # The text searched is the summary, a space, then each body line
+            # after a space of its own. A match ending in a new line starts at
+            # most one query length before it, so that much of the text read so
+            # far is kept, and the read stops at the first match.
+            text = tolower(summary " ")
+            if (index(text, q)) { found = 1; break }
+            tail = substr(text, length(text) - length(q) + 2)
             continue
           }
           if (substr(line, 1, 8) == "project:") {
@@ -542,14 +560,20 @@ render() {
           }
           continue
         }
-        body = body " " line
+        text = tail " " tolower(line)
+        if (index(text, q)) { found = 1; break }
+        tail = substr(text, length(text) - length(q) + 2)
       }
+      # A file that cannot be opened is not an empty one. Said rather than
+      # skipped in silence, so a missing entry has a reason next to it.
+      if (got < 0 && first) printf "cannot read %s\n", file > "/dev/stderr"
       close(file)
 
-      if (fm == 0) return
-      if (project != "" && proj != project) return
-      if (cwdf != "" && index(dir, cwdf) != 1) return
-      if (q != "" && index(tolower(summary " " body), q) == 0) return
+      if (fm == 0) return 0
+      if (!wanted(proj, dir)) return 0
+      # Frontmatter that never closes has no body, only its summary to search.
+      if (q != "" && fm == 1) found = index(tolower(summary " "), q) > 0
+      if (q != "" && !found) return 0
 
       n++
       # The file name itself rather than a friendlier date and time, because it is
@@ -558,13 +582,18 @@ render() {
       id[n] = stem
       who[n] = proj
       what[n] = summary
+      return 0
     }
 
     BEGIN {
       q = tolower(query)
+      # Through the environment rather than -v, which would treat a backslash
+      # in a path as an escape.
+      split(ENVIRON["AGENT_JOURNAL_SKIP"], skipped, "\n")
+      for (k in skipped) skip[skipped[k]] = 1
       for (a = ARGC - 1; a >= 1; a--) {
         if (limit > 0 && n >= limit) break
-        scan(ARGV[a])
+        if (scan(ARGV[a])) break
       }
 
       if (!tty) {
@@ -694,8 +723,23 @@ if [ "$cmd" = list ] || [ "$cmd" = search ]; then
     exit 0
   fi
 
-  render "$@"
-  exit 0
+  # awk stops outright on a directory, which a glob for names cannot tell from
+  # a file without a test per name on every run. So the test runs only once awk
+  # has failed: a directory named like an entry is named and left out, and the
+  # list is read again. Anything else that failed keeps its status, so it cannot
+  # pass for a journal with nothing to show.
+  render "$@" && exit 0
+  status=$?
+  skip=
+  for candidate in "$journal_dir"/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*.md/; do
+    [ -d "$candidate" ] || continue
+    candidate=${candidate%/}
+    printf '%s is a directory, not an entry\n' "$candidate" >&2
+    skip=$skip$candidate$newline
+  done
+  [ -n "$skip" ] || exit "$status"
+  AGENT_JOURNAL_SKIP=$skip render "$@"
+  exit
 fi
 
 # ---------------------------------------------------------------- read

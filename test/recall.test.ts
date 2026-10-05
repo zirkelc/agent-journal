@@ -1,4 +1,4 @@
-import { writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 import { type Entry, fails, fixture, output, rows, run, seed, terminal, worktree } from './helpers.js';
@@ -743,10 +743,11 @@ describe('the exact output', () => {
     expect(listed).toBe('2026-08-05T140000Z\tcheckout-api\tMade full jitter the default on the retry backoff.\n');
   });
 
-  test(`should print every entry aligned in a terminal`, () => {
+  test(`should align the printed entries to the widest project among them`, () => {
     // Arrange
     const store = fixture();
-    seed(store, ENTRIES);
+    /** Older than the limit reaches, so its long name must not widen the column. */
+    seed(store, [{ stem: '2026-08-01T080000Z', project: 'a-much-longer-project-name', summary: 'Out of reach.' }, ...ENTRIES]);
 
     // Act
     const shown = terminal(store, ['list', '--limit', '3'], { env: { NO_COLOR: '1' } });
@@ -761,5 +762,58 @@ describe('the exact output', () => {
       ].join('\n'),
     );
   });
+
 });
 
+describe('files that are not entries it can read', () => {
+  /** awk cannot read a directory and stops, on BSD and on mawk alike. */
+  test(`should name a directory that is named like an entry and list the rest`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ENTRIES);
+    const folder = join(store.journalDir, '2026-08-04T000000Z.md');
+    mkdirSync(folder);
+
+    // Act
+    const result = output(store, ['list']);
+
+    // Assert
+    expect(result.status).toBe(0);
+    expect(rows(result.stdout).length).toBe(4);
+    expect(result.stderr).toContain(`${folder} is a directory, not an entry`);
+  });
+
+  /** Root reads any file whatever its mode, so the case cannot be made there. */
+  test.skipIf(process.getuid?.() === 0)(`should warn about an entry it cannot read and list the rest`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ENTRIES);
+    const locked = join(store.journalDir, '2026-08-04T000000Z.md');
+    writeFileSync(locked, '---\nsummary: "Locked."\n---\n');
+    chmodSync(locked, 0o000);
+
+    // Act
+    const result = output(store, ['list']);
+
+    // Assert
+    expect(result.status).toBe(0);
+    expect(rows(result.stdout).length).toBe(4);
+    expect(result.stderr).toContain('cannot read');
+    expect(result.stderr).toContain('2026-08-04T000000Z.md');
+  });
+
+  test(`should match a search across line breaks in the body`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, [
+      { stem: '2026-08-03T091500Z', project: 'nebula', summary: 'Short lines.', body: 'one\ntwo\nthree\nfour' },
+      { stem: '2026-08-04T091500Z', project: 'nebula', summary: 'Other.', body: 'one two four' },
+    ]);
+
+    // Act
+    const listed = rows(run(store, ['search', 'one two three four']));
+
+    // Assert
+    expect(listed.map((row) => row.summary)).toEqual(['Short lines.']);
+  });
+});
