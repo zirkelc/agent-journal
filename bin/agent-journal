@@ -111,6 +111,7 @@ show_help() {
 
 newline='
 '
+tab=$(printf '\t')
 
 # ---------------------------------------------------------------- config
 
@@ -446,6 +447,34 @@ resolve_day() {
   esac
 }
 
+# How the lines are laid out for the stream they go to, given as a file
+# descriptor. A terminal gets aligned columns, narrowed to its width. Anything
+# else gets one tab between columns, so a script can split them even when the
+# project is empty. `NO_COLOR` turns off colour only, never the layout.
+#
+# The width comes from `stty`, which asks the stream itself. `tput cols` would
+# have to find the terminal through its own stderr once its output is captured,
+# and reports a default 80 when that is silenced. An exported `COLUMNS` still
+# wins, as it does for `tput`.
+layout_for() {
+  tty=0
+  color=0
+  cols=0
+  [ -t "$1" ] || return 0
+  tty=1
+  [ -n "${NO_COLOR:-}" ] || color=1
+  cols=${COLUMNS:-}
+  if [ -z "$cols" ]; then
+    # Through a third descriptor, because inside the substitution the first
+    # one is the pipe that collects the answer, not the terminal.
+    { size=$(stty size <&3 2>/dev/null) || size=; } 3<&"$1"
+    cols=${size#* }
+  fi
+  case $cols in
+    '' | *[!0-9]*) cols=0 ;;
+  esac
+}
+
 # One line per entry, out of the files it is given. `list` and `search` differ
 # only in whether `query` is set, and `read` borrows it to show what an ambiguous
 # id matched, so the format is defined once.
@@ -520,9 +549,13 @@ render() {
 
       if (!tty) {
         for (i = first; i <= n; i++) {
+          # A tab in either field would add a column. `write` refuses one in
+          # the project, but an entry written by hand is never checked.
+          proj = who[i]
+          gsub(/\t/, " ", proj)
           text = what[i]
           gsub(/\t/, " ", text)
-          printf "%s\t%s\t%s\n", id[i], who[i], text
+          printf "%s\t%s\t%s\n", id[i], proj, text
         }
         exit
       }
@@ -580,20 +613,7 @@ if [ "$cmd" = list ] || [ "$cmd" = search ] || [ "$cmd" = read ]; then
   cwd_filter=
   [ "$cwd_set" = 0 ] || cwd_filter=$(abbrev_home "$cwd")
 
-  # A terminal gets aligned columns, narrowed to its width. Anything else gets
-  # one tab between columns, so a script can split them even when the project is
-  # empty. `NO_COLOR` turns off colour only, never the layout.
-  tty=0
-  color=0
-  cols=0
-  if [ -t 1 ]; then
-    tty=1
-    [ -n "${NO_COLOR:-}" ] || color=1
-    cols=$(tput cols 2>/dev/null) || cols=0
-    case $cols in
-      '' | *[!0-9]*) cols=0 ;;
-    esac
-  fi
+  layout_for 1
 
   if [ ! -d "$journal_dir" ]; then
     printf 'no journal at %s\n' "$journal_dir" >&2
@@ -698,12 +718,8 @@ if [ "$cmd" = read ]; then
     query=
     limit=0
     # The matches go to stderr with the message, so stdout stays empty for a
-    # caller that expected an entry. Colour and width were decided for stdout.
-    if [ ! -t 2 ]; then
-      tty=0
-      color=0
-      cols=0
-    fi
+    # caller that expected an entry, and the layout follows stderr instead.
+    layout_for 2
     render "$journal_dir"/"$id"*.md >&2
     exit 1
   fi
@@ -755,6 +771,12 @@ if [ "$cmd" = write ]; then
     case $2 in
       *:*)
         printf 'the %s cannot contain a colon\n' "$1" >&2
+        exit 2
+        ;;
+      *"$tab"*)
+        # Not a problem for the entry, but `list` separates its columns with
+        # tabs down a pipe, and one inside a value would add a column.
+        printf 'the %s cannot contain a tab\n' "$1" >&2
         exit 2
         ;;
     esac

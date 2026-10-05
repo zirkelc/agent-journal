@@ -139,6 +139,42 @@ export function output(
   return { stdout: result.stdout, stderr: result.stderr, status: result.status };
 }
 
+/**
+ * A run with a terminal on its standard streams, for the layout a person sees.
+ * `script` provides the pseudo-terminal, and BSD (macOS) and util-linux take
+ * its arguments in a different order. The terminal turns newlines into CRLF and
+ * BSD echoes the end of input as `^D`, so both are removed.
+ *
+ * The pseudo-terminal has no size of its own, so `stty` gives it one, which is
+ * where the CLI reads the width from. `COLUMNS` is removed, because it would
+ * win over that size, and `TERM` is fixed, because a CI runner may have none.
+ */
+export function terminal(
+  store: Fixture,
+  args: Array<string>,
+  options: RunOptions & { stdoutTo?: string; cols?: number } = {},
+): string {
+  const quote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`;
+  let command = `stty cols ${options.cols ?? 200}; ${[store.bin, ...args].map(quote).join(' ')}`;
+  if (options.stdoutTo) command += ` > ${quote(options.stdoutTo)}`;
+
+  const argv =
+    process.platform === 'darwin'
+      ? ['-q', '/dev/null', 'sh', '-c', command]
+      : ['-qec', command, '/dev/null'];
+
+  /** Not checked for status, because a refusal is laid out like anything else. */
+  const result = spawnSync('script', argv, {
+    encoding: 'utf8',
+    cwd: options.at,
+    env: { ...baseEnv(store, { TERM: 'xterm', ...options.env }), COLUMNS: options.env?.COLUMNS },
+    /** BSD `script` refuses a socket on stdin, which is what a pipe is here. */
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  return result.stdout.replace(/^\^D\x08\x08/, '').replaceAll('\r', '');
+}
+
 /** A run that is expected to be refused, with the reason it gave. */
 export function fails(
   store: Fixture,
@@ -195,14 +231,17 @@ export function seed(store: Fixture, entries: Array<Entry>): void {
  *
  * Down a pipe, which is how the tests run it, the columns are separated by one
  * tab each. An entry with no project leaves that field empty, which is the point
- * of testing it at all.
+ * of testing it at all. A line with no tab is a message rather than an entry and
+ * is skipped, but a line with the wrong number of fields is a broken entry, so
+ * it throws rather than disappearing from the count.
  */
 export function rows(out: string): Array<{ id: string; project: string; summary: string }> {
   const result: Array<{ id: string; project: string; summary: string }> = [];
 
   for (const line of out.split('\n')) {
+    if (!line.includes('\t')) continue;
     const fields = line.split('\t');
-    if (fields.length !== 3) continue;
+    if (fields.length !== 3) throw new Error(`expected 3 fields, got ${fields.length}: ${JSON.stringify(line)}`);
     result.push({ id: fields[0], project: fields[1], summary: fields[2] });
   }
 

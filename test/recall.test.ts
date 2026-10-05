@@ -1,7 +1,7 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
-import { type Entry, fails, fixture, output, rows, run, seed, worktree } from './helpers.js';
+import { type Entry, fails, fixture, output, rows, run, seed, terminal, worktree } from './helpers.js';
 
 /**
  * A week of entries across three projects, with one written outside a
@@ -115,6 +115,19 @@ describe('list', () => {
     // Assert
     expect(listed.length).toBe(1);
     expect(listed[0].summary).toBe('Before after.');
+  });
+
+  test(`should turn a tab inside a project into a space so the columns hold`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, [{ stem: '2026-08-03T091500Z', project: 'a\tb', summary: 'Written by hand.' }]);
+
+    // Act
+    const listed = rows(run(store, ['list']));
+
+    // Assert
+    expect(listed.length).toBe(1);
+    expect(listed[0].project).toBe('a b');
   });
 
   test(`should filter by project`, () => {
@@ -369,6 +382,33 @@ describe('read', () => {
     expect(listed.map((row) => row.id)).toEqual(['2026-08-03T091512Z', '2026-08-03T091547Z']);
   });
 
+  test(`should keep stdout empty when a prefix is ambiguous`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ENTRIES);
+
+    // Act
+    const result = output(store, ['read', '2026-08']);
+
+    // Assert
+    expect(result.status).toBe(1);
+    expect(result.stdout).toBe('');
+  });
+
+  test(`should lay the matches out for a terminal on stderr when stdout is redirected`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ENTRIES);
+
+    // Act
+    const shown = terminal(store, ['read', '2026-08'], { stdoutTo: '/dev/null', env: { NO_COLOR: '1' } });
+
+    // Assert
+    expect(shown.split('\n')[1]).toBe(
+      '2026-08-03T091500Z  nebula        Moved per-turn context into a data part, which took cache reuse from 62% to 95%.',
+    );
+  });
+
   test(`should fail when nothing matches`, () => {
     // Arrange
     const store = fixture();
@@ -494,5 +534,60 @@ describe('the current project', () => {
     // Assert
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('journal_dir=');
+  });
+});
+
+describe('in a terminal', () => {
+  test(`should align the columns with the project padded to the widest name`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ENTRIES);
+
+    // Act
+    const shown = terminal(store, ['list'], { env: { NO_COLOR: '1' } }).split('\n');
+
+    // Assert
+    expect(shown[0]).toBe(
+      '2026-08-03T091500Z  nebula        Moved per-turn context into a data part, which took cache reuse from 62% to 95%.',
+    );
+    expect(shown[2]).toBe('2026-08-07T081000Z                Summarised an episode into the required JSON shape.');
+  });
+
+  test(`should cut a summary to the width of the terminal`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ENTRIES);
+
+    // Act
+    const shown = terminal(store, ['list'], { cols: 60, env: { NO_COLOR: '1' } }).split('\n');
+
+    // Assert
+    expect(shown[0]).toBe('2026-08-03T091500Z  nebula        Moved per-turn context …');
+  });
+
+  test(`should prefer an exported COLUMNS to the size of the terminal`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ENTRIES);
+
+    // Act
+    const shown = terminal(store, ['list'], { cols: 200, env: { NO_COLOR: '1', COLUMNS: '60' } }).split('\n');
+
+    // Assert
+    expect(shown[0]).toBe('2026-08-03T091500Z  nebula        Moved per-turn context …');
+  });
+
+  test(`should colour the id and the project unless NO_COLOR is set`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ENTRIES);
+
+    // Act
+    const shown = terminal(store, ['list']).split('\n');
+
+    // Assert
+    expect(shown[0]).toBe(
+      '\x1b[2m2026-08-03T091500Z\x1b[0m  \x1b[36mnebula      \x1b[0m  Moved per-turn context into a data part, which took cache reuse from 62% to 95%.',
+    );
   });
 });

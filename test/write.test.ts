@@ -142,6 +142,18 @@ describe('write', () => {
     expect(entry.cwd).toBe(tilde(store, store.repo));
   });
 
+  test(`should refuse a project that contains a tab`, () => {
+    // Arrange
+    const store = fixture();
+
+    // Act
+    const result = fails(store, ['write', '--summary', 'Fine.', '--project', 'a\tb'], { at: store.repo });
+
+    // Assert
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('cannot contain a tab');
+  });
+
   test(`should fail for a dot when --cwd is outside a repository`, () => {
     // Arrange
     const store = fixture();
