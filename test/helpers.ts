@@ -155,18 +155,17 @@ export function seed(store: Fixture, entries: Array<Entry>): void {
 /**
  * The columns of one listed entry.
  *
- * The project column is padded to the widest name being printed, so the split is
- * on the run of spaces between the columns rather than on a fixed offset. An
- * entry with no project leaves that group empty, which is the point of testing
- * it at all.
+ * Down a pipe, which is how the tests run it, the columns are separated by one
+ * tab each. An entry with no project leaves that field empty, which is the point
+ * of testing it at all.
  */
-export function rows(out: string): Array<{ when: string; project: string; summary: string }> {
-  const result: Array<{ when: string; project: string; summary: string }> = [];
+export function rows(out: string): Array<{ id: string; project: string; summary: string }> {
+  const result: Array<{ id: string; project: string; summary: string }> = [];
 
   for (const line of out.split('\n')) {
-    if (!line) continue;
-    const match = /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2})  (.*?)\s{2,}(.*)$/.exec(line);
-    if (match) result.push({ when: match[1], project: match[2], summary: match[3] });
+    const fields = line.split('\t');
+    if (fields.length !== 3) continue;
+    result.push({ id: fields[0], project: fields[1], summary: fields[2] });
   }
 
   return result;

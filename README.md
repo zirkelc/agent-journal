@@ -171,7 +171,7 @@ It provides a thin interface over `ls` and `grep` for common commands:
 
 `list` is the default command if not given, so `aj` and `aj list` are the same. 
 
-Entries are listed oldest first, so the newest is nearest the prompt.
+Entries are listed oldest first, so the newest is nearest the prompt. Each line starts with the entry ID, which `aj read` takes as it is. In a terminal the columns are aligned. Down a pipe they are separated by one tab each (ID, project, summary), so `aj list | cut -f1` gives the IDs, and an entry with no project has an empty field.
 
 `list` and `search` take the same filters:
 

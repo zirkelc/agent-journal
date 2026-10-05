@@ -88,7 +88,9 @@ filters: --date D      a prefix of the timestamp: 2026, 2026-01, 2026-01-11
 
 settings: journal_dir    where journal entries are written
 
-Entries are listed oldest first, so the newest is nearest the prompt.
+Entries are listed oldest first, so the newest is nearest the prompt. Each
+line starts with the id that read takes. Down a pipe the columns are id,
+project and summary, separated by one tab each.
 EOF
 }
 
@@ -450,6 +452,7 @@ render() {
     -v since="$since" \
     -v until="$until" \
     -v limit="$limit" \
+    -v tty="$tty" \
     -v color="$color" \
     -v cols="$cols" '
     function emit(   day) {
@@ -462,7 +465,10 @@ render() {
       if (q != "" && index(tolower(summary " " body), q) == 0) return
 
       n++
-      when[n] = day " " substr(stem, 12, 2) ":" substr(stem, 14, 2)
+      # The file name itself rather than a friendlier date and time, because it is
+      # what `read` takes: a line can be copied straight into it, and two entries
+      # from the same minute still come out different.
+      id[n] = stem
       who[n] = proj
       what[n] = summary
     }
@@ -502,6 +508,15 @@ render() {
       first = 1
       if (limit > 0 && n > limit) first = n - limit + 1
 
+      if (!tty) {
+        for (i = first; i <= n; i++) {
+          text = what[i]
+          gsub(/\t/, " ", text)
+          printf "%s\t%s\t%s\n", id[i], who[i], text
+        }
+        exit
+      }
+
       # Measured over the rows that will be printed, not over everything that
       # matched: one long project name in January should not indent all of today.
       for (i = first; i <= n; i++)
@@ -511,16 +526,14 @@ render() {
         pad = who[i]
         while (length(pad) < width) pad = pad " "
         text = what[i]
-        # Only ever narrowed for a terminal. Down a pipe the summary stays whole,
-        # so `list | grep` sees what `grep` on the entries would have seen.
         if (cols > 0) {
-          room = cols - (length(when[i]) + 2 + width + 2)
+          room = cols - (length(id[i]) + 2 + width + 2)
           if (room > 4 && length(text) > room) text = substr(text, 1, room - 3) "…"
         }
         if (color)
-          printf "\033[2m%s\033[0m  \033[36m%s\033[0m  %s\n", when[i], pad, text
+          printf "\033[2m%s\033[0m  \033[36m%s\033[0m  %s\n", id[i], pad, text
         else
-          printf "%s  %s  %s\n", when[i], pad, text
+          printf "%s  %s  %s\n", id[i], pad, text
       }
     }
   ' "$@"
@@ -557,10 +570,15 @@ if [ "$cmd" = list ] || [ "$cmd" = search ] || [ "$cmd" = read ]; then
   cwd_filter=
   [ "$cwd_set" = 0 ] || cwd_filter=$(abbrev_home "$cwd")
 
+  # A terminal gets aligned columns, narrowed to its width. Anything else gets
+  # one tab between columns, so a script can split them even when the project is
+  # empty. `NO_COLOR` turns off colour only, never the layout.
+  tty=0
   color=0
   cols=0
-  if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
-    color=1
+  if [ -t 1 ]; then
+    tty=1
+    [ -n "${NO_COLOR:-}" ] || color=1
     cols=$(tput cols 2>/dev/null) || cols=0
     case $cols in
       '' | *[!0-9]*) cols=0 ;;
@@ -657,7 +675,14 @@ if [ "$cmd" = read ]; then
     printf '%s matches %d entries:\n' "$id" "$matches" >&2
     query=
     limit=0
-    render "$journal_dir"/"$id"*.md
+    # The matches go to stderr with the message, so stdout stays empty for a
+    # caller that expected an entry. Colour and width were decided for stdout.
+    if [ ! -t 2 ]; then
+      tty=0
+      color=0
+      cols=0
+    fi
+    render "$journal_dir"/"$id"*.md >&2
     exit 1
   fi
 

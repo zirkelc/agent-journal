@@ -48,8 +48,8 @@ describe('list', () => {
 
     // Assert
     expect(listed.length).toBe(4);
-    expect(listed[0].when).toBe('2026-08-03 09:15');
-    expect(listed[3].when).toBe('2026-08-09 17:30');
+    expect(listed[0].id).toBe('2026-08-03T091500Z');
+    expect(listed[3].id).toBe('2026-08-09T173000Z');
   });
 
   test(`should list when given no command at all`, () => {
@@ -74,8 +74,8 @@ describe('list', () => {
 
     // Assert
     expect(listed.length).toBe(2);
-    expect(listed[0].when).toBe('2026-08-07 08:10');
-    expect(listed[1].when).toBe('2026-08-09 17:30');
+    expect(listed[0].id).toBe('2026-08-07T081000Z');
+    expect(listed[1].id).toBe('2026-08-09T173000Z');
   });
 
   test(`should leave the project column empty for an entry written outside a repository`, () => {
@@ -84,11 +84,37 @@ describe('list', () => {
     seed(store, ENTRIES);
 
     // Act
+    const listed = run(store, ['list']).split('\n');
+
+    // Assert
+    expect(listed[2]).toBe('2026-08-07T081000Z\t\tSummarised an episode into the required JSON shape.');
+  });
+
+  test(`should separate the columns with single tabs down a pipe`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ENTRIES);
+
+    // Act
+    const listed = run(store, ['list']).split('\n');
+
+    // Assert
+    expect(listed[0]).toBe(
+      '2026-08-03T091500Z\tnebula\tMoved per-turn context into a data part, which took cache reuse from 62% to 95%.',
+    );
+  });
+
+  test(`should turn a tab inside a summary into a space so the columns hold`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, [{ stem: '2026-08-03T091500Z', project: 'nebula', summary: 'Before\tafter.' }]);
+
+    // Act
     const listed = rows(run(store, ['list']));
 
     // Assert
-    expect(listed[2].project).toBe('');
-    expect(listed[2].summary).toBe('Summarised an episode into the required JSON shape.');
+    expect(listed.length).toBe(1);
+    expect(listed[0].summary).toBe('Before after.');
   });
 
   test(`should filter by project`, () => {
@@ -129,8 +155,8 @@ describe('list', () => {
 
     // Assert
     expect(listed.length).toBe(2);
-    expect(listed[0].when).toBe('2026-08-05 14:00');
-    expect(listed[1].when).toBe('2026-08-07 08:10');
+    expect(listed[0].id).toBe('2026-08-05T140000Z');
+    expect(listed[1].id).toBe('2026-08-07T081000Z');
   });
 
   test(`should match a directory and everything under it`, () => {
@@ -153,8 +179,8 @@ describe('list', () => {
       new Date(Date.now() - daysAgo * 86_400_000).toISOString().replace(/[:.]/g, '').slice(0, 17);
 
     seed(store, [
-      { stem: `${stamp(30).slice(0, 15)}Z`, summary: 'A month ago.' },
-      { stem: `${stamp(0).slice(0, 15)}Z`, summary: 'Today.' },
+      { stem: `${stamp(30)}Z`, summary: 'A month ago.' },
+      { stem: `${stamp(0)}Z`, summary: 'Today.' },
     ]);
 
     // Act
@@ -325,6 +351,22 @@ describe('read', () => {
     // Assert
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('matches 4 entries');
+  });
+
+  test(`should show ids that tell apart two matches from the same minute`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, [
+      { stem: '2026-08-03T091512Z', project: 'nebula', summary: 'First.', cwd: '~/Developer/nebula', body: '' },
+      { stem: '2026-08-03T091547Z', project: 'nebula', summary: 'Second.', cwd: '~/Developer/nebula', body: '' },
+    ]);
+
+    // Act
+    const result = fails(store, ['read', '2026-08-03T0915']);
+
+    // Assert
+    const listed = rows(result.stderr);
+    expect(listed.map((row) => row.id)).toEqual(['2026-08-03T091512Z', '2026-08-03T091547Z']);
   });
 
   test(`should fail when nothing matches`, () => {
