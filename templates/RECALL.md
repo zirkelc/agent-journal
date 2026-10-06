@@ -1,7 +1,7 @@
 <!--
 The text given to a model that reads the journal to answer a question about past work, printed by `agent-journal context --recall`. INSTRUCTIONS.md is what a session is told about writing entries; this is what a reader is told, and it says nothing about writing, since a reader must never write.
 
-This comment is stripped before the text is printed. The placeholders are those of INSTRUCTIONS.md, plus `__TIME__`, the clock and the calendar as key=value lines, and `__WEEK_START__`, the user's first day of the week by name. A line whose placeholder resolves to nothing is dropped whole.
+This comment is stripped before the text is printed. The placeholders are those of INSTRUCTIONS.md, plus `__TIME__`, the clock and the calendar as key=value lines. A line whose placeholder resolves to nothing is dropped whole.
 
 The reader is told what an entry is and what the dates mean, not how to reach the files: whoever gives it this text also gives it the means to read, and says how to use them.
 
@@ -52,9 +52,9 @@ Do not work out dates yourself. The clock and the calendar, read when this text 
 __TIME__
 ```
 
-Weeks start on __WEEK_START__. A range is two instants, both included. `local_` values are in the user's time zone, `utc_` values are the same instants in UTC.
+A range is two instants, both included. `local_` values are in the user's time zone, `utc_` values are the same instants in UTC.
 
-A day the user names ("yesterday", "last week", "on Monday") is a local day. Filters by date take local days, so pass the dates above as they are: for a range, its first and its last date.
+A day the user names ("yesterday", "last week", "on Monday") is a local day. To filter by a range, pass its two values as they are, the first as the start and the second as the end.
 
 Ids are UTC. A local day can start or end on the neighbouring UTC date, so the date in an id can differ from the local day the entry was written on.
 

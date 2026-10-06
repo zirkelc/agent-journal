@@ -1666,19 +1666,9 @@ instructions=$root/templates/INSTRUCTIONS.md
 # A reader given a wrong date answers wrongly, so a clock that cannot be read
 # fails the command rather than printing the text without it.
 time=
-week_start_name=
 if [ "$recall" = 1 ]; then
   resolve_time || exit 1
   time=$time_text
-  case $week_start in
-    1) week_start_name=Monday ;;
-    2) week_start_name=Tuesday ;;
-    3) week_start_name=Wednesday ;;
-    4) week_start_name=Thursday ;;
-    5) week_start_name=Friday ;;
-    6) week_start_name=Saturday ;;
-    7) week_start_name=Sunday ;;
-  esac
 fi
 
 resolve_project "$cwd"
@@ -1692,10 +1682,9 @@ AGENT_JOURNAL_TIME=$time awk \
   -v project="$project" \
   -v cwd="$(abbrev_home "$cwd")" \
   -v session_id="$session_id" \
-  -v agent="$agent" \
-  -v week_start="$week_start_name" '
+  -v agent="$agent" '
   BEGIN {
-    keys = "journal_dir project cwd session_id agent time week_start"
+    keys = "journal_dir project cwd session_id agent time"
     n = split(keys, key, " ")
     value["journal_dir"] = journal_dir
     value["project"] = project
@@ -1703,7 +1692,6 @@ AGENT_JOURNAL_TIME=$time awk \
     value["session_id"] = session_id
     value["agent"] = agent
     value["time"] = ENVIRON["AGENT_JOURNAL_TIME"]
-    value["week_start"] = week_start
 
     # In a gsub replacement `&` means the matched text and `\` escapes, so a
     # value containing either would substitute itself back in mangled.

@@ -1,4 +1,4 @@
-import { rmSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 import { fields, fixture, output, recall, run, tilde, type Fixture } from './helpers.ts';
@@ -66,6 +66,30 @@ describe('context --recall', () => {
     expect(result).toContain(`local_last_week=2026-09-28T00:00:00+02:00 2026-10-04T23:59:59+02:00\n`);
   });
 
+  /** The reader is told to pass a range as it is, so the filters must take it. */
+  test(`should give ranges the filters take as they are`, () => {
+    // Arrange
+    const store = fixture();
+    const env = { AGENT_JOURNAL_NOW: NOW, TZ: 'Europe/Berlin', LC_ALL: 'zz_DE.UTF-8' };
+    mkdirSync(store.journalDir, { recursive: true });
+    writeFileSync(
+      join(store.journalDir, '2026-09-30T100000Z.md'),
+      '---\ndate: 2026-09-30T10:00:00Z\nsummary: "Last week"\n---\n',
+    );
+    const text = recall(store, { env });
+    const ranges = [...text.matchAll(/^(?:local|utc)_(?:this|last)_(?:week|month)=(\S+) (\S+)$/gm)];
+
+    // Act
+    const results = ranges.map(([, since, until]) =>
+      output(store, ['list', '--since', since!, '--until', until!], { env }),
+    );
+
+    // Assert
+    expect(ranges.length).toBe(8);
+    expect(results.map((result) => result.status)).toEqual([0, 0, 0, 0, 0, 0, 0, 0]);
+    expect(results.filter((result) => result.stdout.includes('2026-09-30T100000Z')).length).toBe(4);
+  });
+
   test(`should name the first day of the week the region uses`, () => {
     // Arrange
     const store = fixture();
@@ -75,8 +99,8 @@ describe('context --recall', () => {
     const sunday = recallAt(store, 'zz_US.UTF-8');
 
     // Assert
-    expect(monday).toContain(`Weeks start on Monday.`);
-    expect(sunday).toContain(`Weeks start on Sunday.`);
+    expect(monday).toContain(`local_week_start=Monday\n`);
+    expect(sunday).toContain(`local_week_start=Sunday\n`);
   });
 
   test(`should name the current project and directory`, () => {
