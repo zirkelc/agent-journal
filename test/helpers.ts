@@ -55,7 +55,11 @@ export function fixture(instructions?: string): Fixture {
   copyFileSync(join(ROOT, 'adapters', 'common.sh'), join(root, 'adapters', 'common.sh'));
   mkdirSync(join(root, 'lib'), { recursive: true });
   copyFileSync(join(ROOT, 'lib', 'install.sh'), join(root, 'lib', 'install.sh'));
-  writeFileSync(join(root, 'INSTRUCTIONS.md'), instructions ?? readFileSync(join(ROOT, 'INSTRUCTIONS.md'), 'utf8'));
+  mkdirSync(join(root, 'templates'), { recursive: true });
+  writeFileSync(
+    join(root, 'templates', 'INSTRUCTIONS.md'),
+    instructions ?? readFileSync(join(ROOT, 'templates', 'INSTRUCTIONS.md'), 'utf8'),
+  );
 
   mkdirSync(repo, { recursive: true });
   execFileSync('git', ['init', '-q', repo]);

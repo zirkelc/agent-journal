@@ -2,7 +2,7 @@
 
 An adapter is what teaches one agent to journal. It is the only part of this
 project that knows any specific agent exists: `bin/agent-journal` has no product
-names in it, and `INSTRUCTIONS.md` is written to be read by any model.
+names in it, and `templates/INSTRUCTIONS.md` is written to be read by any model.
 
 The job is short. Run the core, take the text it prints, encode that text the way
 your agent wants it, and hand it over at the start of every session.
@@ -29,12 +29,12 @@ value above. Empty output means there is nothing to inject, which is a normal
 result rather than an error.
 
 Do not parse, reformat, extend or truncate that text. Encode it and pass it on.
-If the wording needs to change, change `INSTRUCTIONS.md`, so every agent gets the
+If the wording needs to change, change `templates/INSTRUCTIONS.md`, so every agent gets the
 change at once.
 
 ## Rules
 
-**Exit 0 on every path**, including a missing core, a missing `INSTRUCTIONS.md`,
+**Exit 0 on every path**, including a missing core, a missing template,
 a payload you cannot parse, and a core that returned nothing. A session should
 never fail because the journal was misconfigured.
 

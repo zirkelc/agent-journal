@@ -35,7 +35,7 @@ esac
 
 # An installed copy is reached through a symlink, since `agent-journal` and `aj`
 # both point here from a bin directory. Following them is what makes the root the
-# checkout rather than that bin directory, which is where INSTRUCTIONS.md would
+# checkout rather than that bin directory, which is where the templates would
 # otherwise be looked for and never found. Bounded, so a symlink that points at
 # itself cannot hang a session.
 links=0
@@ -1537,7 +1537,7 @@ fi
 
 # ---------------------------------------------------------------- context
 
-instructions=$root/INSTRUCTIONS.md
+instructions=$root/templates/INSTRUCTIONS.md
 
 # A missing file means nothing to say, which is not worth failing a session over.
 # Print nothing and let the caller decide that means nothing to inject.

@@ -136,7 +136,7 @@ describe('failure', () => {
   test(`should say nothing and succeed when the instructions are missing`, () => {
     // Arrange
     const store = fixture();
-    rmSync(join(store.root, 'INSTRUCTIONS.md'));
+    rmSync(join(store.root, 'templates', 'INSTRUCTIONS.md'));
 
     // Act
     const result = silent(store, JSON.stringify({ cwd: store.repo }));

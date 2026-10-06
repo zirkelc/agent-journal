@@ -108,7 +108,7 @@ if [ -n "$source_dir" ]; then
   mkdir -p "$data_dir"
   # Named rather than copied wholesale, so a developer's node_modules and .git
   # do not become part of an install.
-  for item in bin lib INSTRUCTIONS.md adapters .claude-plugin .codex-plugin .agents README.md LICENSE; do
+  for item in bin lib templates adapters .claude-plugin .codex-plugin .agents README.md LICENSE; do
     [ -e "$source_dir/$item" ] || continue
     cp -R "$source_dir/$item" "$data_dir/"
   done
