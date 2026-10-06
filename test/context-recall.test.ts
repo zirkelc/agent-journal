@@ -76,8 +76,15 @@ describe('context --recall', () => {
       join(store.journalDir, '2026-09-30T100000Z.md'),
       '---\ndate: 2026-09-30T10:00:00Z\nsummary: "Last week"\n---\n',
     );
+    /** 00:30 on Monday 2026-10-05 in Berlin, so yesterday, though its id carries the date before. */
+    writeFileSync(
+      join(store.journalDir, '2026-10-04T223000Z.md'),
+      '---\ndate: 2026-10-04T22:30:00Z\nsummary: "Yesterday"\n---\n',
+    );
     const text = recall(store, { env });
-    const ranges = [...text.matchAll(/^(?:local|utc)_(?:this|last)_(?:week|month)=(\S+) (\S+)$/gm)];
+    const ranges = [
+      ...text.matchAll(/^(?:local|utc)_(?:today|yesterday|this_week|last_week|this_month|last_month)=(\S+) (\S+)$/gm),
+    ];
 
     // Act
     const results = ranges.map(([, since, until]) =>
@@ -85,9 +92,10 @@ describe('context --recall', () => {
     );
 
     // Assert
-    expect(ranges.length).toBe(8);
-    expect(results.map((result) => result.status)).toEqual([0, 0, 0, 0, 0, 0, 0, 0]);
+    expect(ranges.length).toBe(12);
+    expect(results.every((result) => result.status === 0)).toBe(true);
     expect(results.filter((result) => result.stdout.includes('2026-09-30T100000Z')).length).toBe(4);
+    expect(results.filter((result) => result.stdout.includes('2026-10-04T223000Z')).length).toBe(6);
   });
 
   test(`should name the first day of the week the region uses`, () => {
