@@ -503,8 +503,8 @@ locale_region() {
   esac
 }
 
-# The user's first day of the week, in `week_start` (1 is Monday, 7 is Sunday),
-# and where it came from, in `week_start_from`. The first of these that answers:
+# The user's first day of the week, in `week_start` (1 is Monday, 7 is Sunday).
+# The first of these that answers:
 #
 # 1. An explicit setting: macOS's first weekday, or, on Linux, what the
 #    installed locale says. `C` and `POSIX` say Sunday by default rather than by
@@ -516,7 +516,6 @@ locale_region() {
 # 3. Monday, the ISO 8601 week.
 resolve_week_start() {
   week_start=
-  week_start_from=
   t_first=
   t_apple=
   t_plist=$HOME/Library/Preferences/.GlobalPreferences.plist
@@ -540,7 +539,6 @@ resolve_week_start() {
     [1-7])
       # Counted from Sunday as 1.
       week_start=$(((t_first + 5) % 7 + 1))
-      week_start_from=AppleFirstWeekday
       return 0
       ;;
   esac
@@ -565,7 +563,6 @@ resolve_week_start() {
             t_n=${t_n%%"$newline"*}
             civil_to_days "${t_day%????}" $((1${t_day#????} / 100 - 100)) $((1${t_day#??????} - 100))
             week_start=$((((days + 3) % 7 + t_n - 1) % 7 + 1))
-            week_start_from="locale $t_name"
             return 0
             ;;
         esac
@@ -575,17 +572,14 @@ resolve_week_start() {
 
   if [ -n "$t_apple" ] && locale_region "$t_apple" && region_week_start "$t_cc"; then
     week_start=$t_ws
-    week_start_from="region $t_cc from AppleLocale"
     return 0
   fi
   if locale_region "$t_name" && region_week_start "$t_cc"; then
     week_start=$t_ws
-    week_start_from="region $t_cc from $t_var"
     return 0
   fi
 
   week_start=1
-  week_start_from=fallback
 }
 
 # The instant a local day starts, in `midnight`, for a day number. It needs
@@ -664,6 +658,20 @@ resolve_calendar_days() {
   last_month_next=$month_next
 }
 
+# The English name of a weekday number (1 is Monday, 7 is Sunday), in
+# `weekday_name`.
+weekday_name() {
+  case $1 in
+    1) weekday_name=Monday ;;
+    2) weekday_name=Tuesday ;;
+    3) weekday_name=Wednesday ;;
+    4) weekday_name=Thursday ;;
+    5) weekday_name=Friday ;;
+    6) weekday_name=Saturday ;;
+    7) weekday_name=Sunday ;;
+  esac
+}
+
 # Every value about the current time, read from the clock once: one variable
 # per key, named as the key is, and all of them as `key=value` lines in
 # `time_text`, in a fixed order. A command prints `time_text` as it is, or uses
@@ -684,15 +692,10 @@ resolve_time() {
   local_now=$instant
   local_date=$instant_date
   local_time=$instant_time
-  case $weekday in
-    1) local_weekday=Monday ;;
-    2) local_weekday=Tuesday ;;
-    3) local_weekday=Wednesday ;;
-    4) local_weekday=Thursday ;;
-    5) local_weekday=Friday ;;
-    6) local_weekday=Saturday ;;
-    7) local_weekday=Sunday ;;
-  esac
+  weekday_name "$weekday"
+  local_weekday=$weekday_name
+  weekday_name "$week_start"
+  local_week_start=$weekday_name
   local_timezone=$timezone
   local_utc_offset=$offset_text
   format_instant "$now_epoch"
@@ -704,12 +707,12 @@ resolve_time() {
 local_date=$local_date
 local_time=$local_time
 local_weekday=$local_weekday
+local_week_start=$local_week_start
 local_timezone=$local_timezone
 local_utc_offset=$local_utc_offset
 utc_now=$utc_now
 utc_date=$utc_date
-utc_time=$utc_time
-week_start_from=$week_start_from"
+utc_time=$utc_time"
 
   for t_range in today yesterday this_week last_week this_month last_month; do
     eval "t_rf=\$${t_range}_first t_rn=\$${t_range}_next"

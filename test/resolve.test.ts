@@ -50,12 +50,12 @@ describe('resolve', () => {
         'local_date=2026-10-05',
         'local_time=18:10:02',
         'local_weekday=Monday',
+        'local_week_start=Monday',
         'local_timezone=Europe/Berlin',
         'local_utc_offset=+02:00',
         'utc_now=2026-10-05T16:10:02Z',
         'utc_date=2026-10-05',
         'utc_time=16:10:02',
-        'week_start_from=region DE from LC_ALL',
         'local_today=2026-10-05',
         'utc_today=2026-10-04T22:00:00Z 2026-10-05T21:59:59Z',
         'local_yesterday=2026-10-04',
@@ -222,7 +222,7 @@ describe('the first day of the week', () => {
     const values = resolve(store, store.repo, { now: '2026-10-05T16:10:02Z', locale: 'zz_US.UTF-8' });
 
     // Assert
-    expect(values.week_start_from).toBe('region US from LC_ALL');
+    expect(values.local_week_start).toBe('Sunday');
     expect(values.local_this_week).toBe('2026-10-04T00:00:00+02:00 2026-10-10T23:59:59+02:00');
     expect(values.local_last_week).toBe('2026-09-27T00:00:00+02:00 2026-10-03T23:59:59+02:00');
   });
@@ -235,6 +235,7 @@ describe('the first day of the week', () => {
     const values = resolve(store, store.repo, { now: '2026-10-05T16:10:02Z', locale: 'zz_EG.UTF-8' });
 
     // Assert
+    expect(values.local_week_start).toBe('Saturday');
     expect(values.local_this_week).toBe('2026-10-03T00:00:00+02:00 2026-10-09T23:59:59+02:00');
   });
 
@@ -246,7 +247,7 @@ describe('the first day of the week', () => {
     const values = resolve(store, store.repo, { now: '2026-10-05T16:10:02Z', locale: 'zz_Latn_US.UTF-8' });
 
     // Assert
-    expect(values.week_start_from).toBe('region US from LC_ALL');
+    expect(values.local_week_start).toBe('Sunday');
   });
 
   test(`should fall back to Monday when no region can be read`, () => {
@@ -257,7 +258,7 @@ describe('the first day of the week', () => {
     const values = resolve(store, store.repo, { now: '2026-10-05T16:10:02Z', locale: 'C.UTF-8' });
 
     // Assert
-    expect(values.week_start_from).toBe('fallback');
+    expect(values.local_week_start).toBe('Monday');
     expect(values.local_this_week).toBe('2026-10-05T00:00:00+02:00 2026-10-11T23:59:59+02:00');
   });
 
@@ -279,7 +280,7 @@ describe('the first day of the week', () => {
       const values = resolve(store, store.repo, { now: '2026-10-05T16:10:02Z', locale: 'zz_US.UTF-8' });
 
       // Assert
-      expect(values.week_start_from).toBe('region DE from AppleLocale');
+      expect(values.local_week_start).toBe('Monday');
       expect(values.local_this_week).toBe('2026-10-05T00:00:00+02:00 2026-10-11T23:59:59+02:00');
     });
 
@@ -292,7 +293,7 @@ describe('the first day of the week', () => {
       const values = resolve(store, store.repo, { now: '2026-10-05T16:10:02Z' });
 
       // Assert
-      expect(values.week_start_from).toBe('region US from AppleLocale');
+      expect(values.local_week_start).toBe('Sunday');
     });
 
     test(`should take an explicit first weekday over every region`, () => {
@@ -308,7 +309,7 @@ describe('the first day of the week', () => {
       const values = resolve(store, store.repo, { now: '2026-10-05T16:10:02Z' });
 
       // Assert
-      expect(values.week_start_from).toBe('AppleFirstWeekday');
+      expect(values.local_week_start).toBe('Sunday');
       expect(values.local_this_week).toBe('2026-10-04T00:00:00+02:00 2026-10-10T23:59:59+02:00');
     });
   });
