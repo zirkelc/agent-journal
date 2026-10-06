@@ -6,10 +6,15 @@
   "description": "A journal that survives the session that wrote it",
   "packageManager": "pnpm@10.34.5",
   "scripts": {
-    "test": "vitest run"
+    "test": "vitest run",
+    "lint": "oxlint",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check"
   },
   "devDependencies": {
     "@types/node": "^22",
+    "oxfmt": "^0.71.0",
+    "oxlint": "^1.86.0",
     "typescript": "^5",
     "vitest": "^3"
   }
