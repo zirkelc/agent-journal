@@ -997,6 +997,114 @@ describe('local days', () => {
     expect(before.length).toBe(6);
   });
 
+  test(`should take both forms of a range as instants`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, BERLIN);
+
+    // Act
+    const local = summaries(store, ['--since', '2026-08-05T00:00:00+02:00', '--until', '2026-08-05T23:59:59+02:00']);
+    const utc = summaries(store, ['--since', '2026-08-04T22:00:00Z', '--until', '2026-08-05T21:59:59Z']);
+
+    // Assert
+    expect(local).toEqual(['The 5th, first second.', 'The 5th, last second.']);
+    expect(utc).toEqual(local);
+  });
+
+  test(`should take an offset that is not the zone's own`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, BERLIN);
+
+    // Act
+    const listed = summaries(store, ['--since', '2026-08-04T17:00:00-05:00', '--until', '2026-08-05T16:59:58-0500']);
+
+    // Assert
+    expect(listed).toEqual(['The 5th, first second.']);
+  });
+
+  test(`should include an entry exactly at either instant and nothing past it`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, BERLIN);
+
+    // Act
+    const atUntil = summaries(store, ['--since', '2026-08-04T21:59:59Z', '--until', '2026-08-04T22:00:00Z']);
+    const beforeUntil = summaries(store, ['--since', '2026-08-04T21:59:59Z', '--until', '2026-08-04T21:59:59Z']);
+    const atSince = summaries(store, ['--since', '2026-08-05T22:00:00Z']);
+
+    // Assert
+    expect(atUntil).toEqual(['The 4th, last second.', 'The 5th, first second.']);
+    expect(beforeUntil).toEqual(['The 4th, last second.']);
+    expect(atSince).toEqual(['The 6th, first second.']);
+  });
+
+  test(`should read an instant without an offset as local time, with or without seconds`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, BERLIN);
+
+    // Act
+    const since = summaries(store, ['--since', '2026-08-05T00:00']);
+    const until = summaries(store, ['--until', '2026-08-04T23:59:59']);
+
+    // Assert
+    expect(since).toEqual(['The 5th, first second.', 'The 5th, last second.', 'The 6th, first second.']);
+    expect(until).toEqual(['July, last second.', 'August, first second.', 'The 4th, last second.']);
+  });
+
+  test(`should take a range across a change of the clocks`, () => {
+    // Arrange
+    const store = fixture();
+    /** Berlin changes from +02:00 to +01:00 on 25 October 2026, so that day ends at 23:00 UTC. */
+    seed(store, [
+      { stem: '2026-10-23T215959Z', summary: 'Before.' },
+      { stem: '2026-10-23T220000Z', summary: 'Start.' },
+      { stem: '2026-10-25T225959Z', summary: 'End.' },
+      { stem: '2026-10-25T230000Z', summary: 'After.' },
+    ]);
+
+    // Act
+    const listed = summaries(store, ['--since', '2026-10-24T00:00:00+02:00', '--until', '2026-10-25T23:59:59+01:00']);
+    const local = summaries(store, ['--since', '2026-10-24T00:00:00', '--until', '2026-10-25T23:59:59']);
+
+    // Assert
+    expect(listed).toEqual(['Start.', 'End.']);
+    expect(local).toEqual(listed);
+  });
+
+  test(`should refuse a local time that the clocks skip`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, BERLIN);
+
+    // Act
+    /** Berlin moves from 02:00 to 03:00 on 29 March 2026. */
+    const result = fails(store, ['list', '--since', '2026-03-29T02:30:00'], { env: { TZ: 'Europe/Berlin' } });
+
+    // Assert
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('offset');
+  });
+
+  test(`should refuse a time that is not a time`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, BERLIN);
+
+    // Act
+    const hour = fails(store, ['list', '--since', '2026-08-05T25:00']);
+    const minute = fails(store, ['list', '--until', '2026-08-05T12:60']);
+    const fraction = fails(store, ['list', '--until', '2026-08-05T12:00:00.5Z']);
+    const offset = fails(store, ['list', '--until', '2026-08-05T12:00:00+2']);
+
+    // Assert
+    expect(hour.status).toBe(2);
+    expect(minute.status).toBe(2);
+    expect(fraction.status).toBe(2);
+    expect(offset.status).toBe(2);
+  });
+
   /**
    * Havana moves its clocks from 00:00 to 01:00 on 8 March 2026, so that day
    * has no midnight and starts at 01:00. GNU date refuses the missing time,

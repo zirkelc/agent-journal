@@ -80,8 +80,9 @@ flags say otherwise. --project . names the repository of --cwd, and fails
 outside one.
 
 filters: --date D      one local year, month or day: 2026, 2026-01, 2026-01-11
-         --since D     from this local day on, as YYYY-MM-DD, today, or 7d
-         --until D     up to and including this local day, same forms
+         --since D     from this local day or time on: YYYY-MM-DD, today, 7d,
+                       or a time such as 2026-01-11T14:30:00+01:00
+         --until D     up to and including this local day or time, same forms
          --project P   entries filed under one project, or . for the current project
          --cwd DIR     entries from a directory and everything under it
          --limit N     how many of the most recent to print, default 20
@@ -94,7 +95,8 @@ line starts with the id that read takes. Down a pipe the columns are id,
 project and summary, separated by one tab each.
 
 The filters take days in your time zone, and the ids are UTC, so an entry
-written just after midnight can carry the date before.
+written just after midnight can carry the date before. A time takes an
+offset (+01:00) or Z; without one it is your local time.
 EOF
 }
 
@@ -423,11 +425,21 @@ clock_now() {
     t_out=$(date '+%s %z') || return 1
   fi
   now_epoch=${t_out%% *}
-  t_z=${t_out#* }
-  t_hm=${t_z#[+-]}
+  parse_offset "${t_out#* }"
+  now_offset=$offset_seconds
+}
+
+# A UTC offset as `+0200` or `+02:00` in seconds, in `offset_seconds`, or a
+# failure for anything else.
+parse_offset() {
+  case $1 in
+    [+-][0-9][0-9]:[0-9][0-9]) t_hm=${1#?}; t_hm=${t_hm%:*}${t_hm#*:} ;;
+    [+-][0-9][0-9][0-9][0-9]) t_hm=${1#?} ;;
+    *) return 1 ;;
+  esac
   # Through `1HH - 100`, because a leading zero would read as octal.
-  now_offset=$(((1${t_hm%??} - 100) * 3600 + (1${t_hm#??} - 100) * 60))
-  case $t_z in -*) now_offset=$((-now_offset)) ;; esac
+  offset_seconds=$(((1${t_hm%??} - 100) * 3600 + (1${t_hm#??} - 100) * 60))
+  case $1 in -*) offset_seconds=$((-offset_seconds)) ;; esac
 }
 
 # The zone's name, such as `Europe/Berlin`, in `timezone`. From `TZ` when it is
@@ -906,6 +918,65 @@ resolve_day() {
   esac
 }
 
+# An instant as typed, as seconds since the epoch in `epoch`: a date and a time,
+# `2026-01-11T14:30:00` or `2026-01-11T14:30`, then `Z`, an offset such as
+# `+01:00` or `+0100`, or nothing for local time. These are the forms the
+# ranges of `resolve_time` are written in, so a prompt can pass them on as they
+# are. A local time the clocks skip, such as 02:30 on the morning they move to
+# summer time, names no instant: it fails, and `instant_skipped` says why.
+resolve_instant() {
+  instant_skipped=
+  case $1 in
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*) ;;
+    *) return 1 ;;
+  esac
+  parse_date "${1%%T*}" || return 1
+  t_iday=$days
+  t_rest=${1#*T}
+  case $t_rest in
+    *Z) t_clock=${t_rest%Z} t_zone=Z ;;
+    *[+-]*) t_clock=${t_rest%%[+-]*} t_zone=${t_rest#"${t_rest%%[+-]*}"} ;;
+    *) t_clock=$t_rest t_zone= ;;
+  esac
+  case $t_clock in
+    [0-9][0-9]:[0-9][0-9]) t_clock=$t_clock:00 ;;
+    [0-9][0-9]:[0-9][0-9]:[0-9][0-9]) ;;
+    *) return 1 ;;
+  esac
+  to_decimal "${t_clock%%:*}"
+  t_ih=$decimal
+  t_ims=${t_clock#*:}
+  to_decimal "${t_ims%:*}"
+  t_im=$decimal
+  to_decimal "${t_ims#*:}"
+  t_is=$decimal
+  [ "$t_ih" -le 23 ] && [ "$t_im" -le 59 ] && [ "$t_is" -le 59 ] || return 1
+  t_iwall=$((t_iday * 86400 + t_ih * 3600 + t_im * 60 + t_is))
+
+  case $t_zone in
+    Z) epoch=$t_iwall ;;
+    '')
+      # The zone's rules for that moment, from `date`, with the offset it used,
+      # so a time it moved past a gap shows up as a different wall clock.
+      t_out=$(date -j -f '%Y-%m-%d %H:%M:%S' "${1%%T*} $t_clock" '+%s %z' 2>/dev/null) ||
+        t_out=$(date -d "${1%%T*} $t_clock" '+%s %z' 2>/dev/null) || {
+        instant_skipped=1
+        return 1
+      }
+      epoch=${t_out%% *}
+      parse_offset "${t_out#* }" || return 1
+      [ $((epoch + offset_seconds)) -eq "$t_iwall" ] || {
+        instant_skipped=1
+        return 1
+      }
+      ;;
+    *)
+      parse_offset "$t_zone" || return 1
+      epoch=$((t_iwall - offset_seconds))
+      ;;
+  esac
+}
+
 # An instant as an entry id, `2026-01-11T143000Z`, in `id`, so it compares with
 # the names of the entries as a string.
 format_id() {
@@ -1098,6 +1169,17 @@ render() {
   ' "$@"
 }
 
+# The refusal for a `--since` or `--until` that is neither a day nor an
+# instant, with the reason when it was a local time the clocks skip.
+not_a_bound() {
+  if [ -n "${instant_skipped:-}" ]; then
+    printf 'no such local time: %s. The clocks skip it here; give it with an offset, such as %s+01:00\n' "$1" "$1" >&2
+  else
+    printf 'not a day or a time: %s. Use YYYY-MM-DD, today, 7d, or a time such as 2026-01-11T14:30:00+01:00\n' "$1" >&2
+  fi
+  exit 2
+}
+
 if [ "$cmd" = list ] || [ "$cmd" = search ] || [ "$cmd" = read ]; then
   # A period and a range are two ways to say the same thing, and honouring both
   # at once would quietly return the intersection nobody asked for.
@@ -1140,19 +1222,27 @@ if [ "$cmd" = list ] || [ "$cmd" = search ] || [ "$cmd" = read ]; then
       exit 2
     }
   fi
+  # A day or an instant. A day is the whole of it, an instant only that
+  # second, so `--until` with an instant includes the entry written at it.
+  since_epoch=
+  until_epoch=
   if [ -n "$since" ]; then
-    resolve_day "$since" || {
-      printf 'not a day: %s. Use YYYY-MM-DD, today, or 7d\n' "$since" >&2
-      exit 2
-    }
-    since_day=$day
+    if resolve_day "$since"; then
+      since_day=$day
+    elif resolve_instant "$since"; then
+      since_epoch=$epoch
+    else
+      not_a_bound "$since"
+    fi
   fi
   if [ -n "$until" ]; then
-    resolve_day "$until" || {
-      printf 'not a day: %s. Use YYYY-MM-DD, today, or 7d\n' "$until" >&2
-      exit 2
-    }
-    until_day=$day
+    if resolve_day "$until"; then
+      until_day=$day
+    elif resolve_instant "$until"; then
+      until_epoch=$epoch
+    else
+      not_a_bound "$until"
+    fi
   fi
 
   # A day before 1970 is before every entry, so as a start it limits nothing,
@@ -1164,6 +1254,22 @@ if [ "$cmd" = list ] || [ "$cmd" = search ] || [ "$cmd" = read ]; then
   if [ -n "$until_day" ] && [ "$until_day" -lt 0 ]; then
     until_day=
     until=0
+  fi
+  if [ -n "$since_epoch" ]; then
+    if [ "$since_epoch" -lt 0 ]; then
+      since=
+    else
+      format_id "$since_epoch"
+      since=$id
+    fi
+  fi
+  if [ -n "$until_epoch" ]; then
+    if [ "$until_epoch" -lt 0 ]; then
+      until=0
+    else
+      format_id "$until_epoch"
+      until=$id
+    fi
   fi
   if [ -n "$since_day" ]; then
     local_midnight "$since_day" || {
