@@ -63,7 +63,7 @@ failed batch leaves nothing half-written, which is what caused Thursday's partia
 
 ## Recall
 
-Filenames are UTC timestamps, so a glob is a date range and `ls` is already chronological:
+Filenames are UTC timestamps, so a glob is a range of UTC dates and `ls` is already chronological:
 
 ```sh
 # the most recent entries

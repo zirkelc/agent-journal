@@ -1,8 +1,8 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
-import { fixture, run, type Fixture } from './helpers.js';
+import { fixture, output, run, type Fixture } from './helpers.js';
 
 /**
  * A fixed clock, zone and locale. The locale names use the language `zz`, which
@@ -163,6 +163,41 @@ describe('resolve', () => {
     expect(out).toContain('utc_now=2026-10-05T16:10:02Z\n');
   });
 
+  test(`should give a day that has no midnight its first local time`, () => {
+    // Arrange
+    const store = fixture();
+
+    // Act
+    const values = resolve(store, store.repo, { now: '2026-03-08T15:00:00Z', tz: 'America/Havana' });
+
+    // Assert
+    expect(values.utc_today).toBe('2026-03-08T05:00:00Z 2026-03-09T03:59:59Z');
+  });
+
+  /** A `date` that can read the clock but convert no day, as on a system with neither variant. */
+  test(`should fail rather than print empty ranges when a day cannot be converted`, () => {
+    // Arrange
+    const store = fixture();
+    const shim = join(store.home, 'shim');
+    mkdirSync(shim);
+    const real = execFileSync('sh', ['-c', 'command -v date'], { encoding: 'utf8' }).trim();
+    writeFileSync(
+      join(shim, 'date'),
+      `#!/bin/sh\ncase "$*" in *:00:00*) exit 1 ;; esac\nexec ${real} "$@"\n`,
+    );
+    chmodSync(join(shim, 'date'), 0o755);
+
+    // Act
+    const result = output(store, ['resolve'], {
+      at: store.repo,
+      env: { AGENT_JOURNAL_NOW: '1791216602', PATH: `${shim}:${process.env.PATH}` },
+    });
+
+    // Assert
+    expect(result.status).toBe(1);
+    expect(result.stdout).toBe('');
+  });
+
   test(`should leave the project empty outside a repository`, () => {
     // Arrange
     const store = fixture();
@@ -201,6 +236,17 @@ describe('the first day of the week', () => {
 
     // Assert
     expect(values.local_this_week).toBe('2026-10-03T00:00:00+02:00 2026-10-09T23:59:59+02:00');
+  });
+
+  test(`should read the region after a script in the locale name`, () => {
+    // Arrange
+    const store = fixture();
+
+    // Act
+    const values = resolve(store, store.repo, { now: '2026-10-05T16:10:02Z', locale: 'zz_Latn_US.UTF-8' });
+
+    // Assert
+    expect(values.week_start_from).toBe('region US from LC_ALL');
   });
 
   test(`should fall back to Monday when no region can be read`, () => {

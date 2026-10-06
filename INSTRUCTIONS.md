@@ -108,4 +108,4 @@ Read the journal when the user asks about past work. Not otherwise, and never at
     ls __JOURNAL_DIR__ | tail -20                     # the most recent entries
     grep -rl '^project: nebula$' __JOURNAL_DIR__      # every entry for one project
 
-Filenames are UTC timestamps, so a glob is a date range and `ls` is already chronological. `grep` prefixes each match with the filename, which is the date. Narrow with the summaries first and open whole entries only once they point somewhere.
+Filenames are UTC timestamps, so a glob is a range of UTC dates and `ls` is already chronological. A day the user names is a day in their time zone, which can start on the UTC date before it or end on the UTC date after it, so take the neighbouring date into the glob and judge by the times in the names. `grep` prefixes each match with the filename, which is the date. Narrow with the summaries first and open whole entries only once they point somewhere.

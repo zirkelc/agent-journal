@@ -326,6 +326,52 @@ pad2() {
   if [ "$1" -lt 10 ]; then two=0$1; else two=$1; fi
 }
 
+# Digits as a decimal number, in `decimal`. Shell arithmetic reads a leading
+# zero as octal, where `08` and `09` do not exist and `010` is eight.
+to_decimal() {
+  decimal=$1
+  while :; do
+    case $decimal in
+      0?*) decimal=${decimal#0} ;;
+      *) break ;;
+    esac
+  done
+}
+
+# The first day of a month and the first day of the month after it, as day
+# numbers in `month_first` and `month_next`, so the month's last day is the one
+# before `month_next`, whatever its length.
+month_bounds() {
+  civil_to_days "$1" "$2" 1
+  month_first=$days
+  if [ "$2" -eq 12 ]; then
+    civil_to_days $(($1 + 1)) 1 1
+  else
+    civil_to_days "$1" $(($2 + 1)) 1
+  fi
+  month_next=$days
+}
+
+# A date typed as YYYY-MM-DD, as a day number in `days`, or a failure when it
+# names no day of the calendar, such as the 30th of February.
+parse_date() {
+  case $1 in
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;;
+    *) return 1 ;;
+  esac
+  to_decimal "${1%%-*}"
+  t_py=$decimal
+  t_md=${1#*-}
+  to_decimal "${t_md%-*}"
+  t_pm=$decimal
+  to_decimal "${t_md#*-}"
+  t_pd=$decimal
+  [ "$t_pm" -ge 1 ] && [ "$t_pm" -le 12 ] && [ "$t_pd" -ge 1 ] || return 1
+  month_bounds "$t_py" "$t_pm"
+  [ "$t_pd" -le $((month_next - month_first)) ] || return 1
+  days=$((month_first + t_pd - 1))
+}
+
 # A UTC offset in seconds as `+02:00`, in `offset_text`.
 format_offset() {
   t_off=$1
@@ -423,11 +469,22 @@ region_week_start() {
 # macOS locale (`en_US@rg=dezzzz` is Germany) before its country (`en_US`).
 locale_region() {
   case $1 in
-    *@rg=??*) t_cc=${1#*@rg=} ;;
-    *_??*) t_cc=${1#*_} ;;
+    *@rg=??*)
+      t_cc=${1#*@rg=}
+      t_cc=${t_cc%"${t_cc#??}"}
+      ;;
+    *_*)
+      # The last part before any encoding or modifier, past a script such as
+      # the `Latn` in `sr_Latn_RS`.
+      t_cc=${1%%[.@]*}
+      t_cc=${t_cc##*_}
+      ;;
     *) return 1 ;;
   esac
-  t_cc=${t_cc%"${t_cc#??}"}
+  case $t_cc in
+    [A-Za-z][A-Za-z]) ;;
+    *) return 1 ;;
+  esac
   # Only an `rg` value is lower case, so only that one costs a process.
   case $t_cc in
     *[a-z]*) t_cc=$(printf '%s' "$t_cc" | tr '[:lower:]' '[:upper:]') ;;
@@ -524,13 +581,23 @@ resolve_week_start() {
 # `date`, as BSD (`-j -f`) or as GNU (`-d`). Kept per day, so a day that
 # starts one range and ends another is converted once.
 local_midnight() {
-  eval "midnight=\${t_midnight_$1:-}"
+  # The day number names a variable, and a minus sign cannot be part of one.
+  t_key=$1
+  case $t_key in -*) t_key=m${t_key#-} ;; esac
+  eval "midnight=\${t_midnight_$t_key:-}"
   [ -z "$midnight" ] || return 0
   days_to_civil "$1"
-  midnight=$(date -j -f '%Y-%m-%d %H:%M:%S' "$civil 00:00:00" '+%s' 2>/dev/null) ||
-    midnight=$(date -d "$civil 00:00:00" '+%s' 2>/dev/null) ||
-    return 1
-  eval "t_midnight_$1=\$midnight"
+  # A zone that moves its clocks forward at midnight has no 00:00 on that day,
+  # and the day starts at 01:00. BSD date moves a missing time forward by
+  # itself; GNU date refuses it, so 01:00 is asked for next.
+  for t_at in 00:00:00 01:00:00; do
+    midnight=$(date -j -f '%Y-%m-%d %H:%M:%S' "$civil $t_at" '+%s' 2>/dev/null) ||
+      midnight=$(date -d "$civil $t_at" '+%s' 2>/dev/null) ||
+      midnight=
+    [ -z "$midnight" ] || break
+  done
+  [ -n "$midnight" ] || return 1
+  eval "t_midnight_$t_key=\$midnight"
 }
 
 # A range of local days, from day number `$1` up to but not including `$2`, as
@@ -575,15 +642,14 @@ resolve_calendar_days() {
   last_week_next=$this_week_first
 
   days_to_civil "$today"
-  t_y=$civil_y
-  t_m=$civil_m
-  civil_to_days "$t_y" "$t_m" 1
-  this_month_first=$days
-  if [ "$t_m" -eq 12 ]; then civil_to_days $((t_y + 1)) 1 1; else civil_to_days "$t_y" $((t_m + 1)) 1; fi
-  this_month_next=$days
-  if [ "$t_m" -eq 1 ]; then civil_to_days $((t_y - 1)) 12 1; else civil_to_days "$t_y" $((t_m - 1)) 1; fi
-  last_month_first=$days
-  last_month_next=$this_month_first
+  month_bounds "$civil_y" "$civil_m"
+  this_month_first=$month_first
+  this_month_next=$month_next
+  # The month before is the one that holds the day before this one started.
+  days_to_civil $((this_month_first - 1))
+  month_bounds "$civil_y" "$civil_m"
+  last_month_first=$month_first
+  last_month_next=$month_next
 }
 
 # Every value about the current time, read from the clock once: one variable
@@ -594,7 +660,10 @@ resolve_calendar_days() {
 # `local_yesterday` are plain dates, because a local day reads as its date. Their
 # UTC forms stay ranges, because a local day is not one UTC date.
 resolve_time() {
-  clock_now || return 1
+  clock_now || {
+    printf 'cannot read the clock\n' >&2
+    return 1
+  }
   timezone_name
   resolve_week_start
   resolve_calendar_days
@@ -632,9 +701,12 @@ week_start_from=$week_start_from"
 
   for t_range in today yesterday this_week last_week this_month last_month; do
     eval "t_rf=\$${t_range}_first t_rn=\$${t_range}_next"
-    range_local=
-    range_utc=
-    range_instants "$t_rf" "$t_rn" || printf 'cannot convert %s to UTC\n' "$t_range" >&2
+    # An empty range would read as a value. Without the zone's rules there
+    # is no right answer to give, so there is none.
+    range_instants "$t_rf" "$t_rn" || {
+      printf 'cannot convert %s to UTC\n' "$t_range" >&2
+      return 1
+    }
     case $t_range in
       today | yesterday)
         days_to_civil "$t_rf"
@@ -814,26 +886,23 @@ fi
 # there although UTC has not reached it.
 resolve_day() {
   case $1 in
-    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9])
-      t_dm=$((1${1#?????} / 1000 - 100))
-      t_dd=$((1${1#????????} - 100))
-      [ "$t_dm" -ge 1 ] && [ "$t_dm" -le 12 ] && [ "$t_dd" -ge 1 ] && [ "$t_dd" -le 31 ] || return 1
-      civil_to_days "${1%%-*}" "$t_dm" "$t_dd"
-      day=$days
-      ;;
     today | *d)
       t_n=0
       if [ "$1" != today ]; then
-        t_n=${1%d}
-        case $t_n in
+        case ${1%d} in
           '' | *[!0-9]*) return 1 ;;
         esac
+        to_decimal "${1%d}"
+        t_n=$decimal
       fi
       # Read once, so `--since today --until today` cannot straddle a midnight.
       [ -n "${now_epoch:-}" ] || clock_now || return 1
       day=$(((now_epoch + now_offset) / 86400 - t_n))
       ;;
-    *) return 1 ;;
+    *)
+      parse_date "$1" || return 1
+      day=$days
+      ;;
   esac
 }
 
@@ -1045,22 +1114,20 @@ if [ "$cmd" = list ] || [ "$cmd" = search ] || [ "$cmd" = read ]; then
   if [ -n "$date_filter" ]; then
     case $date_filter in
       [0-9][0-9][0-9][0-9])
-        civil_to_days "$date_filter" 1 1
+        to_decimal "$date_filter"
+        civil_to_days "$decimal" 1 1
         since_day=$days
-        civil_to_days $((date_filter + 1)) 1 1
+        civil_to_days $((decimal + 1)) 1 1
         until_day=$((days - 1))
         ;;
       [0-9][0-9][0-9][0-9]-[0-9][0-9])
-        t_dm=$((1${date_filter#?????} - 100))
-        if [ "$t_dm" -ge 1 ] && [ "$t_dm" -le 12 ]; then
-          civil_to_days "${date_filter%-*}" "$t_dm" 1
-          since_day=$days
-          if [ "$t_dm" -eq 12 ]; then
-            civil_to_days $((${date_filter%-*} + 1)) 1 1
-          else
-            civil_to_days "${date_filter%-*}" $((t_dm + 1)) 1
-          fi
-          until_day=$((days - 1))
+        to_decimal "${date_filter%-*}"
+        t_fy=$decimal
+        to_decimal "${date_filter#*-}"
+        if [ "$decimal" -ge 1 ] && [ "$decimal" -le 12 ]; then
+          month_bounds "$t_fy" "$decimal"
+          since_day=$month_first
+          until_day=$((month_next - 1))
         fi
         ;;
       [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9])
@@ -1088,6 +1155,16 @@ if [ "$cmd" = list ] || [ "$cmd" = search ] || [ "$cmd" = read ]; then
     until_day=$day
   fi
 
+  # A day before 1970 is before every entry, so as a start it limits nothing,
+  # and as an end it leaves nothing: an id below every name.
+  if [ -n "$since_day" ] && [ "$since_day" -lt 0 ]; then
+    since_day=
+    since=
+  fi
+  if [ -n "$until_day" ] && [ "$until_day" -lt 0 ]; then
+    until_day=
+    until=0
+  fi
   if [ -n "$since_day" ]; then
     local_midnight "$since_day" || {
       printf 'cannot convert %s to UTC\n' "${since:-$date_filter}" >&2
@@ -1447,10 +1524,7 @@ fi
 # the same functions rather than this command.
 if [ "$cmd" = resolve ]; then
   [ "$argc" -eq 0 ] || usage
-  resolve_time || {
-    printf 'cannot read the clock\n' >&2
-    exit 1
-  }
+  resolve_time || exit 1
   printf '%s\n' "$time_text"
   resolve_project "$cwd"
   printf 'project=%s\n' "$project"

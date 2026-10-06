@@ -926,10 +926,95 @@ describe('local days', () => {
     seed(store, BERLIN);
 
     // Act
-    const result = fails(store, ['list', '--since', '2026-13-01']);
+    const month = fails(store, ['list', '--since', '2026-13-01']);
+    const february = fails(store, ['list', '--date', '2026-02-29']);
+    const april = fails(store, ['list', '--until', '2026-04-31']);
 
     // Assert
-    expect(result.status).toBe(2);
+    expect(month.status).toBe(2);
+    expect(february.status).toBe(2);
+    expect(april.status).toBe(2);
+  });
+
+  test(`should take the 29th of February in a leap year`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, [{ stem: '2028-02-29T120000Z', summary: 'Leap day.' }]);
+
+    // Act
+    const listed = summaries(store, ['--date', '2028-02-29']);
+
+    // Assert
+    expect(listed).toEqual(['Leap day.']);
+  });
+
+  /** A leading zero would read as octal in shell arithmetic, where 08 and 09 do not exist. */
+  test(`should take the 8th and the 9th of a month`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, [
+      { stem: '2026-08-08T120000Z', summary: 'The 8th.' },
+      { stem: '2026-09-09T120000Z', summary: 'The 9th.' },
+    ]);
+
+    // Act
+    const since = summaries(store, ['--since', '2026-08-08', '--until', '2026-09-09']);
+    const day = summaries(store, ['--date', '2026-09-09']);
+    const month = summaries(store, ['--date', '2026-09']);
+
+    // Assert
+    expect(since).toEqual(['The 8th.', 'The 9th.']);
+    expect(day).toEqual(['The 9th.']);
+    expect(month).toEqual(['The 9th.']);
+  });
+
+  test(`should count days with a leading zero in decimal`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, BERLIN);
+    const now = { AGENT_JOURNAL_NOW: String(Date.parse('2026-08-13T12:00:00Z') / 1_000) };
+
+    // Act
+    const eight = summaries(store, ['--since', '08d'], now);
+    const ten = summaries(store, ['--since', '010d'], now);
+
+    // Assert
+    expect(eight).toEqual(['The 5th, first second.', 'The 5th, last second.', 'The 6th, first second.']);
+    expect(ten).toEqual(summaries(store, ['--since', '10d'], now));
+  });
+
+  test(`should take a day before any entry as no limit`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, BERLIN);
+
+    // Act
+    const far = summaries(store, ['--since', '30000d']);
+    const before = summaries(store, ['--since', '1969-12-31']);
+
+    // Assert
+    expect(far.length).toBe(6);
+    expect(before.length).toBe(6);
+  });
+
+  /**
+   * Havana moves its clocks from 00:00 to 01:00 on 8 March 2026, so that day
+   * has no midnight and starts at 01:00. GNU date refuses the missing time,
+   * BSD date moves it forward.
+   */
+  test(`should start a day that has no midnight at its first local time`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, [
+      { stem: '2026-03-08T045959Z', summary: 'The 7th, last second.' },
+      { stem: '2026-03-08T050000Z', summary: 'The 8th, first second.' },
+    ]);
+
+    // Act
+    const listed = summaries(store, ['--date', '2026-03-08'], { TZ: 'America/Havana' });
+
+    // Assert
+    expect(listed).toEqual(['The 8th, first second.']);
   });
 });
 
