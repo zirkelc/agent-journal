@@ -56,9 +56,9 @@ describe('resolve', () => {
         'utc_now=2026-10-05T16:10:02Z',
         'utc_date=2026-10-05',
         'utc_time=16:10:02',
-        'local_today=2026-10-05',
+        'local_today=2026-10-05T00:00:00+02:00 2026-10-05T23:59:59+02:00',
         'utc_today=2026-10-04T22:00:00Z 2026-10-05T21:59:59Z',
-        'local_yesterday=2026-10-04',
+        'local_yesterday=2026-10-04T00:00:00+02:00 2026-10-04T23:59:59+02:00',
         'utc_yesterday=2026-10-03T22:00:00Z 2026-10-04T21:59:59Z',
         'local_this_week=2026-10-05T00:00:00+02:00 2026-10-11T23:59:59+02:00',
         'utc_this_week=2026-10-04T22:00:00Z 2026-10-11T21:59:59Z',
@@ -88,7 +88,7 @@ describe('resolve', () => {
     expect(values.local_time).toBe('00:30:00');
     expect(values.local_weekday).toBe('Tuesday');
     expect(values.utc_date).toBe('2026-10-05');
-    expect(values.local_today).toBe('2026-10-06');
+    expect(values.local_today).toBe('2026-10-06T00:00:00+02:00 2026-10-06T23:59:59+02:00');
     expect(values.utc_today).toBe('2026-10-05T22:00:00Z 2026-10-06T21:59:59Z');
   });
 
@@ -101,6 +101,7 @@ describe('resolve', () => {
 
     // Assert
     expect(values.local_utc_offset).toBe('+01:00');
+    expect(values.local_today).toBe('2026-10-25T00:00:00+02:00 2026-10-25T23:59:59+01:00');
     expect(values.utc_today).toBe('2026-10-24T22:00:00Z 2026-10-25T22:59:59Z');
     expect(values.local_this_week).toBe('2026-10-19T00:00:00+02:00 2026-10-25T23:59:59+01:00');
   });
@@ -114,7 +115,7 @@ describe('resolve', () => {
 
     // Assert
     expect(values.local_weekday).toBe('Friday');
-    expect(values.local_yesterday).toBe('2026-12-31');
+    expect(values.local_yesterday).toBe('2026-12-31T00:00:00+01:00 2026-12-31T23:59:59+01:00');
     expect(values.local_this_week).toBe('2026-12-28T00:00:00+01:00 2027-01-03T23:59:59+01:00');
     expect(values.local_last_week).toBe('2026-12-21T00:00:00+01:00 2026-12-27T23:59:59+01:00');
     expect(values.local_this_month).toBe('2027-01-01T00:00:00+01:00 2027-01-31T23:59:59+01:00');
