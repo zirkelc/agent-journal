@@ -167,6 +167,7 @@ It provides a thin interface over `ls` and `grep` for common commands:
 | `aj config` | `cat ~/.config/agent-journal/config` | read and change the settings |
 | `aj install` | | which agents are on this machine, and how to wire each one up |
 | `aj context` | | the instruction an adapter injects at session start |
+| `aj context --recall` | | what a model that only reads the journal is told: [`RECALL.md`](templates/RECALL.md), with the clock and the calendar |
 | `aj help` | | every command and option |
 
 `list` is the default command if not given, so `aj` and `aj list` are the same. 

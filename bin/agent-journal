@@ -7,10 +7,12 @@
 #   agent-journal read    ID
 #   agent-journal write   [-m SUMMARY]
 #   agent-journal config  [set|unset <key> [value]]
-#   agent-journal context [--cwd DIR] [--session-id ID]
+#   agent-journal context [--cwd DIR] [--session-id ID] [--agent A] [--recall]
 #
-# `context` prints the text a session should be given: INSTRUCTIONS.md,
-# resolved against the settings and against where the session is.
+# `context` prints the text a session should be given: templates/INSTRUCTIONS.md,
+# resolved against the settings and against where the session is. With --recall
+# it prints templates/RECALL.md instead, the text for a model that only reads the
+# journal, with the clock and the calendar.
 # It prints plain text and knows nothing about any agent, which is the seam that
 # lets one adapter per agent wrap it in whatever that agent reads.
 #
@@ -65,7 +67,7 @@ usage: agent-journal list   [filters]
        agent-journal read   latest | 2026-01-11T143000Z | 2026-01-11
        agent-journal write  [--summary S] [--body B] [--project P] [--cwd DIR] [--agent A]
        agent-journal config [set|unset journal_dir <path>]
-       agent-journal context [--cwd DIR] [--session-id ID] [--agent A]
+       agent-journal context [--cwd DIR] [--session-id ID] [--agent A] [--recall]
        agent-journal install [claude|codex] [--all] [--dry-run]
        agent-journal help
 
@@ -755,6 +757,7 @@ opt_body=
 body_set=0
 all_set=0
 dry_run=0
+recall=0
 
 arg1=
 arg2=
@@ -789,6 +792,9 @@ while [ $# -gt 0 ]; do
     # `install` it means every agent found rather than one named.
     --all) limit=0; all_set=1; shift ;;
     --dry-run) dry_run=1; shift ;;
+    # For `context`: the text for a reader of the journal instead of the rules
+    # for writing it.
+    --recall) recall=1; shift ;;
     # One flag per field, rather than one flag for "the message". An entry is a
     # summary and a body, and a single `-m` cannot say which it meant. Spelled
     # out like every other flag here, none of which has a short form.
@@ -1537,32 +1543,58 @@ fi
 
 # ---------------------------------------------------------------- context
 
+# Without --recall, the rules a session is given for writing entries. With it,
+# RECALL.md: what a model that only reads the journal is told, which carries the
+# clock and the calendar, so that model never works out a date itself.
 instructions=$root/templates/INSTRUCTIONS.md
+[ "$recall" = 0 ] || instructions=$root/templates/RECALL.md
 
 # A missing file means nothing to say, which is not worth failing a session over.
 # Print nothing and let the caller decide that means nothing to inject.
 [ -n "$root" ] || exit 0
 [ -f "$instructions" ] || exit 0
 
+# A reader given a wrong date answers wrongly, so a clock that cannot be read
+# fails the command rather than printing the text without it.
+time=
+week_start_name=
+if [ "$recall" = 1 ]; then
+  resolve_time || exit 1
+  time=$time_text
+  case $week_start in
+    1) week_start_name=Monday ;;
+    2) week_start_name=Tuesday ;;
+    3) week_start_name=Wednesday ;;
+    4) week_start_name=Thursday ;;
+    5) week_start_name=Friday ;;
+    6) week_start_name=Saturday ;;
+    7) week_start_name=Sunday ;;
+  esac
+fi
+
 resolve_project "$cwd"
 
-# INSTRUCTIONS.md is the whole of the injected text, placeholders and all, so
-# that every word a session is given lives in one file a person can read. This is
-# the only thing that renders it.
-awk \
+# Each template is the whole of its text, placeholders and all, so that every
+# word a model is given lives in one file a person can read. This is the only
+# thing that renders them. The time is several lines, which `-v` cannot
+# carry in every awk, so it goes through the environment.
+AGENT_JOURNAL_TIME=$time awk \
   -v journal_dir="$journal_dir" \
   -v project="$project" \
   -v cwd="$(abbrev_home "$cwd")" \
   -v session_id="$session_id" \
-  -v agent="$agent" '
+  -v agent="$agent" \
+  -v week_start="$week_start_name" '
   BEGIN {
-    keys = "journal_dir project cwd session_id agent"
+    keys = "journal_dir project cwd session_id agent time week_start"
     n = split(keys, key, " ")
     value["journal_dir"] = journal_dir
     value["project"] = project
     value["cwd"] = cwd
     value["session_id"] = session_id
     value["agent"] = agent
+    value["time"] = ENVIRON["AGENT_JOURNAL_TIME"]
+    value["week_start"] = week_start
 
     # In a gsub replacement `&` means the matched text and `\` escapes, so a
     # value containing either would substitute itself back in mangled.

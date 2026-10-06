@@ -64,16 +64,13 @@ date: 2026-01-11T14:30:00Z
 project: my-lib
 summary: "Shipped the v1.2 sync path on prepared statements, with rollback when a batch fails. Not deployed, waiting on Monday's validation."
 cwd: ~/Developer/oss/my-lib
-agent: __AGENT__
+agent: my-agent/my-model
 session_id: 4eb89b17-6f7f-4264-95d4-ea5313ef277e
 ---
 
-Replaced the string-interpolated SQL in the sync path with prepare(). Added a rollback so a
-failed batch leaves nothing half-written, which is what caused Thursday's partial state.
+Replaced the string-interpolated SQL in the sync path with prepare(). Added a rollback so a failed batch leaves nothing half-written, which is what caused Thursday's partial state.
 
-Considered doing the same to the reporting queries and decided against it for now: they are
-read-only and the rewrite is large enough to want its own session. Not deployed. Validation
-is Monday, and the flag stays off until then.
+Considered doing the same to the reporting queries and decided against it for now: they are read-only and the rewrite is large enough to want its own session. Not deployed. Validation is Monday, and the flag stays off until then.
 ```
 
 Exactly these fields, in this order, on every entry:

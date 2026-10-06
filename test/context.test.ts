@@ -206,6 +206,6 @@ describe('the agent', () => {
     // Assert
     /** A label with nothing after it would read as a field the model must invent. */
     expect(fields(rendered).agent).toBe(undefined);
-    expect(rendered).not.toContain('agent:');
+    expect(rendered).not.toContain('- `agent`: `');
   });
 });

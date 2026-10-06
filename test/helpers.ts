@@ -60,6 +60,7 @@ export function fixture(instructions?: string): Fixture {
     join(root, 'templates', 'INSTRUCTIONS.md'),
     instructions ?? readFileSync(join(ROOT, 'templates', 'INSTRUCTIONS.md'), 'utf8'),
   );
+  copyFileSync(join(ROOT, 'templates', 'RECALL.md'), join(root, 'templates', 'RECALL.md'));
 
   mkdirSync(repo, { recursive: true });
   execFileSync('git', ['init', '-q', repo]);
@@ -274,6 +275,13 @@ export function frontmatter(entry: string): Record<string, string> {
 /** The rules as a session would receive them. */
 export function context(store: Fixture, options: RunOptions = {}): string {
   const args = ['context', '--cwd', options.cwd ?? store.repo];
+  if (options.sessionId !== undefined) args.push('--session-id', options.sessionId);
+  return run(store, args, options);
+}
+
+/** The text a reader of the journal is given, `context --recall`. */
+export function recall(store: Fixture, options: RunOptions = {}): string {
+  const args = ['context', '--recall', '--cwd', options.cwd ?? store.repo];
   if (options.sessionId !== undefined) args.push('--session-id', options.sessionId);
   return run(store, args, options);
 }
