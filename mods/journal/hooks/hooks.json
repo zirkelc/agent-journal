@@ -1,0 +1,4 @@
+{
+  "description": "The journal pane: /journal, its Pane drawing, and a search agent over the agent-journal CLI.",
+  "modules": ["./register.tsx"]
+}
