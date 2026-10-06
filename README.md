@@ -63,7 +63,7 @@ failed batch leaves nothing half-written, which is what caused Thursday's partia
 
 ## Recall
 
-Filenames are UTC timestamps, so a glob is a date range and `ls` is already chronological:
+Filenames are UTC timestamps, so a glob is a range of UTC dates and `ls` is already chronological:
 
 ```sh
 # the most recent entries
@@ -177,13 +177,15 @@ Entries are listed oldest first, so the newest is nearest the prompt. Each line 
 
 | filter | value | description |
 | --- | --- | --- |
-| `--date` | `2026`, `2026-01`, `2026-01-11`, `2026-01-11T143000Z` | a prefix of the timestamp, at any granularity |
+| `--date` | `2026`, `2026-01`, `2026-01-11` | one year, month or day |
 | `--since` | `2026-01-11`, `today`, `7d` | from this day on |
-| `--until` | same forms | up to this day |
+| `--until` | same forms | up to and including this day |
 | `--project` | a project name, or `.` for here | entries filed under one project, across all its worktrees. `.` names the repository of the current directory the same way the session-start hook does, and fails outside a repository |
 | `--cwd` | a directory, or `.` for here | one directory and everything under it |
 | `--limit` | a number, default `20` | how many of the most recent to print |
 | `--all` | | no limit |
+
+Days are local days, in the time zone of the machine. The IDs stay UTC, so an entry written just after local midnight can carry the date before: in Berlin in winter, `--date 2026-01-11` includes `2026-01-10T231500Z`. For one exact entry, use `aj read` with its ID.
 
 `aj write` also takes `--project .`. There it names the repository of `--cwd`, the directory the entry records, and also fails outside a repository.
 

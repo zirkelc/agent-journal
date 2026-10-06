@@ -95,13 +95,18 @@ type RunOptions = {
   /** The directory the process itself is started in, for relative-path cases. */
   at?: string;
   sessionId?: string;
-  env?: Record<string, string>;
+  env?: Record<string, string | undefined>;
   stdin?: string;
 };
 
-function baseEnv(store: Fixture, extra: Record<string, string> = {}): NodeJS.ProcessEnv {
-  return {
+function baseEnv(store: Fixture, extra: Record<string, string | undefined> = {}): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {
     ...process.env,
+    /**
+     * Filters take local days, so a case that does not name a zone runs in UTC
+     * rather than in whatever zone the machine running the tests is in.
+     */
+    TZ: 'UTC',
     HOME: store.home,
     /**
      * Stops git looking above the fixture, so a temp directory inside some
@@ -112,6 +117,9 @@ function baseEnv(store: Fixture, extra: Record<string, string> = {}): NodeJS.Pro
     XDG_CONFIG_HOME: join(store.home, 'config'),
     ...extra,
   };
+  /** A key given as `undefined` is removed, so a case can run without it. */
+  for (const [key, value] of Object.entries(env)) if (value === undefined) delete env[key];
+  return env;
 }
 
 export function run(store: Fixture, args: Array<string>, options: RunOptions = {}): string {

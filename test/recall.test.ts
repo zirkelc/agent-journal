@@ -1,7 +1,7 @@
-import { writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
-import { type Entry, fails, fixture, output, rows, run, seed, terminal, worktree } from './helpers.js';
+import { type Entry, type Fixture, fails, fixture, output, rows, run, seed, terminal, worktree } from './helpers.js';
 
 /**
  * A week of entries across three projects, with one written outside a
@@ -672,3 +672,349 @@ describe('in a terminal', () => {
     );
   });
 });
+
+/**
+ * The complete output, byte for byte, so a change to how entries are found and
+ * read cannot change what is printed. Each case combines a filter with a limit,
+ * because the limit has to apply to the matches, not to the files.
+ */
+describe('the exact output', () => {
+  test(`should print every entry down a pipe`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ENTRIES);
+
+    // Act
+    const listed = run(store, ['list']);
+
+    // Assert
+    expect(listed).toBe(
+      [
+        '2026-08-03T091500Z\tnebula\tMoved per-turn context into a data part, which took cache reuse from 62% to 95%.',
+        '2026-08-05T140000Z\tcheckout-api\tMade full jitter the default on the retry backoff.',
+        '2026-08-07T081000Z\t\tSummarised an episode into the required JSON shape.',
+        '2026-08-09T173000Z\tcheckout-api\tSplit the checkout form into two steps.',
+        '',
+      ].join('\n'),
+    );
+  });
+
+  test(`should keep the most recent matches of a filter, not of all entries`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ENTRIES);
+
+    // Act
+    const listed = run(store, ['list', '--project', 'nebula', '--limit', '1']);
+
+    // Assert
+    expect(listed).toBe(
+      '2026-08-03T091500Z\tnebula\tMoved per-turn context into a data part, which took cache reuse from 62% to 95%.\n',
+    );
+  });
+
+  test(`should keep the most recent matches of a search, in order`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ENTRIES);
+
+    // Act
+    const listed = run(store, ['search', 'the', '--limit', '2']);
+
+    // Assert
+    expect(listed).toBe(
+      [
+        '2026-08-07T081000Z\t\tSummarised an episode into the required JSON shape.',
+        '2026-08-09T173000Z\tcheckout-api\tSplit the checkout form into two steps.',
+        '',
+      ].join('\n'),
+    );
+  });
+
+  test(`should apply a range before the limit`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ENTRIES);
+
+    // Act
+    const listed = run(store, ['list', '--until', '2026-08-06', '--limit', '1']);
+
+    // Assert
+    expect(listed).toBe('2026-08-05T140000Z\tcheckout-api\tMade full jitter the default on the retry backoff.\n');
+  });
+
+  test(`should align the printed entries to the widest project among them`, () => {
+    // Arrange
+    const store = fixture();
+    /** Older than the limit reaches, so its long name must not widen the column. */
+    seed(store, [{ stem: '2026-08-01T080000Z', project: 'a-much-longer-project-name', summary: 'Out of reach.' }, ...ENTRIES]);
+
+    // Act
+    const shown = terminal(store, ['list', '--limit', '3'], { env: { NO_COLOR: '1' } });
+
+    // Assert
+    expect(shown).toBe(
+      [
+        '2026-08-05T140000Z  checkout-api  Made full jitter the default on the retry backoff.',
+        '2026-08-07T081000Z                Summarised an episode into the required JSON shape.',
+        '2026-08-09T173000Z  checkout-api  Split the checkout form into two steps.',
+        '',
+      ].join('\n'),
+    );
+  });
+
+});
+
+describe('files that are not entries it can read', () => {
+  /** awk cannot read a directory and stops, on BSD and on mawk alike. */
+  test(`should name a directory that is named like an entry and list the rest`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ENTRIES);
+    const folder = join(store.journalDir, '2026-08-04T000000Z.md');
+    mkdirSync(folder);
+
+    // Act
+    const result = output(store, ['list']);
+
+    // Assert
+    expect(result.status).toBe(0);
+    expect(rows(result.stdout).length).toBe(4);
+    expect(result.stderr).toContain(`${folder} is a directory, not an entry`);
+  });
+
+  /** Root reads any file whatever its mode, so the case cannot be made there. */
+  test.skipIf(process.getuid?.() === 0)(`should warn about an entry it cannot read and list the rest`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ENTRIES);
+    const locked = join(store.journalDir, '2026-08-04T000000Z.md');
+    writeFileSync(locked, '---\nsummary: "Locked."\n---\n');
+    chmodSync(locked, 0o000);
+
+    // Act
+    const result = output(store, ['list']);
+
+    // Assert
+    expect(result.status).toBe(0);
+    expect(rows(result.stdout).length).toBe(4);
+    expect(result.stderr).toContain('cannot read');
+    expect(result.stderr).toContain('2026-08-04T000000Z.md');
+  });
+
+  test(`should match a search across line breaks in the body`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, [
+      { stem: '2026-08-03T091500Z', project: 'nebula', summary: 'Short lines.', body: 'one\ntwo\nthree\nfour' },
+      { stem: '2026-08-04T091500Z', project: 'nebula', summary: 'Other.', body: 'one two four' },
+    ]);
+
+    // Act
+    const listed = rows(run(store, ['search', 'one two three four']));
+
+    // Assert
+    expect(listed.map((row) => row.summary)).toEqual(['Short lines.']);
+  });
+});
+
+/**
+ * Days are the user's local days. In Berlin in August a day starts at 22:00
+ * UTC the evening before, so each entry sits one second either side of a local
+ * midnight.
+ */
+describe('local days', () => {
+  const BERLIN: Array<Entry> = [
+    { stem: '2026-07-31T215959Z', summary: 'July, last second.' },
+    { stem: '2026-07-31T220000Z', summary: 'August, first second.' },
+    { stem: '2026-08-04T215959Z', summary: 'The 4th, last second.' },
+    { stem: '2026-08-04T220000Z', summary: 'The 5th, first second.' },
+    { stem: '2026-08-05T215959Z', summary: 'The 5th, last second.' },
+    { stem: '2026-08-05T220000Z', summary: 'The 6th, first second.' },
+  ];
+
+  function summaries(store: Fixture, args: Array<string>, env: Record<string, string> = {}): Array<string> {
+    return rows(run(store, ['list', '--all', ...args], { env: { TZ: 'Europe/Berlin', ...env } })).map(
+      (row) => row.summary,
+    );
+  }
+
+  test(`should start --since at local midnight`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, BERLIN);
+
+    // Act
+    const listed = summaries(store, ['--since', '2026-08-05']);
+
+    // Assert
+    expect(listed).toEqual(['The 5th, first second.', 'The 5th, last second.', 'The 6th, first second.']);
+  });
+
+  test(`should end --until at the last second of the local day`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, BERLIN);
+
+    // Act
+    const listed = summaries(store, ['--until', '2026-08-04']);
+
+    // Assert
+    expect(listed).toEqual(['July, last second.', 'August, first second.', 'The 4th, last second.']);
+  });
+
+  test(`should take a local day for --date`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, BERLIN);
+
+    // Act
+    const listed = summaries(store, ['--date', '2026-08-05']);
+
+    // Assert
+    expect(listed).toEqual(['The 5th, first second.', 'The 5th, last second.']);
+  });
+
+  test(`should take a local month and a local year for --date`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, BERLIN);
+
+    // Act
+    const month = summaries(store, ['--date', '2026-08']);
+    const july = summaries(store, ['--date', '2026-07']);
+    const year = summaries(store, ['--date', '2026']);
+
+    // Assert
+    expect(month.length).toBe(5);
+    expect(july).toEqual(['July, last second.']);
+    expect(year.length).toBe(6);
+  });
+
+  test(`should read today from the local clock`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, BERLIN);
+    /** 01:30 on the 6th in Berlin, still the 5th in UTC. */
+    const now = { AGENT_JOURNAL_NOW: String(Date.parse('2026-08-05T23:30:00Z') / 1_000) };
+
+    // Act
+    const today = summaries(store, ['--since', 'today'], now);
+    const yesterday = summaries(store, ['--since', '1d', '--until', '1d'], now);
+
+    // Assert
+    expect(today).toEqual(['The 6th, first second.']);
+    expect(yesterday).toEqual(['The 5th, first second.', 'The 5th, last second.']);
+  });
+
+  test(`should refuse a --date with a time and point to read`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, BERLIN);
+
+    // Act
+    const result = fails(store, ['list', '--date', '2026-08-05T22']);
+
+    // Assert
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('agent-journal read');
+  });
+
+  test(`should refuse a day that is not a date`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, BERLIN);
+
+    // Act
+    const month = fails(store, ['list', '--since', '2026-13-01']);
+    const february = fails(store, ['list', '--date', '2026-02-29']);
+    const april = fails(store, ['list', '--until', '2026-04-31']);
+
+    // Assert
+    expect(month.status).toBe(2);
+    expect(february.status).toBe(2);
+    expect(april.status).toBe(2);
+  });
+
+  test(`should take the 29th of February in a leap year`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, [{ stem: '2028-02-29T120000Z', summary: 'Leap day.' }]);
+
+    // Act
+    const listed = summaries(store, ['--date', '2028-02-29']);
+
+    // Assert
+    expect(listed).toEqual(['Leap day.']);
+  });
+
+  /** A leading zero would read as octal in shell arithmetic, where 08 and 09 do not exist. */
+  test(`should take the 8th and the 9th of a month`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, [
+      { stem: '2026-08-08T120000Z', summary: 'The 8th.' },
+      { stem: '2026-09-09T120000Z', summary: 'The 9th.' },
+    ]);
+
+    // Act
+    const since = summaries(store, ['--since', '2026-08-08', '--until', '2026-09-09']);
+    const day = summaries(store, ['--date', '2026-09-09']);
+    const month = summaries(store, ['--date', '2026-09']);
+
+    // Assert
+    expect(since).toEqual(['The 8th.', 'The 9th.']);
+    expect(day).toEqual(['The 9th.']);
+    expect(month).toEqual(['The 9th.']);
+  });
+
+  test(`should count days with a leading zero in decimal`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, BERLIN);
+    const now = { AGENT_JOURNAL_NOW: String(Date.parse('2026-08-13T12:00:00Z') / 1_000) };
+
+    // Act
+    const eight = summaries(store, ['--since', '08d'], now);
+    const ten = summaries(store, ['--since', '010d'], now);
+
+    // Assert
+    expect(eight).toEqual(['The 5th, first second.', 'The 5th, last second.', 'The 6th, first second.']);
+    expect(ten).toEqual(summaries(store, ['--since', '10d'], now));
+  });
+
+  test(`should take a day before any entry as no limit`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, BERLIN);
+
+    // Act
+    const far = summaries(store, ['--since', '30000d']);
+    const before = summaries(store, ['--since', '1969-12-31']);
+
+    // Assert
+    expect(far.length).toBe(6);
+    expect(before.length).toBe(6);
+  });
+
+  /**
+   * Havana moves its clocks from 00:00 to 01:00 on 8 March 2026, so that day
+   * has no midnight and starts at 01:00. GNU date refuses the missing time,
+   * BSD date moves it forward.
+   */
+  test(`should start a day that has no midnight at its first local time`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, [
+      { stem: '2026-03-08T045959Z', summary: 'The 7th, last second.' },
+      { stem: '2026-03-08T050000Z', summary: 'The 8th, first second.' },
+    ]);
+
+    // Act
+    const listed = summaries(store, ['--date', '2026-03-08'], { TZ: 'America/Havana' });
+
+    // Assert
+    expect(listed).toEqual(['The 8th, first second.']);
+  });
+});
+
