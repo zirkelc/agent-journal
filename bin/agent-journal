@@ -79,9 +79,9 @@ already has. The project and the directory come from where you are unless the
 flags say otherwise. --project . names the repository of --cwd, and fails
 outside one.
 
-filters: --date D      a prefix of the timestamp: 2026, 2026-01, 2026-01-11
-         --since D     from this day on, as YYYY-MM-DD, today, or 7d
-         --until D     up to this day, same forms
+filters: --date D      one local year, month or day: 2026, 2026-01, 2026-01-11
+         --since D     from this local day on, as YYYY-MM-DD, today, or 7d
+         --until D     up to and including this local day, same forms
          --project P   entries filed under one project, or . for the current project
          --cwd DIR     entries from a directory and everything under it
          --limit N     how many of the most recent to print, default 20
@@ -92,6 +92,9 @@ settings: journal_dir    where journal entries are written
 Entries are listed oldest first, so the newest is nearest the prompt. Each
 line starts with the id that read takes. Down a pipe the columns are id,
 project and summary, separated by one tab each.
+
+The filters take days in your time zone, and the ids are UTC, so an entry
+written just after midnight can carry the date before.
 EOF
 }
 
@@ -805,25 +808,42 @@ fi
 
 # ---------------------------------------------------------------- entries
 
-# A day, from the three forms a person types. Absolute dates and `today` are
-# free; `Nd` needs arithmetic, which POSIX `date` cannot do and the two
-# implementations that can do it disagree about. Try both rather than pick one
-# and be wrong on half the machines this runs on.
+# A local day from what a person types, as a day number in `day`: a date,
+# `today`, or `Nd` for N days before today. Today is the user's, from the
+# clock and the zone, so `today` at 01:00 in Berlin is already the new day
+# there although UTC has not reached it.
 resolve_day() {
   case $1 in
-    today) date -u +%Y-%m-%d ;;
-    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) printf '%s\n' "$1" ;;
-    *d)
-      n=${1%d}
-      case $n in
-        '' | *[!0-9]*) return 1 ;;
-      esac
-      date -u -v-"${n}"d +%Y-%m-%d 2>/dev/null && return 0
-      date -u -d "$n days ago" +%Y-%m-%d 2>/dev/null && return 0
-      return 1
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9])
+      t_dm=$((1${1#?????} / 1000 - 100))
+      t_dd=$((1${1#????????} - 100))
+      [ "$t_dm" -ge 1 ] && [ "$t_dm" -le 12 ] && [ "$t_dd" -ge 1 ] && [ "$t_dd" -le 31 ] || return 1
+      civil_to_days "${1%%-*}" "$t_dm" "$t_dd"
+      day=$days
+      ;;
+    today | *d)
+      t_n=0
+      if [ "$1" != today ]; then
+        t_n=${1%d}
+        case $t_n in
+          '' | *[!0-9]*) return 1 ;;
+        esac
+      fi
+      # Read once, so `--since today --until today` cannot straddle a midnight.
+      [ -n "${now_epoch:-}" ] || clock_now || return 1
+      day=$(((now_epoch + now_offset) / 86400 - t_n))
       ;;
     *) return 1 ;;
   esac
+}
+
+# An instant as an entry id, `2026-01-11T143000Z`, in `id`, so it compares with
+# the names of the entries as a string.
+format_id() {
+  format_instant "$1"
+  t_h=${instant_time%%:*}
+  t_rest=${instant_time#*:}
+  id=${instant_date}T$t_h${t_rest%%:*}${t_rest#*:}Z
 }
 
 # How the lines are laid out for the stream they go to, given as a file
@@ -885,14 +905,13 @@ render() {
     # Reads one file and keeps it when it passes the filters. Matches are kept
     # newest first, the order they are found in. Returns 1 once the file is
     # older than `since`, because every file after it is older still.
-    function scan(file,   stem, day, line, got, first, fm, proj, dir, summary, found, tail, text) {
+    function scan(file,   stem, line, got, first, fm, proj, dir, summary, found, tail, text) {
       if (file in skip) return 0
       stem = file
       sub(/.*\//, "", stem)
       sub(/\.md$/, "", stem)
-      day = substr(stem, 1, 10)
-      if (since != "" && day < since) return 1
-      if (until != "" && day > until) return 0
+      if (since != "" && stem < since) return 1
+      if (until != "" && stem > until) return 0
 
       first = 1; fm = 0; proj = ""; dir = ""; summary = ""; found = 0
       while ((got = (getline line < file)) > 0) {
@@ -1011,29 +1030,79 @@ render() {
 }
 
 if [ "$cmd" = list ] || [ "$cmd" = search ] || [ "$cmd" = read ]; then
-  # A prefix and a range are two ways to say the same thing, and honouring both
+  # A period and a range are two ways to say the same thing, and honouring both
   # at once would quietly return the intersection nobody asked for.
   if [ -n "$date_filter" ] && { [ -n "$since" ] || [ -n "$until" ]; }; then
     printf 'use --date or --since/--until, not both\n' >&2
     exit 2
   fi
 
-  # Through a second name, because assigning the substitution directly would
-  # empty the variable before the failure branch could name what was wrong with
-  # it.
+  # Every filter is in local days, and the entries are named in UTC, so each
+  # end becomes the id of the instant it stands for: the first second of the
+  # first day and the last second of the last. A day number is kept until then.
+  since_day=
+  until_day=
+  if [ -n "$date_filter" ]; then
+    case $date_filter in
+      [0-9][0-9][0-9][0-9])
+        civil_to_days "$date_filter" 1 1
+        since_day=$days
+        civil_to_days $((date_filter + 1)) 1 1
+        until_day=$((days - 1))
+        ;;
+      [0-9][0-9][0-9][0-9]-[0-9][0-9])
+        t_dm=$((1${date_filter#?????} - 100))
+        if [ "$t_dm" -ge 1 ] && [ "$t_dm" -le 12 ]; then
+          civil_to_days "${date_filter%-*}" "$t_dm" 1
+          since_day=$days
+          if [ "$t_dm" -eq 12 ]; then
+            civil_to_days $((${date_filter%-*} + 1)) 1 1
+          else
+            civil_to_days "${date_filter%-*}" $((t_dm + 1)) 1
+          fi
+          until_day=$((days - 1))
+        fi
+        ;;
+      [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9])
+        resolve_day "$date_filter" && since_day=$day && until_day=$day
+        ;;
+    esac
+    [ -n "$since_day" ] || {
+      printf 'not a period: %s. Use a year, a month or a day: 2026, 2026-01, 2026-01-11\n' "$date_filter" >&2
+      printf 'for one entry by its id, use: agent-journal read %s\n' "$date_filter" >&2
+      exit 2
+    }
+  fi
   if [ -n "$since" ]; then
-    day=$(resolve_day "$since") || {
+    resolve_day "$since" || {
       printf 'not a day: %s. Use YYYY-MM-DD, today, or 7d\n' "$since" >&2
       exit 2
     }
-    since=$day
+    since_day=$day
   fi
   if [ -n "$until" ]; then
-    day=$(resolve_day "$until") || {
+    resolve_day "$until" || {
       printf 'not a day: %s. Use YYYY-MM-DD, today, or 7d\n' "$until" >&2
       exit 2
     }
-    until=$day
+    until_day=$day
+  fi
+
+  if [ -n "$since_day" ]; then
+    local_midnight "$since_day" || {
+      printf 'cannot convert %s to UTC\n' "${since:-$date_filter}" >&2
+      exit 1
+    }
+    format_id "$midnight"
+    since=$id
+  fi
+  if [ -n "$until_day" ]; then
+    local_midnight $((until_day + 1)) || {
+      printf 'cannot convert %s to UTC\n' "${until:-$date_filter}" >&2
+      exit 1
+    }
+    format_id $((midnight - 1))
+    until=$id
   fi
 
   # Entries record `cwd` abbreviated, and a filter is compared against what is
@@ -1071,33 +1140,27 @@ if [ "$cmd" = list ] || [ "$cmd" = search ]; then
   fi
 
   # The filenames are the instant each entry records, so the shell's own ordering
-  # is chronological and a `--date` prefix is a date range the glob applies for
-  # free: the entries it excludes are never opened.
+  # is chronological. A period is checked on the names, before any file is
+  # opened, rather than by the glob: a local day spans two UTC dates and is no
+  # prefix of them.
   #
   # Starting from the shape of an entry name matters. A journal directory is a
   # plain directory and often holds a README, which `*.md` would sweep up and
   # which sorts after every timestamp there will ever be.
-  if [ -n "$date_filter" ]; then
-    set -- "$journal_dir"/"$date_filter"*.md
-  else
-    set -- "$journal_dir"/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*.md
-  fi
+  set -- "$journal_dir"/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*.md
 
   # A glob only ever expands to names that exist, so the one case to rule out is
   # that it matched nothing and was left as its own pattern. Testing the first
   # argument settles it. Filtering the whole list instead would be quadratic:
   # each `set -- "$@" ...` copies every argument, which on a year of entries is
   # seconds of work to learn what the shell already guaranteed.
+  #
+  # An empty journal and a filter that excluded everything both print nothing,
+  # and the difference between them is the difference between advice and noise:
+  # silence on the first run of a new install reads as something being broken.
   if [ ! -f "$1" ]; then
-    # An empty journal and a filter that excluded everything both print nothing,
-    # and the difference between them is the difference between advice and noise.
-    # Worth a second glob to tell them apart: silence on the first run of a new
-    # install reads as something being broken.
-    set -- "$journal_dir"/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*.md
-    if [ ! -f "$1" ]; then
-      printf 'no entries yet in %s\n' "$journal_dir" >&2
-      printf 'your agent writes them on its own, or write one with: agent-journal write\n' >&2
-    fi
+    printf 'no entries yet in %s\n' "$journal_dir" >&2
+    printf 'your agent writes them on its own, or write one with: agent-journal write\n' >&2
     exit 0
   fi
 

@@ -1,7 +1,7 @@
 import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
-import { type Entry, fails, fixture, output, rows, run, seed, terminal, worktree } from './helpers.js';
+import { type Entry, type Fixture, fails, fixture, output, rows, run, seed, terminal, worktree } from './helpers.js';
 
 /**
  * A week of entries across three projects, with one written outside a
@@ -817,3 +817,119 @@ describe('files that are not entries it can read', () => {
     expect(listed.map((row) => row.summary)).toEqual(['Short lines.']);
   });
 });
+
+/**
+ * Days are the user's local days. In Berlin in August a day starts at 22:00
+ * UTC the evening before, so each entry sits one second either side of a local
+ * midnight.
+ */
+describe('local days', () => {
+  const BERLIN: Array<Entry> = [
+    { stem: '2026-07-31T215959Z', summary: 'July, last second.' },
+    { stem: '2026-07-31T220000Z', summary: 'August, first second.' },
+    { stem: '2026-08-04T215959Z', summary: 'The 4th, last second.' },
+    { stem: '2026-08-04T220000Z', summary: 'The 5th, first second.' },
+    { stem: '2026-08-05T215959Z', summary: 'The 5th, last second.' },
+    { stem: '2026-08-05T220000Z', summary: 'The 6th, first second.' },
+  ];
+
+  function summaries(store: Fixture, args: Array<string>, env: Record<string, string> = {}): Array<string> {
+    return rows(run(store, ['list', '--all', ...args], { env: { TZ: 'Europe/Berlin', ...env } })).map(
+      (row) => row.summary,
+    );
+  }
+
+  test(`should start --since at local midnight`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, BERLIN);
+
+    // Act
+    const listed = summaries(store, ['--since', '2026-08-05']);
+
+    // Assert
+    expect(listed).toEqual(['The 5th, first second.', 'The 5th, last second.', 'The 6th, first second.']);
+  });
+
+  test(`should end --until at the last second of the local day`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, BERLIN);
+
+    // Act
+    const listed = summaries(store, ['--until', '2026-08-04']);
+
+    // Assert
+    expect(listed).toEqual(['July, last second.', 'August, first second.', 'The 4th, last second.']);
+  });
+
+  test(`should take a local day for --date`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, BERLIN);
+
+    // Act
+    const listed = summaries(store, ['--date', '2026-08-05']);
+
+    // Assert
+    expect(listed).toEqual(['The 5th, first second.', 'The 5th, last second.']);
+  });
+
+  test(`should take a local month and a local year for --date`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, BERLIN);
+
+    // Act
+    const month = summaries(store, ['--date', '2026-08']);
+    const july = summaries(store, ['--date', '2026-07']);
+    const year = summaries(store, ['--date', '2026']);
+
+    // Assert
+    expect(month.length).toBe(5);
+    expect(july).toEqual(['July, last second.']);
+    expect(year.length).toBe(6);
+  });
+
+  test(`should read today from the local clock`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, BERLIN);
+    /** 01:30 on the 6th in Berlin, still the 5th in UTC. */
+    const now = { AGENT_JOURNAL_NOW: String(Date.parse('2026-08-05T23:30:00Z') / 1_000) };
+
+    // Act
+    const today = summaries(store, ['--since', 'today'], now);
+    const yesterday = summaries(store, ['--since', '1d', '--until', '1d'], now);
+
+    // Assert
+    expect(today).toEqual(['The 6th, first second.']);
+    expect(yesterday).toEqual(['The 5th, first second.', 'The 5th, last second.']);
+  });
+
+  test(`should refuse a --date with a time and point to read`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, BERLIN);
+
+    // Act
+    const result = fails(store, ['list', '--date', '2026-08-05T22']);
+
+    // Assert
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('agent-journal read');
+  });
+
+  test(`should refuse a day that is not a date`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, BERLIN);
+
+    // Act
+    const result = fails(store, ['list', '--since', '2026-13-01']);
+
+    // Assert
+    expect(result.status).toBe(2);
+  });
+});
+

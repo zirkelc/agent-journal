@@ -152,16 +152,12 @@ describe('resolve', () => {
   test(`should name the zone from the system when TZ is not set`, () => {
     // Arrange
     const store = fixture();
-    const saved = process.env.TZ;
-    delete process.env.TZ;
 
     // Act
-    let out: string;
-    try {
-      out = run(store, ['resolve'], { at: store.repo, env: { AGENT_JOURNAL_NOW: '1791216602', LC_ALL: 'C' } });
-    } finally {
-      if (saved !== undefined) process.env.TZ = saved;
-    }
+    const out = run(store, ['resolve'], {
+      at: store.repo,
+      env: { AGENT_JOURNAL_NOW: '1791216602', LC_ALL: 'C', TZ: undefined },
+    });
 
     // Assert
     expect(out).toContain('utc_now=2026-10-05T16:10:02Z\n');
