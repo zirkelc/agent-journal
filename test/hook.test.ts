@@ -125,7 +125,12 @@ describe('failure', () => {
     execFileSync(HOOK, [], {
       encoding: 'utf8',
       input,
-      env: { ...process.env, HOME: store.home, XDG_CONFIG_HOME: join(store.home, 'config'), CLAUDE_PLUGIN_ROOT: store.root },
+      env: {
+        ...process.env,
+        HOME: store.home,
+        XDG_CONFIG_HOME: join(store.home, 'config'),
+        CLAUDE_PLUGIN_ROOT: store.root,
+      },
     });
 
   test(`should say nothing and succeed when the instructions are missing`, () => {

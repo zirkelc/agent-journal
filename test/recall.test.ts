@@ -136,7 +136,16 @@ describe('list', () => {
     seed(store, ENTRIES);
     writeFileSync(
       join(store.journalDir, '2026-08-10T120000Z.md'),
-      ['---', 'date: 2026-08-10T12:00:00Z', 'project: nebula', 'summary: "Saved on Windows."', '---', '', 'A CRLF body.', ''].join('\r\n'),
+      [
+        '---',
+        'date: 2026-08-10T12:00:00Z',
+        'project: nebula',
+        'summary: "Saved on Windows."',
+        '---',
+        '',
+        'A CRLF body.',
+        '',
+      ].join('\r\n'),
     );
 
     // Act
@@ -747,7 +756,10 @@ describe('the exact output', () => {
     // Arrange
     const store = fixture();
     /** Older than the limit reaches, so its long name must not widen the column. */
-    seed(store, [{ stem: '2026-08-01T080000Z', project: 'a-much-longer-project-name', summary: 'Out of reach.' }, ...ENTRIES]);
+    seed(store, [
+      { stem: '2026-08-01T080000Z', project: 'a-much-longer-project-name', summary: 'Out of reach.' },
+      ...ENTRIES,
+    ]);
 
     // Act
     const shown = terminal(store, ['list', '--limit', '3'], { env: { NO_COLOR: '1' } });
@@ -762,7 +774,6 @@ describe('the exact output', () => {
       ].join('\n'),
     );
   });
-
 });
 
 describe('files that are not entries it can read', () => {
@@ -1017,4 +1028,3 @@ describe('local days', () => {
     expect(listed).toEqual(['The 8th, first second.']);
   });
 });
-

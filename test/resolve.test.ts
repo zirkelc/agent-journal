@@ -181,10 +181,7 @@ describe('resolve', () => {
     const shim = join(store.home, 'shim');
     mkdirSync(shim);
     const real = execFileSync('sh', ['-c', 'command -v date'], { encoding: 'utf8' }).trim();
-    writeFileSync(
-      join(shim, 'date'),
-      `#!/bin/sh\ncase "$*" in *:00:00*) exit 1 ;; esac\nexec ${real} "$@"\n`,
-    );
+    writeFileSync(join(shim, 'date'), `#!/bin/sh\ncase "$*" in *:00:00*) exit 1 ;; esac\nexec ${real} "$@"\n`);
     chmodSync(join(shim, 'date'), 0o755);
 
     // Act
@@ -298,11 +295,7 @@ describe('the first day of the week', () => {
     test(`should take an explicit first weekday over every region`, () => {
       // Arrange
       const store = fixture();
-      settings(
-        store,
-        ['AppleLocale', '-string', 'en_US@rg=dezzzz'],
-        ['AppleFirstWeekday', '-json', '{"gregorian":1}'],
-      );
+      settings(store, ['AppleLocale', '-string', 'en_US@rg=dezzzz'], ['AppleFirstWeekday', '-json', '{"gregorian":1}']);
 
       // Act
       const values = resolve(store, store.repo, { now: '2026-10-05T16:10:02Z' });

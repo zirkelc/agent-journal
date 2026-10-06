@@ -140,14 +140,7 @@ describe('install.sh', () => {
   test(`should say how to reach the commands when the bin directory is off PATH`, () => {
     // Arrange, Act
     const home = realpathSync(mkdtempSync(join(tmpdir(), 'agent-journal-install-')));
-    const output = run(home, [
-      '--prefix',
-      join(home, 'opt'),
-      '--source',
-      ROOT,
-      '--dir',
-      join(home, 'journal'),
-    ]);
+    const output = run(home, ['--prefix', join(home, 'opt'), '--source', ROOT, '--dir', join(home, 'journal')]);
 
     // Assert
     expect(output).toContain('is not on your PATH');
@@ -181,14 +174,7 @@ describe('install.sh', () => {
     const elsewhere = join(installed.home, 'elsewhere');
 
     // Act
-    const again = run(installed.home, [
-      '--prefix',
-      installed.prefix,
-      '--source',
-      ROOT,
-      '--dir',
-      elsewhere,
-    ]);
+    const again = run(installed.home, ['--prefix', installed.prefix, '--source', ROOT, '--dir', elsewhere]);
 
     // Assert
     /** Without this the entries would go somewhere nobody is looking. */
@@ -201,14 +187,7 @@ describe('install.sh', () => {
     const installed = install();
 
     // Act
-    const again = run(installed.home, [
-      '--prefix',
-      installed.prefix,
-      '--source',
-      ROOT,
-      '--dir',
-      installed.journalDir,
-    ]);
+    const again = run(installed.home, ['--prefix', installed.prefix, '--source', ROOT, '--dir', installed.journalDir]);
 
     // Assert
     expect(again).toContain('left as it is');
@@ -220,20 +199,11 @@ describe('install.sh', () => {
     const installed = install();
 
     // Act
-    const again = run(installed.home, [
-      '--prefix',
-      installed.prefix,
-      '--source',
-      ROOT,
-      '--dir',
-      installed.journalDir,
-    ]);
+    const again = run(installed.home, ['--prefix', installed.prefix, '--source', ROOT, '--dir', installed.journalDir]);
 
     // Assert
     expect(again).toContain('are linked into');
-    expect(realpathSync(join(installed.binDir, 'aj'))).toBe(
-      join(installed.dataDir, 'bin', 'agent-journal'),
-    );
+    expect(realpathSync(join(installed.binDir, 'aj'))).toBe(join(installed.dataDir, 'bin', 'agent-journal'));
   });
 });
 

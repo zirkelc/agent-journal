@@ -55,10 +55,7 @@ export function fixture(instructions?: string): Fixture {
   copyFileSync(join(ROOT, 'adapters', 'common.sh'), join(root, 'adapters', 'common.sh'));
   mkdirSync(join(root, 'lib'), { recursive: true });
   copyFileSync(join(ROOT, 'lib', 'install.sh'), join(root, 'lib', 'install.sh'));
-  writeFileSync(
-    join(root, 'INSTRUCTIONS.md'),
-    instructions ?? readFileSync(join(ROOT, 'INSTRUCTIONS.md'), 'utf8'),
-  );
+  writeFileSync(join(root, 'INSTRUCTIONS.md'), instructions ?? readFileSync(join(ROOT, 'INSTRUCTIONS.md'), 'utf8'));
 
   mkdirSync(repo, { recursive: true });
   execFileSync('git', ['init', '-q', repo]);
@@ -167,9 +164,7 @@ export function terminal(
   if (options.stdoutTo) command += ` > ${quote(options.stdoutTo)}`;
 
   const argv =
-    process.platform === 'darwin'
-      ? ['-q', '/dev/null', 'sh', '-c', command]
-      : ['-qec', command, '/dev/null'];
+    process.platform === 'darwin' ? ['-q', '/dev/null', 'sh', '-c', command] : ['-qec', command, '/dev/null'];
 
   /** Not checked for status, because a refusal is laid out like anything else. */
   const result = spawnSync('script', argv, {

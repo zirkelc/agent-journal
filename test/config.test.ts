@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
@@ -109,7 +108,9 @@ describe('writing', () => {
     const result = settings(store);
 
     // Assert
-    const lines = readFileSync(result.config_file, 'utf8').split('\n').filter((l) => l.startsWith('journal_dir='));
+    const lines = readFileSync(result.config_file, 'utf8')
+      .split('\n')
+      .filter((l) => l.startsWith('journal_dir='));
     expect(lines.length).toBe(1);
     expect(result.journal_dir).toBe(join(store.home, 'two'));
   });
