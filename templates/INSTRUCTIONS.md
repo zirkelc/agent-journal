@@ -1,26 +1,13 @@
 <!--
-The entire text injected into the model's context at the start of every session,
-by whichever adapter is installed. Edit this file to change it; nothing
-needs to be copied anywhere.
+The entire text injected into the model's context at the start of every session, by whichever adapter is installed. Edit this file to change it; nothing needs to be copied anywhere.
 
-This comment is stripped before injection. `__JOURNAL_DIR__`, `__PROJECT__`,
-`__CWD__`, `__SESSION_ID__` and `__AGENT__` are replaced with what the session
-resolved to, so every path and command below is runnable as written. A line whose
-placeholder resolves to nothing is dropped whole, which is how an agent with no
-session id produces no line claiming one.
+This comment is stripped before injection. `__JOURNAL_DIR__`, `__PROJECT__`, `__CWD__`, `__SESSION_ID__` and `__AGENT__` are replaced with what the session resolved to, so every path and command below is runnable as written. A line whose placeholder resolves to nothing is dropped whole, which is how an agent with no session id produces no line claiming one.
 
-The opening paragraph is framing rather than instruction: `additionalContext` and
-its equivalents arrive as ambient information, so without being told otherwise
-the model reads all of this as background material about journaling rather than
-as a requirement to journal. An agent that takes its instructions some other way
-can prepend its own framing instead.
+The opening paragraph is framing rather than instruction: `additionalContext` and its equivalents arrive as ambient information, so without being told otherwise the model reads all of this as background material about journaling rather than as a requirement to journal. An agent that takes its instructions some other way can prepend its own framing instead.
 
-Headings start at H2 on purpose. This text is injected standalone into one agent
-and appended into a larger instructions file for another, and an H1 arriving in
-the middle of someone else's document competes with that document's own title.
+Headings start at H2 on purpose. This text is injected standalone into one agent and appended into a larger instructions file for another, and an H1 arriving in the middle of someone else's document competes with that document's own title.
 
-Keep it agent-neutral: no product names, and no tool names beyond the file
-writing one, which every agent has.
+Keep it agent-neutral: no product names, and no tool names beyond the file writing one, which every agent has.
 -->
 
 The following is a standing instruction for this session, injected by `agent-journal` from the user's configuration.
@@ -43,8 +30,7 @@ Once there is something worth remebering, a little noise is better than missed e
 
 Some sessions contain nothing worth remembering: greetings, a question answered from what you already knew, a couple of commands that changed nothing. Do note write an entry and do not announce it.
 
-Never write an entry about the entry: "Created the required journal entry for this session" and "Session opened, no task has been requested yet" tell a future reader only that a session happened. 
-If a summary would mean nothing to someone reading it in a year, there is nothing to write yet.
+Never write an entry about the entry: "Created the required journal entry for this session" and "Session opened, no task has been requested yet" tell a future reader only that a session happened. If a summary would mean nothing to someone reading it in a year, there is nothing to write yet.
 
 ### Writing an entry
 
