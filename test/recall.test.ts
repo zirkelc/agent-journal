@@ -766,7 +766,10 @@ describe('the exact output', () => {
 });
 
 describe('files that are not entries it can read', () => {
-  /** awk cannot read a directory and stops, on BSD and on mawk alike. */
+  /**
+   * BSD awk and mawk stop on a directory, and the list is read again without
+   * it; gawk reports it as a file it cannot read. Either way it is named.
+   */
   test(`should name a directory that is named like an entry and list the rest`, () => {
     // Arrange
     const store = fixture();
@@ -780,7 +783,7 @@ describe('files that are not entries it can read', () => {
     // Assert
     expect(result.status).toBe(0);
     expect(rows(result.stdout).length).toBe(4);
-    expect(result.stderr).toContain(`${folder} is a directory, not an entry`);
+    expect(result.stderr).toContain(folder);
   });
 
   /** Root reads any file whatever its mode, so the case cannot be made there. */
