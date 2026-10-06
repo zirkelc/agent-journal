@@ -267,6 +267,384 @@ no_project_here() {
   exit 1
 }
 
+# ---------------------------------------------------------------- time
+
+# What time it is and what the user's calendar looks like, so a model is told
+# the dates rather than left to work them out. Each function sets variables
+# instead of printing, so a command calls only the ones it needs, without a
+# subshell per value. The clock is read once, by `clock_now`, and everything
+# else is derived from that one instant.
+#
+# Names starting with `t_` are scratch values of these functions.
+
+# Days since 1970-01-01 for a civil date, and back, in `days` and in `civil`
+# (YYYY-MM-DD) with `civil_y`, `civil_m` and `civil_d`. Integer arithmetic
+# (Howard Hinnant's algorithm), so month lengths, leap years and year
+# boundaries need no `date`, and GNU and BSD cannot disagree about them. Valid
+# from 1970 on, which is all a journal needs.
+civil_to_days() {
+  t_cy=$1
+  if [ "$2" -le 2 ]; then
+    t_cy=$((t_cy - 1))
+    t_mp=$(($2 + 9))
+  else
+    t_mp=$(($2 - 3))
+  fi
+  t_era=$((t_cy / 400))
+  t_yoe=$((t_cy - t_era * 400))
+  t_doy=$(((153 * t_mp + 2) / 5 + $3 - 1))
+  days=$((t_era * 146097 + t_yoe * 365 + t_yoe / 4 - t_yoe / 100 + t_doy - 719468))
+}
+
+days_to_civil() {
+  t_z=$(($1 + 719468))
+  t_era=$((t_z / 146097))
+  t_doe=$((t_z - t_era * 146097))
+  t_yoe=$(((t_doe - t_doe / 1460 + t_doe / 36524 - t_doe / 146096) / 365))
+  t_doy=$((t_doe - (365 * t_yoe + t_yoe / 4 - t_yoe / 100)))
+  t_mp=$(((5 * t_doy + 2) / 153))
+  civil_d=$((t_doy - (153 * t_mp + 2) / 5 + 1))
+  civil_y=$((t_yoe + t_era * 400))
+  if [ "$t_mp" -lt 10 ]; then
+    civil_m=$((t_mp + 3))
+  else
+    civil_m=$((t_mp - 9))
+    civil_y=$((civil_y + 1))
+  fi
+  pad2 "$civil_m"
+  civil=$civil_y-$two
+  pad2 "$civil_d"
+  civil=$civil-$two
+}
+
+# Two digits, for the parts of a date or a time, in `two`. Set rather than
+# printed, because a substitution is a fork, and a range takes dozens of these.
+pad2() {
+  if [ "$1" -lt 10 ]; then two=0$1; else two=$1; fi
+}
+
+# A UTC offset in seconds as `+02:00`, in `offset_text`.
+format_offset() {
+  t_off=$1
+  t_sign=+
+  if [ "$t_off" -lt 0 ]; then
+    t_sign=-
+    t_off=$((-t_off))
+  fi
+  pad2 $((t_off / 3600))
+  offset_text=$t_sign$two
+  pad2 $((t_off % 3600 / 60))
+  offset_text=$offset_text:$two
+}
+
+# An instant as ISO 8601, in `instant`, with its parts in `instant_date` and
+# `instant_time`. With an offset in seconds it is the wall clock at that
+# offset, written with it; without one it is UTC, written with `Z`.
+format_instant() {
+  t_wall=$(($1 + ${2:-0}))
+  days_to_civil $((t_wall / 86400))
+  t_sec=$((t_wall % 86400))
+  instant_date=$civil
+  pad2 $((t_sec / 3600))
+  instant_time=$two
+  pad2 $((t_sec % 3600 / 60))
+  instant_time=$instant_time:$two
+  pad2 $((t_sec % 60))
+  instant_time=$instant_time:$two
+  if [ -n "${2:-}" ]; then
+    format_offset "$2"
+    instant=${instant_date}T$instant_time$offset_text
+  else
+    instant=${instant_date}T${instant_time}Z
+  fi
+}
+
+# Reads the clock: `now_epoch`, and `now_offset`, the zone's UTC offset at
+# that instant in seconds. One `date` call, so the two always belong to the
+# same second. `AGENT_JOURNAL_NOW` (seconds since the epoch) stands in for the
+# clock in tests, through `-r` on BSD and `-d @` on GNU. Called once per
+# command: a second call is a second reading, and values derived from the two
+# could belong to different seconds.
+clock_now() {
+  if [ -n "${AGENT_JOURNAL_NOW:-}" ]; then
+    t_out=$(date -r "$AGENT_JOURNAL_NOW" '+%s %z' 2>/dev/null) ||
+      t_out=$(date -d "@$AGENT_JOURNAL_NOW" '+%s %z' 2>/dev/null) ||
+      return 1
+  else
+    t_out=$(date '+%s %z') || return 1
+  fi
+  now_epoch=${t_out%% *}
+  t_z=${t_out#* }
+  t_hm=${t_z#[+-]}
+  # Through `1HH - 100`, because a leading zero would read as octal.
+  now_offset=$(((1${t_hm%??} - 100) * 3600 + (1${t_hm#??} - 100) * 60))
+  case $t_z in -*) now_offset=$((-now_offset)) ;; esac
+}
+
+# The zone's name, such as `Europe/Berlin`, in `timezone`. From `TZ` when it is
+# set, else from where `/etc/localtime` points, else from `/etc/timezone`.
+# Empty when none of them says, which leaves the offset to speak for it.
+timezone_name() {
+  timezone=${TZ:-}
+  timezone=${timezone#:}
+  case $timezone in
+    /*zoneinfo/*) timezone=${timezone#*zoneinfo/} ;;
+    /*) timezone= ;;
+  esac
+  [ -z "$timezone" ] || return 0
+  t_link=$(readlink /etc/localtime 2>/dev/null) || t_link=
+  case $t_link in
+    *zoneinfo/*) timezone=${t_link#*zoneinfo/} ;;
+  esac
+  [ -z "$timezone" ] || return 0
+  [ -r /etc/timezone ] && IFS= read -r timezone </etc/timezone
+  return 0
+}
+
+# The first day of the week for a region, in `t_ws` (1 is Monday, 7 is
+# Sunday), from CLDR's week data. Most of the world starts on Monday, so only
+# the regions that do not are listed.
+region_week_start() {
+  case $1 in
+    MV) t_ws=5 ;;
+    AF | BH | DJ | DZ | EG | IQ | IR | JO | KW | LY | OM | QA | SD | SY) t_ws=6 ;;
+    AG | AS | BD | BR | BS | BT | BW | BZ | CA | CO | DM | DO | ET | GT | GU | HK | HN | ID | IL | IN | IS | \
+      JM | JP | KE | KH | KR | LA | MH | MM | MO | MT | MX | MZ | NI | NP | PA | PE | PH | PK | PR | PT | \
+      PY | SA | SG | SV | TH | TT | TW | UM | US | VE | VI | WS | YE | ZA | ZW) t_ws=7 ;;
+    [A-Z][A-Z]) t_ws=1 ;;
+    *) return 1 ;;
+  esac
+}
+
+# The region of a locale name, upper case, in `t_cc`: the `rg` override of a
+# macOS locale (`en_US@rg=dezzzz` is Germany) before its country (`en_US`).
+locale_region() {
+  case $1 in
+    *@rg=??*) t_cc=${1#*@rg=} ;;
+    *_??*) t_cc=${1#*_} ;;
+    *) return 1 ;;
+  esac
+  t_cc=${t_cc%"${t_cc#??}"}
+  # Only an `rg` value is lower case, so only that one costs a process.
+  case $t_cc in
+    *[a-z]*) t_cc=$(printf '%s' "$t_cc" | tr '[:lower:]' '[:upper:]') ;;
+  esac
+}
+
+# The user's first day of the week, in `week_start` (1 is Monday, 7 is Sunday),
+# and where it came from, in `week_start_from`. The first of these that answers:
+#
+# 1. An explicit setting: macOS's first weekday, or, on Linux, what the
+#    installed locale says. `C` and `POSIX` say Sunday by default rather than by
+#    anyone's choice, and a locale that is not installed falls back to them, so
+#    neither counts.
+# 2. The region: of the macOS locale, where `rg` is the region chosen in System
+#    Settings and can differ from the language's country, then of `LC_ALL`,
+#    `LC_TIME` or `LANG`, whichever decides the time format.
+# 3. Monday, the ISO 8601 week.
+resolve_week_start() {
+  week_start=
+  week_start_from=
+  t_first=
+  t_apple=
+  t_plist=$HOME/Library/Preferences/.GlobalPreferences.plist
+  if [ -f "$t_plist" ] && command -v plutil >/dev/null 2>&1; then
+    # One conversion for both keys. The file is binary, and plutil reads it
+    # faster than one `defaults` call per key.
+    t_out=$(plutil -convert xml1 -o - "$t_plist" 2>/dev/null | awk '
+      /<key>AppleFirstWeekday<\/key>/ { first = 1; next }
+      first && /<key>gregorian<\/key>/ { gregorian = 1; next }
+      gregorian && /<integer>/ { gsub(/.*<integer>|<\/integer>.*/, ""); weekday = $0; gregorian = 0 }
+      first && /<\/dict>/ { first = 0 }
+      /<key>AppleLocale<\/key>/ { locale = 1; next }
+      locale { gsub(/.*<string>|<\/string>.*/, ""); name = $0; locale = 0 }
+      END { print weekday; print name }
+    ')
+    t_first=${t_out%%"$newline"*}
+    t_apple=${t_out#*"$newline"}
+  fi
+
+  case $t_first in
+    [1-7])
+      # Counted from Sunday as 1.
+      week_start=$(((t_first + 5) % 7 + 1))
+      week_start_from=AppleFirstWeekday
+      return 0
+      ;;
+  esac
+
+  t_var=LANG
+  [ -z "${LC_TIME:-}" ] || t_var=LC_TIME
+  [ -z "${LC_ALL:-}" ] || t_var=LC_ALL
+  eval "t_name=\${$t_var:-}"
+
+  case $t_name in
+    '' | C | C.* | POSIX) ;;
+    *)
+      if command -v locale >/dev/null 2>&1; then
+        t_out=$(locale -k LC_TIME 2>&1)
+        case $t_out in
+          *'Cannot set'*) ;;
+          *week-1stday=*first_weekday=*)
+            # glibc counts the first weekday from the day `week-1stday` names.
+            t_day=${t_out#*week-1stday=}
+            t_day=${t_day%%"$newline"*}
+            t_n=${t_out#*first_weekday=}
+            t_n=${t_n%%"$newline"*}
+            civil_to_days "${t_day%????}" $((1${t_day#????} / 100 - 100)) $((1${t_day#??????} - 100))
+            week_start=$((((days + 3) % 7 + t_n - 1) % 7 + 1))
+            week_start_from="locale $t_name"
+            return 0
+            ;;
+        esac
+      fi
+      ;;
+  esac
+
+  if [ -n "$t_apple" ] && locale_region "$t_apple" && region_week_start "$t_cc"; then
+    week_start=$t_ws
+    week_start_from="region $t_cc from AppleLocale"
+    return 0
+  fi
+  if locale_region "$t_name" && region_week_start "$t_cc"; then
+    week_start=$t_ws
+    week_start_from="region $t_cc from $t_var"
+    return 0
+  fi
+
+  week_start=1
+  week_start_from=fallback
+}
+
+# The instant a local day starts, in `midnight`, for a day number. It needs
+# the zone's rules for that day, which may differ from today's, so it asks
+# `date`, as BSD (`-j -f`) or as GNU (`-d`). Kept per day, so a day that
+# starts one range and ends another is converted once.
+local_midnight() {
+  eval "midnight=\${t_midnight_$1:-}"
+  [ -z "$midnight" ] || return 0
+  days_to_civil "$1"
+  midnight=$(date -j -f '%Y-%m-%d %H:%M:%S' "$civil 00:00:00" '+%s' 2>/dev/null) ||
+    midnight=$(date -d "$civil 00:00:00" '+%s' 2>/dev/null) ||
+    return 1
+  eval "t_midnight_$1=\$midnight"
+}
+
+# A range of local days, from day number `$1` up to but not including `$2`, as
+# instants: `range_local` with the zone's offsets, and `range_utc`. The ends
+# are the last second of the range, so both are inclusive.
+#
+# Each offset is the difference between the wall clock and the instant, which
+# holds even on a day that changes it: the week of 25 October 2026 in Berlin
+# starts at +02:00 and ends at +01:00.
+range_instants() {
+  local_midnight "$1" || return 1
+  t_start=$midnight
+  local_midnight "$2" || return 1
+  t_end=$((midnight - 1))
+  days_to_civil "$1"
+  format_offset $(($1 * 86400 - t_start))
+  range_local=${civil}T00:00:00$offset_text
+  days_to_civil $(($2 - 1))
+  format_offset $(($2 * 86400 - 1 - t_end))
+  range_local="$range_local ${civil}T23:59:59$offset_text"
+  format_instant "$t_start"
+  range_utc=$instant
+  format_instant "$t_end"
+  range_utc="$range_utc $instant"
+}
+
+# The calendar around the clock's instant, as day numbers: `today`, and the
+# first day of each range with the first day after it, in `<name>_first` and
+# `<name>_next`. Needs `clock_now` and `resolve_week_start` first.
+resolve_calendar_days() {
+  today=$(((now_epoch + now_offset) / 86400))
+  weekday=$(((today + 3) % 7 + 1))
+
+  yesterday_first=$((today - 1))
+  yesterday_next=$today
+  today_first=$today
+  today_next=$((today + 1))
+
+  this_week_first=$((today - (weekday - week_start + 7) % 7))
+  this_week_next=$((this_week_first + 7))
+  last_week_first=$((this_week_first - 7))
+  last_week_next=$this_week_first
+
+  days_to_civil "$today"
+  t_y=$civil_y
+  t_m=$civil_m
+  civil_to_days "$t_y" "$t_m" 1
+  this_month_first=$days
+  if [ "$t_m" -eq 12 ]; then civil_to_days $((t_y + 1)) 1 1; else civil_to_days "$t_y" $((t_m + 1)) 1; fi
+  this_month_next=$days
+  if [ "$t_m" -eq 1 ]; then civil_to_days $((t_y - 1)) 12 1; else civil_to_days "$t_y" $((t_m - 1)) 1; fi
+  last_month_first=$days
+  last_month_next=$this_month_first
+}
+
+# Every value about the current time, read from the clock once: one variable
+# per key, named as the key is, and all of them as `key=value` lines in
+# `time_text`, in a fixed order. A command prints `time_text` as it is, or uses
+# the variables by name when it needs another form. The ranges are instant
+# pairs in both forms, the same two instants each; only `local_today` and
+# `local_yesterday` are plain dates, because a local day reads as its date. Their
+# UTC forms stay ranges, because a local day is not one UTC date.
+resolve_time() {
+  clock_now || return 1
+  timezone_name
+  resolve_week_start
+  resolve_calendar_days
+
+  format_instant "$now_epoch" "$now_offset"
+  local_now=$instant
+  local_date=$instant_date
+  local_time=$instant_time
+  case $weekday in
+    1) local_weekday=Monday ;;
+    2) local_weekday=Tuesday ;;
+    3) local_weekday=Wednesday ;;
+    4) local_weekday=Thursday ;;
+    5) local_weekday=Friday ;;
+    6) local_weekday=Saturday ;;
+    7) local_weekday=Sunday ;;
+  esac
+  local_timezone=$timezone
+  local_utc_offset=$offset_text
+  format_instant "$now_epoch"
+  utc_now=$instant
+  utc_date=$instant_date
+  utc_time=$instant_time
+
+  time_text="local_now=$local_now
+local_date=$local_date
+local_time=$local_time
+local_weekday=$local_weekday
+local_timezone=$local_timezone
+local_utc_offset=$local_utc_offset
+utc_now=$utc_now
+utc_date=$utc_date
+utc_time=$utc_time
+week_start_from=$week_start_from"
+
+  for t_range in today yesterday this_week last_week this_month last_month; do
+    eval "t_rf=\$${t_range}_first t_rn=\$${t_range}_next"
+    range_local=
+    range_utc=
+    range_instants "$t_rf" "$t_rn" || printf 'cannot convert %s to UTC\n' "$t_range" >&2
+    case $t_range in
+      today | yesterday)
+        days_to_civil "$t_rf"
+        range_local=$civil
+        ;;
+    esac
+    eval "local_$t_range=\$range_local utc_$t_range=\$range_utc"
+    time_text="$time_text
+local_$t_range=$range_local
+utc_$t_range=$range_utc"
+  done
+}
+
 # ---------------------------------------------------------------- arguments
 
 # Bare `agent-journal` lists, because the question a person arrives with is what
@@ -996,6 +1374,25 @@ EOF
 
   mv "$draft" "$entry" || exit 1
   printf '%s\n' "$entry"
+  exit 0
+fi
+
+# ---------------------------------------------------------------- resolve
+
+# Everything the CLI works out for itself, as key=value lines. For debugging
+# and tests, and left out of the help: the commands that need these values call
+# the same functions rather than this command.
+if [ "$cmd" = resolve ]; then
+  [ "$argc" -eq 0 ] || usage
+  resolve_time || {
+    printf 'cannot read the clock\n' >&2
+    exit 1
+  }
+  printf '%s\n' "$time_text"
+  resolve_project "$cwd"
+  printf 'project=%s\n' "$project"
+  printf 'cwd=%s\n' "$(abbrev_home "$cwd")"
+  printf 'journal_dir=%s\n' "$(abbrev_home "$journal_dir")"
   exit 0
 fi
 
