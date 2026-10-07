@@ -25,6 +25,11 @@
 
 set -u
 
+# The whole payload is read before anything here can exit. The agent writes it
+# into a pipe, and a hook that leaves without reading it hands the writer a
+# broken pipe.
+payload=$(cat)
+
 self=$0
 case $self in
   */*) ;;
@@ -38,7 +43,9 @@ root=${PLUGIN_ROOT:-$(cd "$(dirname "$self")/../.." 2>/dev/null && pwd)}
 
 . "$root/adapters/common.sh"
 
-journal_read_payload
+journal_read_payload <<EOF
+$payload
+EOF
 
 # Without a cwd in the payload, the core falls back to the directory it runs in.
 out=$("$root/bin/agent-journal" context \

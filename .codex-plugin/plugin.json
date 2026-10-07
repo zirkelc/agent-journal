@@ -1,6 +1,6 @@
 {
   "name": "agent-journal",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "A journal written by your agent, autonomously. One small markdown file per milestone, written as the work happens, in a format built to be scanned with grep and ls.",
   "author": {
     "name": "Chris Cook",
