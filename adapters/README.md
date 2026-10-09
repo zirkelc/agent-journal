@@ -54,7 +54,7 @@ Two more questions are worth answering before you write anything:
 3. **Build the `agent` value.** Your agent's name, plus `/model` when the payload carries one; `common.sh` has `journal_agent` for this. Strip a redundant product prefix from the model if there is one, so it reads `claude/opus-5` rather than `claude/claude-opus-5`.
 4. **Register it where that agent looks.** Usually a plugin manifest at the repository root, next to `.claude-plugin/` and `.codex-plugin/`. An agent with a marketplace may also need an index file. Codex reads `.agents/plugins/marketplace.json`, which makes this repository its own marketplace.
 5. **Teach the installer about it.** Add the agent to `journal_harnesses` in `lib/install.sh`: how to detect it without running it, the commands that register the plugin, and anything the person still has to do by hand. Detection should be a `command -v` and a directory test. Launching an agent to ask it about itself costs that time at every `agent-journal install`.
-6. **Add tests** under `test/`, covering at least that the output is well formed for that agent, that the instruction survives its encoding unchanged, and that broken or empty input still exits 0. `test/plugin.test.ts` runs its checks over a list of agents, so a new one is usually a new entry in that list rather than new cases.
+6. **Add tests** under `test/`, covering at least that the output is well formed for that agent, that the instruction survives its encoding unchanged, and that broken or empty input still exits 0. `test/plugin.spec.ts` runs its checks over a list of agents, so a new one is usually a new entry in that list rather than new cases.
 
 ## What is here
 
