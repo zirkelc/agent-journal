@@ -85,3 +85,7 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Validate the plugin
         run: claude plugin validate .
+      # The journal pane's tests run in Claude Code's own kit, the environment
+      # its hooks run in, not under vitest: every *.test.ts under the plugin.
+      - name: Test the journal pane
+        run: claude plugin test .

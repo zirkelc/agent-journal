@@ -9,13 +9,25 @@
   "homepage": "https://github.com/zirkelc/agent-journal",
   "repository": "https://github.com/zirkelc/agent-journal",
   "license": "MIT",
-  "keywords": [
-    "journal",
-    "diary",
-    "memory",
-    "context",
-    "recall",
-    "sessions"
-  ],
-  "hooks": "./adapters/claude-code/hooks.json"
+  "keywords": ["journal", "diary", "memory", "context", "recall", "sessions"],
+  "hooks": "./adapters/claude-code/hooks.json",
+  "types": "./mods/journal/types/index.d.ts",
+  "userConfig": {
+    "model": {
+      "type": "string",
+      "title": "Journal search model",
+      "description": "The model the journal search agent runs on. \"inherit\" uses the session's model.",
+      "required": false,
+      "default": "haiku",
+      "options": ["haiku", "sonnet", "opus", "inherit"]
+    },
+    "scope": {
+      "type": "string",
+      "title": "Journal default scope",
+      "description": "Which entries the journal pane shows when it opens: the current project's, or all of them.",
+      "required": false,
+      "default": "project",
+      "options": ["project", "all"]
+    }
+  }
 }

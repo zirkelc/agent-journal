@@ -1,4 +1,5 @@
 {
+  "description": "The SessionStart command that puts the journal rules into each session, and the journal pane: /journal, its drawing, and a search agent over the CLI.",
   "hooks": {
     "SessionStart": [
       {
@@ -12,5 +13,6 @@
         ]
       }
     ]
-  }
+  },
+  "modules": ["../../mods/journal/hooks/register.tsx"]
 }

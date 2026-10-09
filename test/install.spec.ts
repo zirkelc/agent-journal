@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 /** `run` here is the installer script, so the one that drives the binary is renamed. */
 import { type Fixture, fails, fixture, output as capture, ROOT, run as runBin } from './helpers.js';
@@ -82,6 +82,18 @@ describe('install.sh', () => {
       expect(lstatSync(link).isSymbolicLink()).toBe(true);
       expect(realpathSync(link)).toBe(join(installed.dataDir, 'bin', 'agent-journal'));
     }
+  });
+
+  test(`should copy every file the Claude Code plugin's manifest and hooks name`, () => {
+    // Arrange, Act
+    const installed = install();
+
+    // Assert
+    const manifest = JSON.parse(readFileSync(join(installed.dataDir, '.claude-plugin', 'plugin.json'), 'utf8'));
+    const hooksFile = join(installed.dataDir, manifest.hooks);
+    const hooks = JSON.parse(readFileSync(hooksFile, 'utf8'));
+    const named = [manifest.types, ...hooks.modules.map((module: string) => join(dirname(manifest.hooks), module))];
+    for (const path of named) expect(existsSync(join(installed.dataDir, path))).toBe(true);
   });
 
   test(`should render the instruction when run through the symlink`, () => {
