@@ -184,6 +184,7 @@ Entries are listed oldest first, so the newest is nearest the prompt. Each line 
 | `--project` | a project name, or `.` for here | entries filed under one project, across all its worktrees. `.` names the repository of the current directory the same way the session-start hook does, and fails outside a repository |
 | `--cwd` | a directory, or `.` for here | one directory and everything under it |
 | `--limit` | a number, default `20` | how many of the most recent to print |
+| `--offset` | a number, default `0` | skip this many of the most recent first, to page back through older entries |
 | `--all` | | no limit |
 
 Days are local days, in the time zone of the machine. The IDs stay UTC, so an entry written just after local midnight can carry the date before: in Berlin in winter, `--date 2026-01-11` includes `2026-01-10T231500Z`. A time takes an offset (`+01:00`) or `Z`, and without one it is local time. `--until` with a time includes an entry written in that second. For one exact entry, use `aj read` with its ID.

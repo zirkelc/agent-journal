@@ -396,6 +396,19 @@ describe('read', () => {
     expect(result.stderr).toContain('matches 4 entries');
   });
 
+  test(`should list every match of an ambiguous prefix, whatever offset was given`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ENTRIES);
+
+    // Act
+    const result = fails(store, ['read', '2026-08', '--offset', '2']);
+
+    // Assert
+    expect(result.stderr).toContain('matches 4 entries');
+    expect(result.stderr.match(/\d{4}-\d{2}-\d{2}T\d{6}Z/g)?.length).toBe(4);
+  });
+
   test(`should show ids that tell apart two matches from the same minute`, () => {
     // Arrange
     const store = fixture();
@@ -738,6 +751,44 @@ describe('the exact output', () => {
         '',
       ].join('\n'),
     );
+  });
+
+  test(`should skip the most recent matches of a filter by the offset, then apply the limit`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ENTRIES);
+
+    // Act
+    const all = rows(run(store, ['list', '--all']));
+    const page = rows(run(store, ['list', '--offset', '1', '--limit', '2']));
+
+    // Assert
+    expect(page.map((row) => row.id)).toEqual(all.slice(-3, -1).map((row) => row.id));
+  });
+
+  test(`should print nothing when the offset is past every match`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ENTRIES);
+
+    // Act
+    const listed = run(store, ['list', '--offset', '99']);
+
+    // Assert
+    expect(listed).toBe('');
+  });
+
+  test(`should refuse an offset that is not a number`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ENTRIES);
+
+    // Act
+    const result = fails(store, ['list', '--offset', 'x']);
+
+    // Assert
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('--offset takes a number');
   });
 
   test(`should apply a range before the limit`, () => {

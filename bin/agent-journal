@@ -88,6 +88,7 @@ filters: --date D      one local year, month or day: 2026, 2026-01, 2026-01-11
          --project P   entries filed under one project, or . for the current project
          --cwd DIR     entries from a directory and everything under it
          --limit N     how many of the most recent to print, default 20
+         --offset N    skip this many of the most recent first, for the next page
          --all         no limit
 
 settings: journal_dir    where journal entries are written
@@ -760,6 +761,7 @@ since=
 until=
 project_filter=
 limit=20
+offset=0
 opt_summary=
 summary_set=0
 opt_body=
@@ -797,6 +799,8 @@ while [ $# -gt 0 ]; do
     --project=*) project_filter=${1#--project=}; shift ;;
     --limit) [ $# -ge 2 ] || usage; limit=$2; shift 2 ;;
     --limit=*) limit=${1#--limit=}; shift ;;
+    --offset) [ $# -ge 2 ] || usage; offset=$2; shift 2 ;;
+    --offset=*) offset=${1#--offset=}; shift ;;
     # Two readings again: for the query commands it lifts the limit, and for
     # `install` it means every agent found rather than one named.
     --all) limit=0; all_set=1; shift ;;
@@ -828,6 +832,9 @@ done
 
 case $limit in
   '' | *[!0-9]*) printf '%s: --limit takes a number\n' "$limit" >&2; exit 2 ;;
+esac
+case $offset in
+  '' | *[!0-9]*) printf '%s: --offset takes a number\n' "$offset" >&2; exit 2 ;;
 esac
 
 [ -n "$cwd" ] || cwd=$(pwd)
@@ -1035,6 +1042,7 @@ render() {
     -v since="$since" \
     -v until="$until" \
     -v limit="$limit" \
+    -v offset="$offset" \
     -v tty="$tty" \
     -v color="$color" \
     -v cols="$cols" '
@@ -1114,6 +1122,8 @@ render() {
       # Frontmatter that never closes has no body, only its summary to search.
       if (q != "" && fm == 1) found = index(tolower(summary " "), q) > 0
       if (q != "" && !found) return 0
+      # The newest matches an earlier page already showed are counted and passed.
+      if (skipped_n < offset) { skipped_n++; return 0 }
 
       n++
       # The file name itself rather than a friendlier date and time, because it is
@@ -1426,6 +1436,7 @@ if [ "$cmd" = read ]; then
     printf '%s matches %d entries:\n' "$id" "$matches" >&2
     query=
     limit=0
+    offset=0
     # The matches go to stderr with the message, so stdout stays empty for a
     # caller that expected an entry, and the layout follows stderr instead.
     layout_for 2
