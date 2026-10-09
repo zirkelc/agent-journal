@@ -552,6 +552,19 @@ describe('the bare form', () => {
     expect(flag).toBe(asked);
   });
 
+  test(`should keep context out of the help, since only the adapters call it`, () => {
+    // Arrange
+    const store = fixture();
+
+    // Act
+    const asked = run(store, ['help']);
+    const listed = run(store, ['context', '--cwd', store.repo]);
+
+    // Assert
+    expect(asked).not.toContain('context');
+    expect(listed).toContain('agent-journal');
+  });
+
   test(`should explain itself on stderr and fail when it was a mistake`, () => {
     // Arrange
     const store = fixture();

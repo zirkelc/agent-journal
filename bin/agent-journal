@@ -9,7 +9,8 @@
 #   agent-journal config  [set|unset <key> [value]]
 #   agent-journal context [--cwd DIR] [--session-id ID] [--agent A] [--recall]
 #
-# `context` prints the text a session should be given: templates/INSTRUCTIONS.md,
+# `context` is left out of the help, since only the adapters and the journal
+# pane call it. It prints the text a session should be given: templates/INSTRUCTIONS.md,
 # resolved against the settings and against where the session is. With --recall
 # it prints templates/RECALL.md instead, the text for a model that only reads the
 # journal, with the clock and the calendar.
@@ -67,7 +68,6 @@ usage: agent-journal list   [filters]
        agent-journal read   latest | 2026-01-11T143000Z | 2026-01-11
        agent-journal write  [--summary S] [--body B] [--project P] [--cwd DIR] [--agent A]
        agent-journal config [set|unset journal_dir <path>]
-       agent-journal context [--cwd DIR] [--session-id ID] [--agent A] [--recall]
        agent-journal install [claude|codex] [--all] [--dry-run]
        agent-journal help
 
@@ -610,8 +610,9 @@ local_midnight() {
 }
 
 # A range of local days, from day number `$1` up to but not including `$2`, as
-# instants: `range_local` with the zone's offsets, and `range_utc`. The ends
-# are the last second of the range, so both are inclusive.
+# instants: `range_local_since` and `range_local_until` with the zone's
+# offsets, and `range_utc_since` and `range_utc_until`. The end is the last
+# second of the range, so both are inclusive.
 #
 # Each offset is the difference between the wall clock and the instant, which
 # holds even on a day that changes it: the week of 25 October 2026 in Berlin
@@ -623,14 +624,14 @@ range_instants() {
   t_end=$((midnight - 1))
   days_to_civil "$1"
   format_offset $(($1 * 86400 - t_start))
-  range_local=${civil}T00:00:00$offset_text
+  range_local_since=${civil}T00:00:00$offset_text
   days_to_civil $(($2 - 1))
   format_offset $(($2 * 86400 - 1 - t_end))
-  range_local="$range_local ${civil}T23:59:59$offset_text"
+  range_local_until=${civil}T23:59:59$offset_text
   format_instant "$t_start"
-  range_utc=$instant
+  range_utc_since=$instant
   format_instant "$t_end"
-  range_utc="$range_utc $instant"
+  range_utc_until=$instant
 }
 
 # The calendar around the clock's instant, as day numbers: `today`, and the
@@ -679,9 +680,10 @@ weekday_name() {
 # per key, named as the key is, and all of them as `key=value` lines in
 # `time_text`, in a fixed order. A command prints `time_text` as it is, or uses
 # the variables by name when it needs another form. Every range, a single day
-# included, is an instant pair in both forms, the same two instants each, so a
-# reader passes its two values to `--since` and `--until` and gets exactly that
-# range. `local_date` is today's plain date.
+# included, is two keys in both forms, `<range>_since` and `<range>_until`,
+# the same two instants each. One value per key, named after the flag it goes
+# to, because a model given a pair on one line passed the whole line, key and
+# all, as one flag. `local_date` is today's plain date.
 resolve_time() {
   clock_now || {
     printf 'cannot read the clock\n' >&2
@@ -725,10 +727,13 @@ utc_time=$utc_time"
       printf 'cannot convert %s to UTC\n' "$t_range" >&2
       return 1
     }
-    eval "local_$t_range=\$range_local utc_$t_range=\$range_utc"
+    eval "local_${t_range}_since=\$range_local_since local_${t_range}_until=\$range_local_until"
+    eval "utc_${t_range}_since=\$range_utc_since utc_${t_range}_until=\$range_utc_until"
     time_text="$time_text
-local_$t_range=$range_local
-utc_$t_range=$range_utc"
+local_${t_range}_since=$range_local_since
+local_${t_range}_until=$range_local_until
+utc_${t_range}_since=$range_utc_since
+utc_${t_range}_until=$range_utc_until"
   done
 }
 

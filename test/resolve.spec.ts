@@ -56,18 +56,30 @@ describe('resolve', () => {
         'utc_now=2026-10-05T16:10:02Z',
         'utc_date=2026-10-05',
         'utc_time=16:10:02',
-        'local_today=2026-10-05T00:00:00+02:00 2026-10-05T23:59:59+02:00',
-        'utc_today=2026-10-04T22:00:00Z 2026-10-05T21:59:59Z',
-        'local_yesterday=2026-10-04T00:00:00+02:00 2026-10-04T23:59:59+02:00',
-        'utc_yesterday=2026-10-03T22:00:00Z 2026-10-04T21:59:59Z',
-        'local_this_week=2026-10-05T00:00:00+02:00 2026-10-11T23:59:59+02:00',
-        'utc_this_week=2026-10-04T22:00:00Z 2026-10-11T21:59:59Z',
-        'local_last_week=2026-09-28T00:00:00+02:00 2026-10-04T23:59:59+02:00',
-        'utc_last_week=2026-09-27T22:00:00Z 2026-10-04T21:59:59Z',
-        'local_this_month=2026-10-01T00:00:00+02:00 2026-10-31T23:59:59+01:00',
-        'utc_this_month=2026-09-30T22:00:00Z 2026-10-31T22:59:59Z',
-        'local_last_month=2026-09-01T00:00:00+02:00 2026-09-30T23:59:59+02:00',
-        'utc_last_month=2026-08-31T22:00:00Z 2026-09-30T21:59:59Z',
+        'local_today_since=2026-10-05T00:00:00+02:00',
+        'local_today_until=2026-10-05T23:59:59+02:00',
+        'utc_today_since=2026-10-04T22:00:00Z',
+        'utc_today_until=2026-10-05T21:59:59Z',
+        'local_yesterday_since=2026-10-04T00:00:00+02:00',
+        'local_yesterday_until=2026-10-04T23:59:59+02:00',
+        'utc_yesterday_since=2026-10-03T22:00:00Z',
+        'utc_yesterday_until=2026-10-04T21:59:59Z',
+        'local_this_week_since=2026-10-05T00:00:00+02:00',
+        'local_this_week_until=2026-10-11T23:59:59+02:00',
+        'utc_this_week_since=2026-10-04T22:00:00Z',
+        'utc_this_week_until=2026-10-11T21:59:59Z',
+        'local_last_week_since=2026-09-28T00:00:00+02:00',
+        'local_last_week_until=2026-10-04T23:59:59+02:00',
+        'utc_last_week_since=2026-09-27T22:00:00Z',
+        'utc_last_week_until=2026-10-04T21:59:59Z',
+        'local_this_month_since=2026-10-01T00:00:00+02:00',
+        'local_this_month_until=2026-10-31T23:59:59+01:00',
+        'utc_this_month_since=2026-09-30T22:00:00Z',
+        'utc_this_month_until=2026-10-31T22:59:59Z',
+        'local_last_month_since=2026-09-01T00:00:00+02:00',
+        'local_last_month_until=2026-09-30T23:59:59+02:00',
+        'utc_last_month_since=2026-08-31T22:00:00Z',
+        'utc_last_month_until=2026-09-30T21:59:59Z',
         'project=repo',
         'cwd=~/repo',
         'journal_dir=~/agent-journal',
@@ -88,8 +100,10 @@ describe('resolve', () => {
     expect(values.local_time).toBe('00:30:00');
     expect(values.local_weekday).toBe('Tuesday');
     expect(values.utc_date).toBe('2026-10-05');
-    expect(values.local_today).toBe('2026-10-06T00:00:00+02:00 2026-10-06T23:59:59+02:00');
-    expect(values.utc_today).toBe('2026-10-05T22:00:00Z 2026-10-06T21:59:59Z');
+    expect(values.local_today_since).toBe('2026-10-06T00:00:00+02:00');
+    expect(values.local_today_until).toBe('2026-10-06T23:59:59+02:00');
+    expect(values.utc_today_since).toBe('2026-10-05T22:00:00Z');
+    expect(values.utc_today_until).toBe('2026-10-06T21:59:59Z');
   });
 
   test(`should give the day of a change to winter time 25 hours`, () => {
@@ -101,9 +115,12 @@ describe('resolve', () => {
 
     // Assert
     expect(values.local_utc_offset).toBe('+01:00');
-    expect(values.local_today).toBe('2026-10-25T00:00:00+02:00 2026-10-25T23:59:59+01:00');
-    expect(values.utc_today).toBe('2026-10-24T22:00:00Z 2026-10-25T22:59:59Z');
-    expect(values.local_this_week).toBe('2026-10-19T00:00:00+02:00 2026-10-25T23:59:59+01:00');
+    expect(values.local_today_since).toBe('2026-10-25T00:00:00+02:00');
+    expect(values.local_today_until).toBe('2026-10-25T23:59:59+01:00');
+    expect(values.utc_today_since).toBe('2026-10-24T22:00:00Z');
+    expect(values.utc_today_until).toBe('2026-10-25T22:59:59Z');
+    expect(values.local_this_week_since).toBe('2026-10-19T00:00:00+02:00');
+    expect(values.local_this_week_until).toBe('2026-10-25T23:59:59+01:00');
   });
 
   test(`should cross a year boundary for the week and the month`, () => {
@@ -115,12 +132,18 @@ describe('resolve', () => {
 
     // Assert
     expect(values.local_weekday).toBe('Friday');
-    expect(values.local_yesterday).toBe('2026-12-31T00:00:00+01:00 2026-12-31T23:59:59+01:00');
-    expect(values.local_this_week).toBe('2026-12-28T00:00:00+01:00 2027-01-03T23:59:59+01:00');
-    expect(values.local_last_week).toBe('2026-12-21T00:00:00+01:00 2026-12-27T23:59:59+01:00');
-    expect(values.local_this_month).toBe('2027-01-01T00:00:00+01:00 2027-01-31T23:59:59+01:00');
-    expect(values.local_last_month).toBe('2026-12-01T00:00:00+01:00 2026-12-31T23:59:59+01:00');
-    expect(values.utc_last_month).toBe('2026-11-30T23:00:00Z 2026-12-31T22:59:59Z');
+    expect(values.local_yesterday_since).toBe('2026-12-31T00:00:00+01:00');
+    expect(values.local_yesterday_until).toBe('2026-12-31T23:59:59+01:00');
+    expect(values.local_this_week_since).toBe('2026-12-28T00:00:00+01:00');
+    expect(values.local_this_week_until).toBe('2027-01-03T23:59:59+01:00');
+    expect(values.local_last_week_since).toBe('2026-12-21T00:00:00+01:00');
+    expect(values.local_last_week_until).toBe('2026-12-27T23:59:59+01:00');
+    expect(values.local_this_month_since).toBe('2027-01-01T00:00:00+01:00');
+    expect(values.local_this_month_until).toBe('2027-01-31T23:59:59+01:00');
+    expect(values.local_last_month_since).toBe('2026-12-01T00:00:00+01:00');
+    expect(values.local_last_month_until).toBe('2026-12-31T23:59:59+01:00');
+    expect(values.utc_last_month_since).toBe('2026-11-30T23:00:00Z');
+    expect(values.utc_last_month_until).toBe('2026-12-31T22:59:59Z');
   });
 
   test(`should end February on the 29th in a leap year`, () => {
@@ -131,9 +154,12 @@ describe('resolve', () => {
     const values = resolve(store, store.repo, { now: '2028-03-10T12:00:00Z' });
 
     // Assert
-    expect(values.local_last_month).toBe('2028-02-01T00:00:00+01:00 2028-02-29T23:59:59+01:00');
-    expect(values.local_this_month).toBe('2028-03-01T00:00:00+01:00 2028-03-31T23:59:59+02:00');
-    expect(values.utc_this_month).toBe('2028-02-29T23:00:00Z 2028-03-31T21:59:59Z');
+    expect(values.local_last_month_since).toBe('2028-02-01T00:00:00+01:00');
+    expect(values.local_last_month_until).toBe('2028-02-29T23:59:59+01:00');
+    expect(values.local_this_month_since).toBe('2028-03-01T00:00:00+01:00');
+    expect(values.local_this_month_until).toBe('2028-03-31T23:59:59+02:00');
+    expect(values.utc_this_month_since).toBe('2028-02-29T23:00:00Z');
+    expect(values.utc_this_month_until).toBe('2028-03-31T21:59:59Z');
   });
 
   test(`should print UTC as its own zone`, () => {
@@ -147,7 +173,8 @@ describe('resolve', () => {
     expect(values.local_now).toBe('2026-10-05T16:10:02+00:00');
     expect(values.local_timezone).toBe('UTC');
     expect(values.local_utc_offset).toBe('+00:00');
-    expect(values.utc_today).toBe('2026-10-05T00:00:00Z 2026-10-05T23:59:59Z');
+    expect(values.utc_today_since).toBe('2026-10-05T00:00:00Z');
+    expect(values.utc_today_until).toBe('2026-10-05T23:59:59Z');
   });
 
   test(`should name the zone from the system when TZ is not set`, () => {
@@ -172,7 +199,8 @@ describe('resolve', () => {
     const values = resolve(store, store.repo, { now: '2026-03-08T15:00:00Z', tz: 'America/Havana' });
 
     // Assert
-    expect(values.utc_today).toBe('2026-03-08T05:00:00Z 2026-03-09T03:59:59Z');
+    expect(values.utc_today_since).toBe('2026-03-08T05:00:00Z');
+    expect(values.utc_today_until).toBe('2026-03-09T03:59:59Z');
   });
 
   /** A `date` that can read the clock but convert no day, as on a system with neither variant. */
@@ -221,8 +249,10 @@ describe('the first day of the week', () => {
 
     // Assert
     expect(values.local_week_start).toBe('Sunday');
-    expect(values.local_this_week).toBe('2026-10-04T00:00:00+02:00 2026-10-10T23:59:59+02:00');
-    expect(values.local_last_week).toBe('2026-09-27T00:00:00+02:00 2026-10-03T23:59:59+02:00');
+    expect(values.local_this_week_since).toBe('2026-10-04T00:00:00+02:00');
+    expect(values.local_this_week_until).toBe('2026-10-10T23:59:59+02:00');
+    expect(values.local_last_week_since).toBe('2026-09-27T00:00:00+02:00');
+    expect(values.local_last_week_until).toBe('2026-10-03T23:59:59+02:00');
   });
 
   test(`should start the week on Saturday in a region that does`, () => {
@@ -234,7 +264,8 @@ describe('the first day of the week', () => {
 
     // Assert
     expect(values.local_week_start).toBe('Saturday');
-    expect(values.local_this_week).toBe('2026-10-03T00:00:00+02:00 2026-10-09T23:59:59+02:00');
+    expect(values.local_this_week_since).toBe('2026-10-03T00:00:00+02:00');
+    expect(values.local_this_week_until).toBe('2026-10-09T23:59:59+02:00');
   });
 
   test(`should read the region after a script in the locale name`, () => {
@@ -257,7 +288,8 @@ describe('the first day of the week', () => {
 
     // Assert
     expect(values.local_week_start).toBe('Monday');
-    expect(values.local_this_week).toBe('2026-10-05T00:00:00+02:00 2026-10-11T23:59:59+02:00');
+    expect(values.local_this_week_since).toBe('2026-10-05T00:00:00+02:00');
+    expect(values.local_this_week_until).toBe('2026-10-11T23:59:59+02:00');
   });
 
   /** The macOS settings live in a property list under `HOME`, written here with the system's own tool. */
@@ -279,7 +311,8 @@ describe('the first day of the week', () => {
 
       // Assert
       expect(values.local_week_start).toBe('Monday');
-      expect(values.local_this_week).toBe('2026-10-05T00:00:00+02:00 2026-10-11T23:59:59+02:00');
+      expect(values.local_this_week_since).toBe('2026-10-05T00:00:00+02:00');
+      expect(values.local_this_week_until).toBe('2026-10-11T23:59:59+02:00');
     });
 
     test(`should take the country of AppleLocale when it names no region`, () => {
@@ -304,7 +337,8 @@ describe('the first day of the week', () => {
 
       // Assert
       expect(values.local_week_start).toBe('Sunday');
-      expect(values.local_this_week).toBe('2026-10-04T00:00:00+02:00 2026-10-10T23:59:59+02:00');
+      expect(values.local_this_week_since).toBe('2026-10-04T00:00:00+02:00');
+      expect(values.local_this_week_until).toBe('2026-10-10T23:59:59+02:00');
     });
   });
 });

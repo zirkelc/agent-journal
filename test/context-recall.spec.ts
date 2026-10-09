@@ -63,10 +63,12 @@ describe('context --recall', () => {
     expect(result).toContain(`local_now=2026-10-06T16:15:27+02:00\n`);
     expect(result).toContain(`local_weekday=Tuesday\n`);
     expect(result).toContain(`utc_now=2026-10-06T14:15:27Z\n`);
-    expect(result).toContain(`local_last_week=2026-09-28T00:00:00+02:00 2026-10-04T23:59:59+02:00\n`);
+    expect(result).toContain(
+      `local_last_week_since=2026-09-28T00:00:00+02:00\nlocal_last_week_until=2026-10-04T23:59:59+02:00\n`,
+    );
   });
 
-  /** The reader is told to pass a range as it is, so the filters must take it. */
+  /** The reader is told to pass a range's `_since` and `_until` values as they are, so the filters must take them. */
   test(`should give ranges the filters take as they are`, () => {
     // Arrange
     const store = fixture();
@@ -83,11 +85,13 @@ describe('context --recall', () => {
     );
     const text = recall(store, { env });
     const ranges = [
-      ...text.matchAll(/^(?:local|utc)_(?:today|yesterday|this_week|last_week|this_month|last_month)=(\S+) (\S+)$/gm),
+      ...text.matchAll(
+        /^((?:local|utc)_(?:today|yesterday|this_week|last_week|this_month|last_month))_since=(\S+)\n\1_until=(\S+)$/gm,
+      ),
     ];
 
     // Act
-    const results = ranges.map(([, since, until]) =>
+    const results = ranges.map(([, , since, until]) =>
       output(store, ['list', '--since', since!, '--until', until!], { env }),
     );
 

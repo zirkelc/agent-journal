@@ -52,9 +52,9 @@ Do not work out dates yourself. The clock and the calendar, read when this text 
 __TIME__
 ```
 
-A range is two instants, both included. `local_` values are in the user's time zone, `utc_` values are the same instants in UTC.
+A range is two keys, `<range>_since` and `<range>_until`, both instants included. `local_` values are in the user's time zone, `utc_` values are the same instants in UTC.
 
-A day the user names ("yesterday", "last week", "on Monday") is a local day. To filter by a range, pass its two values as they are, the first as the start and the second as the end.
+A day the user names ("yesterday", "last week", "on Monday") is a local day. To filter by a range, pass the value of its `_since` key as the start and the value of its `_until` key as the end, each as it is: for today, `local_today_since` and `local_today_until`.
 
 Ids are UTC. A local day can start or end on the neighbouring UTC date, so the date in an id can differ from the local day the entry was written on.
 
