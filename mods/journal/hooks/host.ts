@@ -1,6 +1,6 @@
 import type { ProcessRunResult, Timer } from 'claude-code';
 import type { JournalDate, JournalList, JournalOpened, JournalTurn, JournalView } from '../types';
-import type { Scope } from './agent.js';
+import type { Scope, SearchModel } from './agent.js';
 
 /** One value of the mod's session state: read it, or change it from what it is. */
 export type Cell<VALUE> = {
@@ -26,13 +26,17 @@ export type Host = {
   /** Where a path lands with every link followed, or undefined when it leads nowhere. */
   realPath: (path: string) => Promise<string | undefined>;
   run: (argv: Array<string>, cwd: string, timeoutMs: number) => Promise<ProcessRunResult>;
-  spawn: (prompt: string) => Promise<{ agentId?: string; deny?: string }>;
+  /** Starts the search agent, on a model by its alias, or on the agent type's own without one. */
+  spawn: (prompt: string, model?: string) => Promise<{ agentId?: string; deny?: string }>;
   openPane: () => Promise<boolean>;
   closePane: () => Promise<unknown>;
   fillPrompt: (text: string) => Promise<unknown>;
   toast: (text: string) => void;
   after: (ms: number, fn: () => void) => Timer;
-  scope: Cell<Scope | null>;
+  /** Which entries the pane lists and a question is about, kept across sessions. */
+  scope: Cell<Scope>;
+  /** The model questions go to, kept across sessions. */
+  model: Cell<SearchModel>;
   list: Cell<JournalList>;
   view: Cell<JournalView>;
   chat: Cell<Array<JournalTurn>>;
@@ -40,6 +44,10 @@ export type Host = {
   top: Cell<number>;
   date: Cell<JournalDate>;
   notice: Cell<string>;
+  /** The text of the main conversation as its next model request reads it, after the last compaction. */
+  conversationText: () => Promise<string>;
+  /** Adds a row to the main conversation that the model reads and the person does not see as typed. */
+  appendNote: (text: string) => Promise<void>;
   /** Draws the pane again, for what changes with time alone. */
   redraw: () => void;
 };

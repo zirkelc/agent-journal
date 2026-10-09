@@ -93,13 +93,26 @@ export function readArgs(id: string): Array<string> {
   return ['read', value];
 }
 
-/** The text a reader of the journal is given, for the session the question comes from. */
-export function recallArgs(cwd: string, sessionId: string | undefined, agent: string | undefined): Array<string> {
-  const args = ['context', '--recall', '--cwd', cwd];
+/** The flags that name a session to `context`: where it works, its id, and the agent and model in it. */
+function sessionArgs(cwd: string, sessionId: string | undefined, agent: string | undefined): Array<string> {
+  const args = ['--cwd', cwd];
   if (sessionId) args.push('--session-id', sessionId);
   if (agent) args.push('--agent', agent);
   return args;
 }
+
+/** `context`, the rules for writing the journal, for the session they are given to. */
+export const contextArgs = (cwd: string, sessionId: string | undefined, agent: string | undefined): Array<string> => [
+  'context',
+  ...sessionArgs(cwd, sessionId, agent),
+];
+
+/** `context --recall`, the text a reader of the journal is given, for the session the question comes from. */
+export const recallArgs = (cwd: string, sessionId: string | undefined, agent: string | undefined): Array<string> => [
+  'context',
+  '--recall',
+  ...sessionArgs(cwd, sessionId, agent),
+];
 
 /** `config`, for the journal directory. */
 export const configArgs = (): Array<string> => ['config'];

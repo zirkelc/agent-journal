@@ -16,6 +16,8 @@ export type Script = {
   read?: string;
   context?: string;
   failing?: string;
+  /** The main conversation as its next request reads it: the text of each message. */
+  conversation?: Array<string>;
   /** A spawn waits for this before it answers, so a question can stay open while a test asks again. */
   holdSpawn?: Promise<void>;
   /** Where a path lands once links are followed, or undefined when it does not exist. */
@@ -60,6 +62,35 @@ export function world(on: On, script: Script = {}) {
   });
   const turns: Array<unknown> = [];
   on('turn.complete', ($, e) => (turns.push(e), { text: '' }));
+  /** The engine's context is the blocks it was given. */
+  on('prompt.context', ($, e) => ({ blocks: e.blocks }));
+  /** Every row appended, and the main conversation as its next request reads it, appended rows included. */
+  const notes: Array<string> = [];
+  let conversation = [...(script.conversation ?? [])];
+  on(
+    'session.messages',
+    ($, e) =>
+      ({
+        value: (e as { agentId?: string }).agentId
+          ? []
+          : conversation.map((text) => ({ role: 'user', content: [{ type: 'text', text }] })),
+      }) as never,
+  );
+  on('session.append', ($, e, next) => {
+    const text = e.message.content.map((block) => String((block as { text?: unknown }).text ?? '')).join('');
+    notes.push(text);
+    conversation.push(text);
+    return next(e);
+  });
+  /** A compaction leaves its summary alone, so what was appended before is gone from the next request. */
+  on('session.compact', ($, e) => {
+    conversation = ['The summary.'];
+    return { messages: e.messages } as never;
+  });
+  /** The store in memory: what one session sets, the next one gets. */
+  const stored = new Map<string, unknown>();
+  on('store.get', ($, e) => ({ value: stored.get(e.key) }) as never);
+  on('store.set', ($, e) => (stored.set(e.key, e.value), { value: undefined }) as never);
   on('ui.open', ($, e) => (opened.push(e), { value: { isPlaced: true } }));
   on('ui.toast', ($, e) => (toasts.push(e.text), { value: undefined }));
   on('ui.invalidate', () => ({ value: undefined }));
@@ -78,7 +109,10 @@ export function world(on: On, script: Script = {}) {
     return { value: { exitCode: 0, stdout, stderr: '' } } as never;
   });
 
-  return { runs, opened, spawned, registered, toasts, filled, turns, clock };
+  /** The CLI runs a test asks about: every one but the rules made ahead at the session's start. */
+  const queries = () => runs.filter((run) => !(run.argv[1] === 'context' && !run.argv.includes('--recall')));
+
+  return { runs, queries, opened, spawned, registered, toasts, filled, turns, clock, notes, stored };
 }
 
 export const SESSION = { surface: 'terminal', isInteractive: true, cwd: '/work' } as const;

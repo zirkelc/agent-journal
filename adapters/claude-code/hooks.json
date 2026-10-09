@@ -1,18 +1,4 @@
 {
-  "description": "The SessionStart command that puts the journal rules into each session, and the journal pane: /journal, its drawing, and a search agent over the CLI.",
-  "hooks": {
-    "SessionStart": [
-      {
-        "matcher": "startup|clear|compact",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/adapters/claude-code/session-start.sh\"",
-            "timeout": 10
-          }
-        ]
-      }
-    ]
-  },
+  "description": "The journal for Claude Code as one hooks module: the rules for writing it in every conversation's context, and the /journal pane with its search agent.",
   "modules": ["../../mods/journal/hooks/register.tsx"]
 }

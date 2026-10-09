@@ -4,6 +4,8 @@ An adapter is what teaches one agent to journal. It is the only part of this pro
 
 The job is short. Run the core, take the text it prints, encode that text the way your agent wants it, and hand it over at the start of every session.
 
+Claude Code is the one agent without a shell script here. Its plugin is a hooks module, [`mods/journal`](../mods/journal), which `claude-code/hooks.json` loads. The module runs the same `context` command and adds the text as a hidden row of the main conversation: at the start, after `/clear` and after compaction, whenever the conversation does not hold it, and never to a subagent. Every other agent takes the route below.
+
 ## The contract
 
 Run the core. It prints the text a session should be given:
@@ -36,7 +38,7 @@ Do not parse, reformat, extend or truncate that text. Encode it and pass it on. 
 
 ## Delivery is different for every agent
 
-The contract is deliberately "text out, delivered somehow" rather than "return JSON from a hook". Both agents supported today happen to take a `SessionStart` hook and read `hookSpecificOutput.additionalContext` from stdout, using the same field names in the payload, but that is a coincidence rather than a standard. It is also why the shared parts live in `common.sh` instead of in the core.
+The contract is deliberately "text out, delivered somehow" rather than "return JSON from a hook". Codex takes a `SessionStart` hook and reads `hookSpecificOutput.additionalContext` from stdout, while Claude Code's hooks module adds the text as a row of the main conversation. The shared parts of a shell adapter live in `common.sh` instead of in the core.
 
 An agent with no session event can still be adapted. Have its adapter write the same text into whatever instructions file that agent reads, at install time and whenever the config changes. The core does not change either way.
 

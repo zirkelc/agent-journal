@@ -3,7 +3,7 @@
 /* @jsxFrag Fragment */
 import type { Register, Timer } from 'claude-code';
 import { atom, read, update } from 'claude-code';
-import { agentSpec, scopeOf, TOOL_SPECS } from './agent.js';
+import { agentSpec, scopeOf, searchModelOf, TOOL_SPECS } from './agent.js';
 import { capped, entriesOf, InputError, listArgs, readArgs, searchArgs, type Filters } from './cli.js';
 import { ALL_DATES, entryOfText } from './format.js';
 import type { Host } from './host.js';
@@ -17,6 +17,7 @@ import {
   isAskingFor,
   listLoader,
   recorded,
+  rulesKeeper,
   runCli,
   stepOf,
 } from './journal.js';
@@ -34,8 +35,6 @@ import {
 import type { JournalView } from '../types';
 import { listLayoutOf, listTopRows, PADDING, paneView, SUGGESTIONS, windowOf } from './pane-view.js';
 
-/** The scope the person picked in the pane, which lasts for the session; null until then. */
-const scopeAtom = atom({ plugin: 'agent-journal', key: 'scope' } as const, null);
 const listAtom = atom({ plugin: 'agent-journal', key: 'list' } as const, {
   status: 'idle',
   entries: [],
@@ -50,18 +49,21 @@ const topAtom = atom({ plugin: 'agent-journal', key: 'top' } as const, 0);
 const dateAtom = atom({ plugin: 'agent-journal', key: 'date' } as const, ALL_DATES);
 const noticeAtom = atom({ plugin: 'agent-journal', key: 'notice' } as const, '');
 
+/** The pane's choices kept in the store, so they last across sessions: which entries, and which model answers. */
+const SCOPE_KEY = 'scope';
+const MODEL_KEY = 'model';
+
 /** How often an open question redraws its elapsed time. */
 const TICK_MS = 1_000;
 
 /** Several writes to the journal in a row reload the list once. */
 const REFRESH_DEBOUNCE_MS = 200;
 
-export const register: Register = (on, options) => {
-  const model = String(options.model ?? 'haiku');
-  const defaultScope = scopeOf(options.scope);
-
+export const register: Register = (on) => {
   /** The engine as the session bound it, for work that outlives the dispatch that started it. */
   let host: Host | null = null;
+  /** Makes the rules for writing the journal and gives them to the main conversation. */
+  let keeper: ReturnType<typeof rulesKeeper> | null = null;
   let loader: ReturnType<typeof listLoader> | null = null;
   let refresh: Timer | null = null;
   /** Whether the pane redraws each second, which it does only while a question is open. */
@@ -95,7 +97,7 @@ export const register: Register = (on, options) => {
 
   /** Asks from the pane or the command, and says so when another question is still being answered. */
   async function askFrom(bound: Host, question: string): Promise<AskOutcome> {
-    const outcome = await ask(bound, defaultScope, question).catch((): AskOutcome => 'failed');
+    const outcome = await ask(bound, question).catch((): AskOutcome => 'failed');
     await bound.notice.update(() => (outcome === 'busy' ? busyNotice(question) : ''));
     if (outcome === 'asked') tick(bound);
     return outcome;
@@ -128,8 +130,13 @@ export const register: Register = (on, options) => {
         }
       },
       run: (argv, cwd, timeoutMs) => $.process.run(argv, { cwd, timeoutMs }),
-      spawn: async (prompt) => {
-        const spawned = await $.agent.spawn({ subagentType: AGENT_TYPE, description: 'Search the journal', prompt });
+      spawn: async (prompt, model) => {
+        const spawned = await $.agent.spawn({
+          subagentType: AGENT_TYPE,
+          description: 'Search the journal',
+          prompt,
+          ...(model ? { model } : {}),
+        });
         return 'deny' in spawned && spawned.deny ? { deny: spawned.deny } : { agentId: spawned.agentId };
       },
       openPane: async () =>
@@ -138,7 +145,14 @@ export const register: Register = (on, options) => {
       fillPrompt: (text) => $.prompt.fill({ text, mode: 'insert' }),
       toast: (text) => $.ui.toast(text),
       after: (ms, fn) => $.clock.after(ms, fn),
-      scope: { read: () => read($, scopeAtom), update: (change) => update($, scopeAtom, change) },
+      scope: {
+        read: async () => scopeOf(await $.store.get(SCOPE_KEY)),
+        update: async (change) => $.store.set(SCOPE_KEY, change(scopeOf(await $.store.get(SCOPE_KEY)))),
+      },
+      model: {
+        read: async () => searchModelOf(await $.store.get(MODEL_KEY)),
+        update: async (change) => $.store.set(MODEL_KEY, change(searchModelOf(await $.store.get(MODEL_KEY)))),
+      },
       list: { read: () => read($, listAtom), update: (change) => update($, listAtom, change) },
       view: { read: () => read($, viewAtom), update: (change) => update($, viewAtom, change) },
       chat: { read: () => read($, chatAtom), update: (change) => update($, chatAtom, change) },
@@ -146,16 +160,58 @@ export const register: Register = (on, options) => {
       date: { read: () => read($, dateAtom), update: (change) => update($, dateAtom, change) },
       notice: { read: () => read($, noticeAtom), update: (change) => update($, noticeAtom, change) },
       redraw: () => $.ui.invalidate('ui.render'),
+      conversationText: async () => {
+        const messages = await $.session.messages({ as: 'api' });
+        return messages
+          .flatMap((message) => message.content)
+          .map((block) => (typeof block.text === 'string' ? block.text : ''))
+          .join('\n');
+      },
+      appendNote: async (text) => {
+        await $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] } });
+      },
       opened: { read: () => read($, openedAtom), update: (change) => update($, openedAtom, change) },
     };
-    loader = listLoader(host, defaultScope);
+    loader = listLoader(host);
     waiter = answerWaiter(host);
+    keeper = rulesKeeper(host);
+    /** Made now, so the first message does not wait for the CLI. */
+    void keeper.prepare().catch(() => undefined);
     currentProject = projectOf(await $.session.repo().catch(() => null));
     for (const spec of TOOL_SPECS) await $.tool.register(spec);
-    await $.agent.register(agentSpec(model));
+    await $.agent.register(agentSpec());
     await $.command.register({ name: COMMAND, description: COMMAND_DESCRIPTION });
     return started;
   });
+
+  /**
+   * The engine builds the main conversation's context at its start, after
+   * /clear and after compaction, and subagents reuse it. So this is when the
+   * main conversation may need the rules again, but they are not put into the
+   * shared context, which subagents would read too: they go to the main
+   * conversation as a row of their own.
+   */
+  on('prompt.context', async ($, e, next) => {
+    const result = await next(e);
+    if (keeper) await keeper.deliver().catch(() => undefined);
+    return result;
+  }).catch(($, e, next) => next(e));
+
+  /**
+   * Compaction replaces the main conversation with its summary, and the rules
+   * with it, after the engine has already rebuilt the context. So once the
+   * compacted conversation is in place, the rules are given again. A message
+   * handed up with the compaction would be stored as one the person typed,
+   * which is why they come as the same hidden row as at the start. A
+   * subagent's compaction is its own, and a precompute installs nothing.
+   */
+  on('session.compact', async ($, e, next) => {
+    const result = await next(e);
+    if (!host || !keeper || e.agentId !== undefined || e.trigger === 'precompute' || !result.messages) return result;
+    const delivery = keeper;
+    host.after(0, () => void delivery.deliver().catch(() => undefined));
+    return result;
+  }).catch(($, e, next) => next(e));
 
   /** The search agent is this mod's own: the main model never sees it. */
   on('agent.offer', { agent: 'agent-journal:search' }, () => ({ isOffered: false }));
@@ -300,11 +356,11 @@ export const register: Register = (on, options) => {
       read($, viewAtom),
       read($, openedAtom),
       read($, listAtom),
-      read($, scopeAtom),
+      host.scope.read(),
     ]);
     if (opened !== null || view !== 'list' || list.entries.length === 0) return next(e);
     const { lines } = listLayoutOf(list, new Date());
-    const topRows = listTopRows({ scope: scope ?? defaultScope, currentProject, list });
+    const topRows = listTopRows({ scope, currentProject, list, journalDir: loader.journalDir() });
     const current = windowOf(lines.length, paneRows, topRows, await read($, topAtom));
     const moved = windowOf(lines.length, paneRows, topRows, current.top + e.by);
     if (moved.top !== current.top) await update($, topAtom, () => moved.top);
@@ -315,8 +371,8 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'Pane', requestId: 'journal' }, async ($, e, next) => {
     if (!host || e.surface === 'mobile') return next(e);
     const { Box, Text, Button, Input, Markdown } = await $.ui.resolve(e);
-    const [scope, view, list, chat, opened, top, date, notice] = await Promise.all([
-      read($, scopeAtom),
+    const [scope, view, list, chat, opened, top, date, notice, model, sessionModel] = await Promise.all([
+      host.scope.read(),
       read($, viewAtom),
       read($, listAtom),
       read($, chatAtom),
@@ -324,10 +380,15 @@ export const register: Register = (on, options) => {
       read($, topAtom),
       read($, dateAtom),
       read($, noticeAtom),
+      host.model.read(),
+      $.session.model().catch(() => ''),
     ]);
     paneRows = e.props.scroll.bodyRows;
-    return paneView({ Box, Text, Button, Input, Markdown }, actionsOf(host, defaultScope, load), {
-      scope: scope ?? defaultScope,
+    return paneView({ Box, Text, Button, Input, Markdown }, actionsOf(host, load), {
+      scope,
+      model,
+      sessionModel,
+      journalDir: loader?.journalDir() ?? null,
       view,
       list,
       chat,

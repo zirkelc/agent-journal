@@ -7,11 +7,24 @@ export const SOURCES_PREFIX = 'Sources:';
 /** Which entries a question is about when it names no project. */
 export type Scope = 'project' | 'all';
 
-/** The values `scope` may hold, as the manifest declares them. */
-export const SCOPES: ReadonlyArray<Scope> = ['project', 'all'];
+/** The scope the pane opens on until the person picks another: the current project's entries. */
+export const DEFAULT_SCOPE: Scope = 'project';
 
-/** A stored option outside the declared values counts as the default. */
-export const scopeOf = (value: unknown): Scope => (value === 'all' ? 'all' : 'project');
+/** A stored value that is no longer a scope counts as the default. */
+export const scopeOf = (value: unknown): Scope => (value === 'all' ? 'all' : DEFAULT_SCOPE);
+
+/** The model a question goes to: one by its alias, or `inherit` for the session's own. */
+export type SearchModel = 'haiku' | 'sonnet' | 'opus' | 'inherit';
+
+/** The models the Ask view offers, in its order. */
+export const SEARCH_MODELS: ReadonlyArray<SearchModel> = ['haiku', 'sonnet', 'opus', 'inherit'];
+
+/** Fast enough for a few list and search calls, and the cheapest. */
+export const DEFAULT_SEARCH_MODEL: SearchModel = 'haiku';
+
+/** A stored value that is no longer one of the models counts as the default. */
+export const searchModelOf = (value: unknown): SearchModel =>
+  SEARCH_MODELS.find((model) => model === value) ?? DEFAULT_SEARCH_MODEL;
 
 /**
  * The agent's whole system prompt. It holds only what never changes: the clock,
@@ -27,15 +40,18 @@ const SYSTEM_PROMPT = [
   `End with one last line, \`${SOURCES_PREFIX} \` followed by the id of every entry you used, comma-separated (\`${SOURCES_PREFIX} 2026-01-11T143000Z, 2026-01-12T091500Z\`). The reader shows those entries as a list of sources under the answer, so the answer itself does not need to name them.`,
 ].join('\n');
 
-/** The agent type, registered once per load; the model is the person's choice. */
-export const agentSpec = (model: string) => ({
+/**
+ * The agent type, registered once per load. It runs on the session's model
+ * unless a question names another, so the model can change between questions.
+ */
+export const agentSpec = () => ({
   name: AGENT_NAME,
   description: 'Answers a question about past work from the agent journal. Started only by /journal.',
   prompt: SYSTEM_PROMPT,
   tools: AGENT_TOOLS,
   disallowedTools: DENIED_TOOLS,
   omitClaudeMd: true as const,
-  model,
+  model: 'inherit',
   maxTurns: 12,
 });
 
@@ -71,11 +87,12 @@ const FILTERS = {
   since: {
     type: 'string',
     description:
-      'From this point on: a value from the clock block as it is, a local day (YYYY-MM-DD), today, or a number of days back (7d).',
+      'From this point on: the value of a `_since` key of the clock block as it is (for today, `local_today_since`), a local day (YYYY-MM-DD), today, or a number of days back (7d).',
   },
   until: {
     type: 'string',
-    description: 'Up to and including this point, in the same forms as since.',
+    description:
+      'Up to and including this point: the value of an `_until` key of the clock block as it is (for today, `local_today_until`), or a local day, today, or a number of days back, as for since.',
   },
   project: {
     type: 'string',

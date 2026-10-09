@@ -265,3 +265,6 @@ export const markdownOf = (text: string): string =>
     text.replace(/[\p{Cc}\p{Cf}]/gu, (char) => (char === '\n' || char === '\t' ? char : '')),
     MARKDOWN_MAX,
   );
+
+/** How a step line ends when its tool call failed, and the only thing that marks it as failed. */
+export const FAILED_STEP = ' · failed';

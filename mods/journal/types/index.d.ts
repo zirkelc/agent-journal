@@ -43,8 +43,6 @@ export type JournalView = 'list' | 'chat';
 declare module 'claude-code' {
   interface PluginState {
     'agent-journal': {
-      /** The scope the person picked in the pane; null until then, so the setting applies. */
-      scope: 'project' | 'all' | null;
       view: JournalView;
       list: JournalList;
       chat: Array<JournalTurn>;

@@ -24,9 +24,9 @@ Agent Journal makes the model record its work along the way: one small markdown 
 
 Nothing leaves your machine.
 
-- **No server, no account, no API requests.** The plugin runs locally. It makes no network requests.
-- **No hidden tool calls.** Entries are written by the model's own file-writing tool, in your session, in front of you. Nothing runs in the background and nothing runs between sessions.
-- **A read-only hook.** At session start, a shell script in [`adapters/`](adapters/) reads `~/.config/agent-journal/config` and runs `git rev-parse` to name the project. It writes no files.
+- **No server, no account, no API requests.** The plugin runs locally. It makes no network requests of its own: the journal pane's search uses the model of your Claude Code session.
+- **No hidden tool calls.** Entries are written by the model's own file-writing tool, in your session, in front of you. Nothing runs between sessions, and in the background only the journal pane's search, when you ask it something.
+- **A read-only hook.** At session start, a hook (a shell script in [`adapters/`](adapters/) for Codex, a hooks module for Claude Code) reads `~/.config/agent-journal/config` and runs `git rev-parse` to name the project. It writes no files.
 - **Your own files.** Entries are plain markdown in a directory you choose. Delete one and it is gone.
 
 Everything stays between you and your model.
@@ -99,17 +99,22 @@ curl -fsSL https://raw.githubusercontent.com/zirkelc/agent-journal/main/install.
 
 It will detect your installed agents and provide specific instructions. It also symlinks the `agent-journal` CLI into `~/.local/bin`. If that directory is not on your `$PATH`, it prints the line to add to your shell profile.
 
-### Claude 
+### Claude
 
-Install the plugin:
+Requires Claude Code 2.1.287 or later, since the plugin runs as a [mod](https://code.claude.com/docs/en/plugins/mods/overview): a hooks module that Claude Code loads itself. Install the plugin:
 
 ```
 /plugin marketplace add zirkelc/agent-plugins
 /plugin install agent-journal@zirkelc
 ```
 
-Then open a new session and ask Claude to write a journal entry.
-By default, it will write to the directory `~/agent-journal/`.
+Then open a new session and ask Claude to write a journal entry. By default, it will write to the directory `~/agent-journal/`.
+
+#### The journal pane
+
+`/journal` opens a pane beside the conversation. It lists the entries of the current project, or of all projects, grouped by day, and narrows them to a year, a month or a day. Press an entry to read it, or send it to the prompt.
+
+**Ask** answers questions about the journal, such as "what did we fix last week?", with the entries it used as sources. Follow-up questions work. `/journal what did we fix last week?` asks from the prompt. A search agent answers it, on Haiku unless you pick another model in the Ask view. The pane keeps your project choice and your model for the next session. It can only list, search and read entries, and it runs in your session like any other subagent, so each question costs a few model requests.
 
 #### Permissions
 
@@ -166,8 +171,6 @@ It provides a thin interface over `ls` and `grep` for common commands:
 | `aj write` | `$EDITOR ~/agent-journal/$(date -u +%Y-%m-%dT%H%M%SZ).md` | add an entry yourself |
 | `aj config` | `cat ~/.config/agent-journal/config` | read and change the settings |
 | `aj install` | | which agents are on this machine, and how to wire each one up |
-| `aj context` | | the instruction an adapter injects at session start |
-| `aj context --recall` | | what a model that only reads the journal is told: [`RECALL.md`](templates/RECALL.md), with the clock and the calendar |
 | `aj help` | | every command and option |
 
 `list` is the default command if not given, so `aj` and `aj list` are the same. 

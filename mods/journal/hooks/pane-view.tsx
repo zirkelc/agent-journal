@@ -3,12 +3,13 @@
 /* @jsxFrag Fragment */
 import type { ElementTable, RenderElement } from 'claude-code';
 import type { JournalDate, JournalEntry, JournalList, JournalOpened, JournalTurn, JournalView } from '../types';
-import type { Scope } from './agent.js';
+import type { Scope, SearchModel } from './agent.js';
 import { sanitize } from './cli.js';
 import {
   colorOf,
   column,
   dayHeading,
+  FAILED_STEP,
   fit,
   instantOf,
   isLatest,
@@ -26,6 +27,7 @@ export type Ui = Pick<ElementTable<'terminal' | 'desktop'>, 'Box' | 'Text' | 'Bu
 /** What a press or an edit in the pane does. The view only calls these. */
 export type PaneActions = {
   chooseScope: (scope: Scope) => void;
+  chooseModel: (model: SearchModel) => void;
   chooseDateUnit: (unit: DateUnit) => void;
   /** One period back (`-1`) or forward (`1`) in the unit chosen. */
   stepDate: (by: number) => void;
@@ -42,6 +44,12 @@ export type PaneActions = {
 /** Everything one drawing of the pane reads. */
 export type PaneModel = {
   scope: Scope;
+  /** The model questions go to. */
+  model: SearchModel;
+  /** The session's own model, which `inherit` runs on. */
+  sessionModel: string;
+  /** Where the journal is, or null until the CLI has said. */
+  journalDir: string | null;
   view: JournalView;
   list: JournalList;
   chat: Array<JournalTurn>;
@@ -161,12 +169,12 @@ export function listLayoutOf(list: JournalList, now: Date, timeZone?: string): L
 
 /**
  * The rows above the list: the header and its margin, Ask and its margin, the
- * scope, the date, the rule, the project's name with its margin when one
+ * journal's folder once it is known, the scope, the date, the rule, the project's name with its margin when one
  * shows, and the margin above the list. Kept beside the views that draw them.
  */
-export function listTopRows(model: Pick<PaneModel, 'scope' | 'currentProject' | 'list'>): number {
+export function listTopRows(model: Pick<PaneModel, 'scope' | 'currentProject' | 'list' | 'journalDir'>): number {
   const hasChip = model.scope === 'project' && (model.currentProject ?? model.list.entries[0]?.project);
-  return 2 + 2 + 1 + 1 + 1 + (hasChip ? 2 : 0) + 1;
+  return 2 + 2 + (model.journalDir !== null ? 1 : 0) + 1 + 1 + 1 + (hasChip ? 2 : 0) + 1;
 }
 
 /** Where the list's window stands: its first row, clamped, its height, and the furthest its first row goes. */
@@ -256,13 +264,22 @@ function ruleView(ui: Ui, model: PaneModel, key: string): RenderElement {
   );
 }
 
+/** The columns a row's label takes, so the buttons of the project, date and model rows start in one column. */
+const LABEL_WIDTH = 'Project'.length;
+
+/** A row's dim label, padded to the labels' one width. */
+function rowLabel(ui: Ui, text: string): RenderElement {
+  const { Text } = ui;
+  return <Text dimColor>{text.padEnd(LABEL_WIDTH, ' ')}</Text>;
+}
+
 /** The scope as two buttons, the active one highlighted: both choices are visible and take a click. */
 function scopeView(ui: Ui, actions: PaneActions, model: PaneModel): RenderElement {
-  const { Box, Text } = ui;
+  const { Box } = ui;
   const current = model.currentProject ? `Current (${sanitize(model.currentProject)})` : 'Current';
   return (
     <Box flexDirection="row" columnGap={1}>
-      <Text dimColor>Project</Text>
+      {rowLabel(ui, 'Project')}
       {actionButton(
         ui,
         model,
@@ -281,6 +298,48 @@ function scopeView(ui: Ui, actions: PaneActions, model: PaneModel): RenderElemen
       )}
     </Box>
   );
+}
+
+/** A model's id as the model row shows it: without the product's prefix or a context-size suffix. */
+export const modelName = (model: string): string => model.replace(/^claude-/, '').replace(/\[.*\]$/, '');
+
+/** The labels of the models the Ask view offers. */
+const MODEL_LABELS: Record<Exclude<SearchModel, 'inherit'>, string> = {
+  haiku: 'Haiku',
+  sonnet: 'Sonnet',
+  opus: 'Opus',
+};
+
+/** The model questions go to, as buttons like the scope's: the chosen one on color, each one a press away. */
+function modelView(ui: Ui, actions: PaneActions, model: PaneModel): RenderElement {
+  const { Box } = ui;
+  const session = modelName(model.sessionModel);
+  const choices: Array<[SearchModel, string]> = [
+    ...Object.entries(MODEL_LABELS).map(([alias, label]): [SearchModel, string] => [alias as SearchModel, label]),
+    ['inherit', session ? `Session (${sanitize(session)})` : 'Session'],
+  ];
+  return (
+    <Box flexDirection="row" columnGap={1}>
+      {rowLabel(ui, 'Model')}
+      {choices.map(([choice, label]) =>
+        actionButton(
+          ui,
+          model,
+          `model:${choice}`,
+          label,
+          () => actions.chooseModel(choice),
+          model.model === choice ? 'primary' : 'dim',
+        ),
+      )}
+    </Box>
+  );
+}
+
+/** A path cut from the front to a width, so its last parts, which tell it apart, stay. */
+export function pathFit(path: string, width: number): string {
+  const chars = [...path];
+  if (chars.length <= width) return path;
+  return width <= 1 ? '…' : `…${chars.slice(chars.length - width + 1).join('')}`;
 }
 
 /** The units the list narrows to, in the order the date row shows them. */
@@ -302,7 +361,7 @@ function dateView(ui: Ui, actions: PaneActions, model: PaneModel): RenderElement
   const isNewest = isLatest(date, localDayTime(model.now, model.timeZone).day);
   return (
     <Box flexDirection="row" columnGap={1}>
-      <Text dimColor>{'Date   '}</Text>
+      {rowLabel(ui, 'Date')}
       {DATE_UNITS.map(([unit, label]) =>
         actionButton(
           ui,
@@ -417,6 +476,12 @@ function listView(ui: Ui, actions: PaneActions, model: PaneModel): RenderElement
       <Box flexDirection="row" marginBottom={1}>
         {actionButton(ui, model, 'open-ask', '✦ Ask', () => actions.showChat())}
       </Box>
+      {model.journalDir !== null && (
+        <Box key="dir" flexDirection="row" columnGap={1}>
+          {rowLabel(ui, 'Journal')}
+          <Text dimColor>{pathFit(sanitize(model.journalDir), Math.max(model.columns - LABEL_WIDTH - 1, 10))}</Text>
+        </Box>
+      )}
       {scopeView(ui, actions, model)}
       {dateView(ui, actions, model)}
       {ruleView(ui, model, 'rule:list')}
@@ -496,7 +561,7 @@ export function sourcesOf(turn: JournalTurn, known: ReadonlyArray<JournalEntry>)
 }
 
 /** Whether a step line tells of a tool call that failed. */
-export const isFailedStep = (step: string): boolean => /\bfailed$/.test(step);
+export const isFailedStep = (step: string): boolean => step.endsWith(FAILED_STEP);
 
 /** The status under a turn, as the main session shows one under a reply. */
 export function statusOf(turn: JournalTurn, now: number): string {
@@ -562,6 +627,7 @@ function chatView(ui: Ui, actions: PaneActions, model: PaneModel): RenderElement
         </Box>
       )}
       {scopeView(ui, actions, model)}
+      {modelView(ui, actions, model)}
       {ruleView(ui, model, 'rule:chat')}
       <Box marginTop={1} />
       {model.chat.length === 0 && (

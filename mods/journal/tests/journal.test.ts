@@ -1,9 +1,10 @@
 import { describe, expect, test } from 'claude-code/testing';
 import type { Timer } from 'claude-code';
 import type { JournalDate, JournalList, JournalOpened, JournalTurn, JournalView } from '../types';
-import type { Scope } from '../hooks/agent.js';
+import { type Scope, type SearchModel, TOOL_SPECS } from '../hooks/agent.js';
 import type { Cell, Host } from '../hooks/host.js';
 import { TOOL_LIST, TOOL_READ, TOOL_SEARCH, toolName } from '../hooks/names.js';
+import { isFailedStep } from '../hooks/pane-view.js';
 import {
   agentOf,
   ANSWER_ATTEMPTS,
@@ -70,7 +71,8 @@ function hostWith(spawn: Host['spawn']): Host {
     fillPrompt: async () => undefined,
     toast: () => {},
     after: () => ({ cancel: () => {} }) as unknown as Timer,
-    scope: cell<Scope | null>(null),
+    scope: cell<Scope>('project'),
+    model: cell<SearchModel>('haiku'),
     list: cell<JournalList>({ status: 'idle', entries: [], error: '', limit: 0, hasMore: false }),
     view: cell<JournalView>('list'),
     chat: cell<Array<JournalTurn>>([]),
@@ -78,6 +80,8 @@ function hostWith(spawn: Host['spawn']): Host {
     top: cell(0),
     date: cell<JournalDate>({ unit: 'all', value: '' }),
     notice: cell(''),
+    conversationText: async () => '',
+    appendNote: async () => {},
     redraw: () => {},
   };
 }
@@ -88,7 +92,7 @@ describe('journal', () => {
     const host = hostWith(async () => ({ agentId: 'agent-1' }));
 
     // Act
-    const outcome = await ask(host, 'project', 'what did we fix?');
+    const outcome = await ask(host, 'what did we fix?');
 
     // Assert
     expect(outcome).toBe('asked');
@@ -103,8 +107,8 @@ describe('journal', () => {
     });
 
     // Act
-    const outcome = await ask(host, 'project', 'what did we fix?');
-    const next = await ask(host, 'project', 'and now?');
+    const outcome = await ask(host, 'what did we fix?');
+    const next = await ask(host, 'and now?');
 
     // Assert
     expect(outcome).toBe('failed');
@@ -127,7 +131,7 @@ describe('journal', () => {
     host.agentMessages = async () => [{ role: 'assistant', text: 'Fixed the race.' }];
     const timers: Array<() => void> = [];
     host.after = (ms, fn) => (timers.push(fn), { cancel: () => {} }) as unknown as Timer;
-    await ask(host, 'project', 'what did we fix?');
+    await ask(host, 'what did we fix?');
     const waiter = answerWaiter(host);
 
     // Act
@@ -148,12 +152,26 @@ describe('journal', () => {
     const host = hostWith(async () => ({ agentId: `agent-${++spawns}` }));
 
     // Act
-    const outcomes = await Promise.all([ask(host, 'project', 'one?'), ask(host, 'project', 'two?')]);
+    const outcomes = await Promise.all([ask(host, 'one?'), ask(host, 'two?')]);
 
     // Assert
     expect(outcomes).toEqual(['asked', 'busy']);
     expect(spawns).toBe(1);
     expect((await host.chat.read()).map((turn) => turn.question)).toEqual(['one?']);
+  });
+
+  test('since takes a range\u2019s _since value of the clock and until its _until value', () => {
+    // Arrange
+    const list = TOOL_SPECS.find((spec) => spec.name === TOOL_LIST)!;
+    const properties = (list.inputSchema as { properties: Record<string, { description: string }> }).properties;
+
+    // Act
+    const since = properties.since!.description;
+    const until = properties.until!.description;
+
+    // Assert
+    expect(since).toContain('`local_today_since`');
+    expect(until).toContain('`local_today_until`');
   });
 
   test('a list kept from before the pane loaded in pages starts at the first page', () => {
@@ -202,12 +220,12 @@ describe('journal', () => {
     expect(result[1]!.answer).toBe('The search was stopped.');
   });
 
-  test('the main model is named as the session-start hook names it', () => {
+  test('the agent is named by the product and the model, and by the product alone without a model', () => {
     // Act
-    const result = [agentOf('claude-opus-5-5[1m]'), agentOf('claude-haiku-4-5-20251001')];
+    const result = [agentOf('claude-opus-5-5[1m]'), agentOf('claude-haiku-4-5-20251001'), agentOf('')];
 
     // Assert
-    expect(result).toEqual(['claude/opus-5-5', 'claude/haiku-4-5-20251001']);
+    expect(result).toEqual(['claude/opus-5-5', 'claude/haiku-4-5-20251001', 'claude']);
   });
 
   test('a step of the agent goes to the turn it asks for, with the entries it returned, once each', () => {
@@ -269,6 +287,29 @@ describe('journal', () => {
       'Read: Released 0.2.1',
       'Read the entry of Oct 5, 00:30',
     ]);
+  });
+
+  test('a failed call of every tool reads as failed, and a search for the word failed does not', () => {
+    // Arrange
+    const failed = { isOk: false, entries: [] };
+    const zone = 'Europe/Berlin';
+
+    // Act
+    const steps = [
+      stepOf(toolName(TOOL_LIST), { since: 'today', project: '.' }, failed, [], zone),
+      stepOf(toolName(TOOL_SEARCH), { text: 'race' }, failed, [], zone),
+      stepOf(toolName(TOOL_READ), { id: '2026-10-07T095401Z' }, failed, [], zone),
+      stepOf(toolName(TOOL_SEARCH), { text: 'failed' }, { isOk: true, entries: [] }, [], zone),
+    ];
+
+    // Assert
+    expect(steps).toEqual([
+      'Listing · this project · today · failed',
+      'Searching "race" · all projects · failed',
+      'Reading 2026-10-07T095401Z · failed',
+      'Searched "failed" · 0 matches · all projects',
+    ]);
+    expect(steps.map(isFailedStep)).toEqual([true, true, true, false]);
   });
 
   test('a running agent is waited for, and an unlisted one only until it counts as gone', () => {

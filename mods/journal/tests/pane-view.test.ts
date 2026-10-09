@@ -5,6 +5,8 @@ import {
   BUTTON_COLOR,
   daysOf,
   linesOf,
+  listTopRows,
+  pathFit,
   paneView,
   projectWidth,
   visibleLines,
@@ -17,6 +19,7 @@ import { nodeOf, PANE, propsOf, textOf } from './world.js';
 
 const NOTHING: PaneActions = {
   chooseScope: () => {},
+  chooseModel: () => {},
   chooseDateUnit: () => {},
   stepDate: () => {},
   ask: () => {},
@@ -31,6 +34,9 @@ const NOTHING: PaneActions = {
 
 const MODEL: PaneModel = {
   scope: 'all',
+  model: 'haiku',
+  sessionModel: 'claude-opus-5-5[1m]',
+  journalDir: '/home/me/journal',
   view: 'list',
   list: {
     status: 'ready',
@@ -191,6 +197,72 @@ describe('pane-view', () => {
     );
     expect(propsOf(outside, 'scope:project')?.label).toBe('Current');
     expect(propsOf(outside, 'box:scope:project')?.backgroundColor).toBe(BUTTON_COLOR);
+  });
+
+  test('the list names the journal\u2019s folder in a row above the project, and nothing before the CLI has said where it is', async ($, on) => {
+    // Arrange
+    const set = drawsWith(on);
+
+    // Act
+    const known = await $.ui.render(VIEW as never);
+    set({ ...MODEL, journalDir: null });
+    const unknown = await $.ui.render(VIEW as never);
+    set({ ...MODEL, view: 'chat' });
+    const chat = await $.ui.render(VIEW as never);
+
+    // Assert
+    const drawn = textOf(known);
+    const order = ['✦ Ask', 'Journal', '/home/me/journal', 'Project'].map((text) => drawn.indexOf(text));
+    expect(order.every((at, i) => at > (order[i - 1] ?? -1))).toBe(true);
+    expect(textOf(unknown)).not.toContain('/home/me/journal');
+    expect(listTopRows(MODEL)).toBe(listTopRows({ ...MODEL, journalDir: null }) + 1);
+    expect(textOf(chat)).not.toContain('/home/me/journal');
+  });
+
+  test('the labels of the project, date and model rows have one width, so their buttons line up', async ($, on) => {
+    // Arrange
+    const set = drawsWith(on);
+
+    // Act
+    const list = JSON.stringify(await $.ui.render(VIEW as never));
+    set({ ...MODEL, view: 'chat' });
+    const chat = JSON.stringify(await $.ui.render(VIEW as never));
+
+    // Assert
+    expect(list).toContain('"Project"');
+    expect(list).toContain('"Date   "');
+    expect(chat).toContain('"Project"');
+    expect(chat).toContain('"Model  "');
+  });
+
+  test('a path too long for its room keeps its end', () => {
+    // Act
+    const result = [pathFit('/home/me/journal', 20), pathFit('/home/me/journal', 8)];
+
+    // Assert
+    expect(result).toEqual(['/home/me/journal', '…journal']);
+  });
+
+  test('the chat shows the model questions go to, as buttons with the session\u2019s own named', async ($, on) => {
+    // Arrange
+    const set = drawsWith(on);
+    set({ ...MODEL, view: 'chat' });
+
+    // Act
+    const haiku = await $.ui.render(VIEW as never);
+    set({ ...MODEL, view: 'chat', model: 'inherit' });
+    const session = await $.ui.render(VIEW as never);
+    set({ ...MODEL, view: 'list' });
+    const list = await $.ui.render(VIEW as never);
+
+    // Assert
+    expect(propsOf(haiku, 'box:model:haiku')?.backgroundColor).toBe(BUTTON_COLOR);
+    expect(propsOf(haiku, 'model:sonnet')).toEqual(expect.objectContaining({ label: 'Sonnet', dimColor: true }));
+    expect(propsOf(haiku, 'model:opus')?.label).toBe('Opus');
+    expect(propsOf(haiku, 'model:inherit')?.label).toBe('Session (opus-5-5)');
+    expect(propsOf(session, 'box:model:inherit')?.backgroundColor).toBe(BUTTON_COLOR);
+    expect(propsOf(session, 'box:model:haiku')?.backgroundColor).toBe(undefined);
+    expect(propsOf(list, 'model:haiku')).toBe(undefined);
   });
 
   test('an opened entry shows its summary in a box, then its fields and its body as markdown, on every surface with input', async ($, on) => {

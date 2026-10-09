@@ -15,7 +15,12 @@ for (const key of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR
 }
 
 export const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-export const HOOK = join(ROOT, 'adapters', 'claude-code', 'session-start.sh');
+/**
+ * The session-start adapter the shell tests drive. Claude Code takes the rules
+ * through its hooks module instead, so the shell path is Codex's, and with it
+ * everything the adapters share in `common.sh`.
+ */
+export const HOOK = join(ROOT, 'adapters', 'codex', 'session-start.sh');
 
 /**
  * Every case gets its own plugin root, so a test can give the core instructions
@@ -329,7 +334,7 @@ export function tilde(store: Fixture, path: string): string {
   return path === store.home ? '~' : path.replace(`${store.home}/`, '~/');
 }
 
-/** The Claude Code adapter, run as Claude Code runs it. */
+/** The Codex adapter, run as Codex runs it. */
 export function hook(store: Fixture, options: RunOptions = {}): Record<string, any> | null {
   const payload =
     options.stdin ??
@@ -344,7 +349,7 @@ export function hook(store: Fixture, options: RunOptions = {}): Record<string, a
     encoding: 'utf8',
     cwd: options.at,
     input: payload,
-    env: baseEnv(store, { CLAUDE_PLUGIN_ROOT: store.root, ...options.env }),
+    env: baseEnv(store, { PLUGIN_ROOT: store.root, ...options.env }),
   });
 
   return out.trim() ? JSON.parse(out) : null;

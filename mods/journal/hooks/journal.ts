@@ -1,7 +1,17 @@
 import type { JournalEntry, JournalList, JournalOpened, JournalTurn, JournalView } from '../types';
-import { questionPrompt, type Scope } from './agent.js';
-import { dayText, instantOf, isLatest, localDayTime, rangeText, stepped, withUnit } from './format.js';
-import { configArgs, entriesOf, journalDirOf, listArgs, readArgs, recallArgs, sanitize, type Filters } from './cli.js';
+import { questionPrompt } from './agent.js';
+import { dayText, FAILED_STEP, instantOf, isLatest, localDayTime, rangeText, stepped, withUnit } from './format.js';
+import {
+  configArgs,
+  contextArgs,
+  entriesOf,
+  journalDirOf,
+  listArgs,
+  readArgs,
+  recallArgs,
+  sanitize,
+  type Filters,
+} from './cli.js';
 import type { Host } from './host.js';
 import { CLI_IN_CHECKOUT, CLI_ON_PATH } from './names.js';
 import type { PaneActions } from './pane-view.js';
@@ -11,6 +21,67 @@ export type Run = { cli: string; exitCode: number; stdout: string; stderr: strin
 
 /** Long enough for `list --limit 200` on a large journal, short enough to give up on a hung one. */
 const CLI_TIMEOUT_MS = 15_000;
+
+/** The session as the CLI's `context` names it: where it works, its id, and the agent and model in it. */
+export type SessionNames = { cwd: string; sessionId: string; agent: string };
+
+export async function sessionOf(host: Host): Promise<SessionNames> {
+  const [cwd, sessionId, mainModel] = await Promise.all([host.cwd(), host.sessionId(), host.mainModel()]);
+  return { cwd, sessionId, agent: agentOf(mainModel) };
+}
+
+/**
+ * The mark the rules' row opens with, which says the conversation holds them.
+ * A comment of the mod's own, not a sentence of the rules: those are quoted,
+ * pasted and read in this very repository without the rules being there.
+ */
+export const RULES_MARK = '<!-- agent-journal rules -->';
+
+/** How handing the rules to the main conversation went. */
+export type RulesOutcome = 'delivered' | 'present' | 'none';
+
+/**
+ * Gives the main conversation the rules for writing the journal: a row the
+ * model reads, added only when what its next request is built from does not
+ * hold them yet. That is so at a session's start, after /clear and after
+ * compaction, and not on a resume, which still carries them. Subagents never
+ * get them, since the row goes to the main conversation alone.
+ *
+ * The rules are made ahead, at the start and again for a new session id
+ * (a /clear) or another model, so a delivery waits for no CLI run. One
+ * delivery runs at a time: a second asked while one is under way gets its
+ * outcome, so two cannot both find the rules missing and both add them.
+ */
+export function rulesKeeper(host: Host) {
+  let made: { key: string; rules: Promise<string> } | null = null;
+  let delivering: Promise<RulesOutcome> | null = null;
+
+  /** The rules for the session as it is now; empty when the CLI cannot give them. */
+  async function rules(): Promise<string> {
+    const session = await sessionOf(host);
+    const key = `${session.sessionId}\n${session.cwd}\n${session.agent}`;
+    if (made?.key !== key) {
+      const ran = runCli(host, contextArgs(session.cwd, session.sessionId, session.agent));
+      made = { key, rules: ran.then((run) => (run.exitCode === 0 ? run.stdout.trim() : '')) };
+    }
+    return made.rules;
+  }
+
+  async function deliverOnce(): Promise<RulesOutcome> {
+    const [text, conversation] = await Promise.all([rules(), host.conversationText()]);
+    if (text === '') return 'none';
+    if (conversation.includes(RULES_MARK)) return 'present';
+    await host.appendNote(`${RULES_MARK}\n${text}`);
+    return 'delivered';
+  }
+
+  function deliver(): Promise<RulesOutcome> {
+    delivering ??= deliverOnce().finally(() => (delivering = null));
+    return delivering;
+  }
+
+  return { prepare: () => rules().then(() => undefined), deliver };
+}
 
 /** How many entries the pane loads at first, and how many more each time the list nears its end. */
 export const PANE_PAGE = 200;
@@ -76,10 +147,14 @@ export function failureOf(run: Run): string {
 }
 
 /**
- * `claude-opus-5-5[1m]` as an entry's `agent` field spells it, `claude/opus-5-5`,
- * the way the session-start hook writes it.
+ * The agent writing, as an entry's `agent` field spells it: the product, then
+ * the model without the product's own prefix or a context-size suffix, so
+ * `claude-opus-5-5[1m]` is `claude/opus-5-5`. Without a model, the product alone.
  */
-export const agentOf = (model: string): string => `claude/${model.replace(/^claude-/, '').replace(/\[.*\]$/, '')}`;
+export function agentOf(model: string): string {
+  const name = model.replace(/^claude-/, '').replace(/\[.*\]$/, '');
+  return name === '' ? 'claude' : `claude/${name}`;
+}
 
 /**
  * How many entries a load asks for: the first page when it starts again, else
@@ -96,7 +171,7 @@ export function pageLimitOf(list: JournalList, isFresh: boolean): number {
  * ones before it. The CLI prints the most recent entries oldest first, so one
  * entry more than asked for says that older ones exist, and is left out.
  */
-export function listLoader(host: Host, defaultScope: Scope) {
+export function listLoader(host: Host) {
   let generation = 0;
   let journalDir: string | null = null;
 
@@ -107,7 +182,7 @@ export function listLoader(host: Host, defaultScope: Scope) {
       limit: limit + 1,
       offset,
       ...(date.unit !== 'all' ? { date: date.value } : {}),
-      ...((scope ?? defaultScope) === 'project' ? { project: '.' } : {}),
+      ...(scope === 'project' ? { project: '.' } : {}),
     };
   }
 
@@ -195,7 +270,7 @@ export type AskOutcome = 'asked' | 'busy' | 'empty' | 'failed';
  * failure after that settles the turn, so a question never stays open with no
  * agent behind it.
  */
-export async function ask(host: Host, defaultScope: Scope, question: string): Promise<AskOutcome> {
+export async function ask(host: Host, question: string): Promise<AskOutcome> {
   const text = question.trim();
   if (text === '') return 'empty';
 
@@ -229,12 +304,13 @@ export async function ask(host: Host, defaultScope: Scope, question: string): Pr
   };
 
   try {
-    const [cwd, sessionId, mainModel] = await Promise.all([host.cwd(), host.sessionId(), host.mainModel()]);
-    const recall = await runCli(host, recallArgs(cwd, sessionId, agentOf(mainModel)));
+    const session = await sessionOf(host);
+    const recall = await runCli(host, recallArgs(session.cwd, session.sessionId, session.agent));
     if (recall.exitCode !== 0 || recall.stdout.trim() === '') return await fail(failureOf(recall));
 
-    const scope = (await host.scope.read()) ?? defaultScope;
-    const spawned = await host.spawn(questionPrompt(recall.stdout, scope, earlier, text));
+    const [scope, model] = await Promise.all([host.scope.read(), host.model.read()]);
+    const prompt = questionPrompt(recall.stdout, scope, earlier, text);
+    const spawned = await host.spawn(prompt, model === 'inherit' ? undefined : model);
     if (spawned.deny) return await fail(`The search did not start: ${spawned.deny}`);
     if (!spawned.agentId) return await fail('The search started without an agent to wait for.');
     const agentId = spawned.agentId;
@@ -412,13 +488,17 @@ export function stepOf(
   const n = result.entries.length;
   const count = (one: string, many: string) => `${n} ${n === 1 ? one : many}`;
   const parts = (head: string) => [head, where, range].filter(Boolean).join(' · ');
-  if (tool.endsWith('__list')) return parts(result.isOk ? `Listed ${count('entry', 'entries')}` : 'Listing failed');
+  if (tool.endsWith('__list'))
+    return result.isOk ? parts(`Listed ${count('entry', 'entries')}`) : `${parts('Listing')}${FAILED_STEP}`;
   if (tool.endsWith('__search')) {
-    const head = `Searched "${text(input.text)}"`;
-    return parts(result.isOk ? `${head} · ${count('match', 'matches')}` : `${head} · failed`);
+    const query = `"${text(input.text)}"`;
+    return result.isOk
+      ? parts(`Searched ${query} · ${count('match', 'matches')}`)
+      : `${parts(`Searching ${query}`)}${FAILED_STEP}`;
   }
   if (tool.endsWith('__read')) {
     const id = text(input.id);
+    if (!result.isOk) return `Reading ${id}${FAILED_STEP}`;
     const known = [...result.entries, ...seen].find((entry) => entry.id === id);
     if (known?.summary) return `Read: ${known.summary}`;
     const instant = instantOf(id);
@@ -442,7 +522,7 @@ export async function openEntry(host: Host, id: string): Promise<void> {
 }
 
 /** Presses and edits in the pane. Nothing they start may reject into the engine. */
-export function actionsOf(host: Host, defaultScope: Scope, load: (isFresh?: boolean) => Promise<void>): PaneActions {
+export function actionsOf(host: Host, load: (isFresh?: boolean) => Promise<void>): PaneActions {
   const quietly = (work: () => Promise<unknown>) => void work().catch(() => undefined);
   return {
     chooseScope: (scope) =>
@@ -451,6 +531,7 @@ export function actionsOf(host: Host, defaultScope: Scope, load: (isFresh?: bool
         await host.top.update(() => 0);
         await load(true);
       }),
+    chooseModel: (model) => quietly(() => host.model.update(() => model)),
     chooseDateUnit: (unit) =>
       quietly(async () => {
         await host.date.update((date) => withUnit(date, unit, localDayTime(new Date()).day));
@@ -466,7 +547,7 @@ export function actionsOf(host: Host, defaultScope: Scope, load: (isFresh?: bool
         await host.top.update(() => 0);
         await load(true);
       }),
-    ask: (question) => quietly(() => ask(host, defaultScope, question)),
+    ask: (question) => quietly(() => ask(host, question)),
     open: (id) => quietly(() => openEntry(host, id)),
     back: () => quietly(() => host.opened.update(() => null)),
     showChat: () => quietly(() => host.view.update((): JournalView => 'chat')),

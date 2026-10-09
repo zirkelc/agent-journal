@@ -1,6 +1,6 @@
 {
   "name": "agent-journal",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "A journal written by your agent, autonomously. One small markdown file per milestone, written as the work happens, in a format built to be scanned with grep and ls.",
   "author": {
     "name": "Chris Cook",
@@ -11,23 +11,5 @@
   "license": "MIT",
   "keywords": ["journal", "diary", "memory", "context", "recall", "sessions"],
   "hooks": "./adapters/claude-code/hooks.json",
-  "types": "./mods/journal/types/index.d.ts",
-  "userConfig": {
-    "model": {
-      "type": "string",
-      "title": "Journal search model",
-      "description": "The model the journal search agent runs on. \"inherit\" uses the session's model.",
-      "required": false,
-      "default": "haiku",
-      "options": ["haiku", "sonnet", "opus", "inherit"]
-    },
-    "scope": {
-      "type": "string",
-      "title": "Journal default scope",
-      "description": "Which entries the journal pane shows when it opens: the current project's, or all of them.",
-      "required": false,
-      "default": "project",
-      "options": ["project", "all"]
-    }
-  }
+  "types": "./mods/journal/types/index.d.ts"
 }
