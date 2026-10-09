@@ -50,6 +50,22 @@ function isExecutable(path: string): boolean {
   }
 }
 
+/**
+ * Claude Code takes an update only when the version string changes, so the
+ * manifests and the package must name the same one, or a release reaches one
+ * agent and not the other.
+ */
+test(`should give every manifest and the package the same version`, () => {
+  // Arrange
+  const versions = [...AGENTS.map((agent) => read(agent.manifest).version), read('package.json').version];
+
+  // Act
+  const distinct = new Set(versions);
+
+  // Assert
+  expect(distinct.size).toBe(1);
+});
+
 describe.each(AGENTS)('the $name plugin', (agent) => {
   test(`should be valid JSON with the fields a marketplace lists it by`, () => {
     // Arrange, Act

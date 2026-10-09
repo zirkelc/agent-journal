@@ -89,3 +89,33 @@ jobs:
       # its hooks run in, not under vitest: every *.test.ts under the plugin.
       - name: Test the journal pane
         run: claude plugin test .
+
+  # Claude Code takes an update only when the version in the manifest changes,
+  # however many commits are pushed after it. So a change to what the plugin
+  # ships, made after the last version change, reaches nobody who has it
+  # installed. This fails until the version is raised, so such changes cannot
+  # sit unreleased without anyone noticing.
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Check that shipped changes have a new version
+        run: |
+          # What an installed copy runs. Tests, the README and CI are not in it,
+          # and the journal pane's tests sit under mods/ but are never loaded.
+          shipped='bin adapters lib templates mods .claude-plugin .codex-plugin'
+
+          since=$(git log -1 --format=%H -G'"version"' -- .claude-plugin/plugin.json)
+          [ -n "$since" ] || { echo 'found no version change in .claude-plugin/plugin.json'; exit 1; }
+
+          # shellcheck disable=SC2086
+          changed=$(git diff --name-only "$since" HEAD -- $shipped ':(exclude)mods/*/tests')
+          if [ -n "$changed" ]; then
+            echo "These shipped files changed after the version was last raised in $(git log -1 --format='%h (%s)' "$since"):"
+            echo "$changed"
+            echo 'Raise the version in .claude-plugin/plugin.json, .codex-plugin/plugin.json and package.json.'
+            exit 1
+          fi

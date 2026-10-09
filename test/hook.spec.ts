@@ -167,6 +167,24 @@ describe('failure', () => {
     expect(() => JSON.parse(result)).not.toThrow();
   });
 
+  /**
+   * The payload is larger than a pipe holds, so a hook that exits before it
+   * reads its input leaves the writer with a broken pipe every time, not only
+   * when the timing is unlucky.
+   */
+  test(`should read all of its input even when it has nothing to do`, () => {
+    // Arrange
+    const store = fixture();
+    rmSync(store.bin);
+    const payload = JSON.stringify({ cwd: store.repo, padding: 'x'.repeat(1_000_000) });
+
+    // Act
+    const result = silent(store, payload);
+
+    // Assert
+    expect(result).toBe(``);
+  });
+
   test(`should say nothing and succeed when the core is gone`, () => {
     // Arrange
     const store = fixture();
