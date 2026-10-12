@@ -244,9 +244,39 @@ describe('pane-view', () => {
     const inline = await $.ui.render(VIEW as never);
 
     // Assert
-    expect(blanksAfter(docked, 'Older')).toBe(rows - lines);
-    expect(blanksAfter(inline, 'Older')).toBe(0);
+    expect(blanksAfter(docked, 'Older')).toBe(rows - lines + 1);
+    expect(blanksAfter(inline, 'Older')).toBe(1);
     expect(textOf(inline).indexOf('/home/me/journal') > textOf(inline).indexOf('Older')).toBe(true);
+  });
+
+  test('the list ends in an empty row, which points down while more rows are below or older entries wait', async ($, on) => {
+    // Arrange
+    const set = drawsWith(on);
+    const many = Array.from({ length: 60 }, (_, at) => ({
+      id: `2026-10-06T${String(Math.floor(at / 60) + 10).padStart(2, '0')}${String(at % 60).padStart(2, '0')}00Z`,
+      project: 'repo',
+      summary: `Entry ${at}`,
+    }));
+    const long = { ...MODEL, list: { ...MODEL.list, entries: many } };
+    const outer = listOuterRows(long);
+
+    // Act
+    set(long);
+    const top = textOf(await $.ui.render(VIEW as never));
+    set({ ...long, top: many.length + 1 - (MODEL.bodyRows - outer) });
+    const end = textOf(await $.ui.render(VIEW as never));
+    set({ ...long, top: many.length, list: { ...long.list, hasMore: true } });
+    const older = textOf(await $.ui.render(VIEW as never));
+    set(MODEL);
+    const few = textOf(await $.ui.render(VIEW as never));
+
+    // Assert
+    expect(top).toContain('↓ more');
+    expect(top.indexOf('↓ more') < top.indexOf('/home/me/journal')).toBe(true);
+    expect(end).not.toContain('↓');
+    expect(older).toContain('↓ more');
+    expect(few).not.toContain('↓');
+    expect(listOuterRows(MODEL)).toBe(listOuterRows({ ...MODEL, journalDir: null }) + 2);
   });
 
   test('the labels of the project, date and model rows have one width, so their buttons line up', async ($, on) => {

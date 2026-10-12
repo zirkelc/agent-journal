@@ -184,13 +184,13 @@ export function listLayoutOf(list: JournalList, now: Date, timeZone?: string): L
 /**
  * The rows around the list. Above it: the header and its margin, Ask and its
  * margin, the scope, the date, the rule, the project's name with its margin
- * when one shows, and the margin above the list. Below it, once the journal's
- * folder is known: the rule and the status line. Kept beside the views that
- * draw them.
+ * when one shows, and the margin above the list. Below it: the row that ends
+ * the list, and once the journal's folder is known, the rule and the status
+ * line. Kept beside the views that draw them.
  */
 export function listOuterRows(model: Pick<PaneModel, 'scope' | 'currentProject' | 'list' | 'journalDir'>): number {
   const hasChip = model.scope === 'project' && (model.currentProject ?? model.list.entries[0]?.project);
-  return 2 + 2 + 1 + 1 + 1 + (hasChip ? 2 : 0) + 1 + (model.journalDir !== null ? 2 : 0);
+  return 2 + 2 + 1 + 1 + 1 + (hasChip ? 2 : 0) + 1 + 1 + (model.journalDir !== null ? 2 : 0);
 }
 
 /** Where the list's window stands: its first row, clamped, its height, and the furthest its first row goes. */
@@ -490,6 +490,8 @@ function listView(ui: Ui, actions: PaneActions, model: PaneModel): RenderElement
   let rows: RenderElement | Array<RenderElement>;
   /** How many rows the list shows, so a docked pane can fill the rest and keep the status line at its foot. */
   let shownRows = 1;
+  /** Whether scrolling down shows more: rows below the window, or older entries not loaded yet. */
+  let isMoreBelow = false;
   if (list.status === 'loading' && list.entries.length === 0) rows = <Text dimColor>Loading the journal…</Text>;
   else if (list.status === 'failed') rows = <Text color="red">{sanitize(list.error)}</Text>;
   else if (list.entries.length === 0)
@@ -504,6 +506,7 @@ function listView(ui: Ui, actions: PaneActions, model: PaneModel): RenderElement
     const window = windowOf(lines.length, model.bodyRows, listOuterRows(model), model.top);
     const visible = visibleLines(lines, window);
     shownRows = visible.length;
+    isMoreBelow = window.top + window.rows < lines.length || list.hasMore;
     rows = visible.map((line, at) => {
       if (line.kind === 'entry') return entryRow(ui, actions, line.entry, line.time, width, model.columns, 'entry');
       if (line.kind === 'day')
@@ -538,6 +541,9 @@ function listView(ui: Ui, actions: PaneActions, model: PaneModel): RenderElement
       <Box marginTop={1} flexDirection="column">
         {rows}
         {pad}
+        <Text key="end" dimColor>
+          {isMoreBelow ? '↓ more' : ' '}
+        </Text>
       </Box>
       {model.journalDir !== null && ruleView(ui, model, 'rule:status')}
       {model.journalDir !== null && statusLine(ui, model, model.journalDir)}
