@@ -28,6 +28,7 @@ Nothing leaves your machine.
 - **No hidden tool calls.** Entries are written by the model's own file-writing tool, in your session, in front of you. Nothing runs between sessions, and in the background only the journal pane's search, when you ask it something.
 - **A read-only hook.** At session start, a hook (a shell script in [`adapters/`](adapters/) for Codex, a hooks module for Claude Code) reads `~/.config/agent-journal/config` and runs `git rev-parse` to name the project. It writes no files.
 - **Your own files.** Entries are plain markdown in a directory you choose. Delete one and it is gone.
+- **Sync only when you turn it on.** [Git sync](#git-sync) is off by default. When you turn it on, the entries go to the git remote that you choose, and nowhere else.
 
 Everything stays between you and your model.
 
@@ -170,6 +171,7 @@ It provides a thin interface over `ls` and `grep` for common commands:
 | `aj read ID` | `cat "$(ls ~/agent-journal/*.md \| tail -1)"` | one entry in full |
 | `aj write` | `$EDITOR ~/agent-journal/$(date -u +%Y-%m-%dT%H%M%SZ).md` | add an entry yourself |
 | `aj config` | `cat ~/.config/agent-journal/config` | read and change the settings |
+| `aj sync` | `git add -A && git commit && git push` | commit the journal folder and push it, see [Git sync](#git-sync) |
 | `aj install` | | which agents are on this machine, and how to wire each one up |
 | `aj help` | | every command and option |
 
@@ -214,6 +216,40 @@ If you have the [`agent-journal`](#cli) installed, you can change the config thr
 | key | default | description |
 | --- | --- | --- |
 | `journal_dir` | `~/agent-journal` | default directory for journal entries |
+| `sync` | off | `git` to commit and push the journal folder after each write, see [Git sync](#git-sync) |
+
+## Git sync
+
+The journal can keep itself in a git repository: each new entry is committed, and pushed when the branch has a remote. It is off by default. To turn it on:
+
+```sh
+aj sync init                                  # commit only, on this machine
+aj sync init git@github.com:you/journal.git   # commit and push
+```
+
+`aj sync init` makes the journal folder a git repository if it is not one yet, adds the URL as `origin`, sets `sync=git`, and makes the first commit. If the folder is already a repository, it uses it. The journal folder must be the root of its own repository: a folder inside a larger repository (for example your notes or your dotfiles) is refused, because a push sends the whole branch, with your other commits too. To turn sync off, run `aj config unset sync`.
+
+To make a new private repository on GitHub for the journal, use the [GitHub CLI](https://cli.github.com) after `aj sync init`. It adds the repository as `origin` and pushes the first commit, and every later sync pushes to it:
+
+```sh
+aj sync init
+gh repo create agent-journal --private --source ~/agent-journal --remote origin --push
+```
+
+Use your own journal folder in `--source` if you changed `journal_dir`.
+
+When sync is on, `aj sync` runs:
+
+- in Claude Code, after the model writes an entry, and once more when the session ends if the exit leaves time for it. It runs in the background, so a push never holds up the turn. In the pane, the status line under the list shows the journal folder and, for a synced journal, `⇅` with the result of the last sync: green after a push, red with the reason after a failure.
+- after `aj write`.
+- when you run `aj sync` yourself, for example for entries that Codex wrote.
+
+Each sync commits every file in the journal folder. The commit names a single new entry by its ID and summary. Then it pushes the current branch. If the remote has commits that this machine does not have (another machine pushed first, or the repository was made with a README), it rebases onto them and pushes again; entries have unique file names, so this does not conflict. If the push fails (no network, no credentials), the commit stays, and the next sync pushes it. A sync commits nothing on a detached HEAD or while a merge, rebase or bisect is open.
+
+A sync never waits for input: git does not prompt for a password, ssh runs in batch mode (also with your own `core.sshCommand`), and the journal's commits are not signed, so no passphrase dialog opens.
+
+> [!WARNING]
+> A push sends your entries to the remote. Entries describe your work, so use a private repository.
 
 ## Credits
 

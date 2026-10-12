@@ -55,6 +55,18 @@ describe('writing', () => {
     expect(existsSync(target)).toBe(true);
   });
 
+  test(`should create the default directory once journal_dir is unset`, () => {
+    // Arrange
+    const store = fixture();
+    configure(store, ['set', 'journal_dir', join(store.home, 'notes', 'journal')]);
+
+    // Act
+    configure(store, ['unset', 'journal_dir']);
+
+    // Assert
+    expect(existsSync(store.journalDir)).toBe(true);
+  });
+
   test(`should expand a leading tilde`, () => {
     // Arrange
     const store = fixture();
@@ -67,11 +79,8 @@ describe('writing', () => {
     expect(result.journal_dir).toBe(join(store.home, 'notes', 'journal'));
   });
 
-  /**
-   * Accepting a default must not pin it, otherwise changing the shipped default
-   * later reaches nobody who ever ran the setup.
-   */
-  test(`should drop the key when the value is the default`, () => {
+  /** A value that was set stays where it is, even when it is the shipped default, so a later default does not move it. */
+  test(`should keep the key when the value is the default`, () => {
     // Arrange
     const store = fixture();
 
@@ -80,8 +89,8 @@ describe('writing', () => {
     const result = settings(store);
 
     // Assert
-    expect(result.journal_dir_from).toBe(`default`);
-    expect(readFileSync(result.config_file, 'utf8')).not.toContain(`journal_dir=`);
+    expect(result.journal_dir_from).toBe(`config`);
+    expect(readFileSync(result.config_file, 'utf8')).toContain(`journal_dir=${store.journalDir}\n`);
   });
 
   test(`should return to the default when the key is unset`, () => {
