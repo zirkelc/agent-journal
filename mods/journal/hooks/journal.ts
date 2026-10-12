@@ -1,23 +1,30 @@
-import type { JournalEntry, JournalList, JournalOpened, JournalTurn, JournalView } from '../types';
+import type { JournalEntry, JournalList, JournalOpened, JournalSync, JournalTurn, JournalView } from '../types';
 import { questionPrompt } from './agent.js';
 import { dayText, FAILED_STEP, instantOf, isLatest, localDayTime, rangeText, stepped, withUnit } from './format.js';
 import {
   configArgs,
   contextArgs,
   entriesOf,
+  isSyncOnOf,
   journalDirOf,
   listArgs,
   readArgs,
   recallArgs,
   sanitize,
+  SYNC_OFF,
+  SYNC_PUSH_FAILED,
+  syncArgs,
   type Filters,
 } from './cli.js';
 import type { Host } from './host.js';
 import { CLI_IN_CHECKOUT, CLI_ON_PATH } from './names.js';
 import type { PaneActions } from './pane-view.js';
 
-/** How a CLI call ended: the CLI it ran, its exit code and both streams, or -1 when it could not start. */
-export type Run = { cli: string; exitCode: number; stdout: string; stderr: string };
+/**
+ * How a CLI call ended: the CLI it ran, its exit code and both streams, or -1
+ * with the engine's reason when it could not start or was stopped.
+ */
+export type Run = { cli: string; exitCode: number; stdout: string; stderr: string; error?: string };
 
 /** Long enough for `list --limit 200` on a large journal, short enough to give up on a hung one. */
 const CLI_TIMEOUT_MS = 15_000;
@@ -117,12 +124,12 @@ async function findCli(host: Host): Promise<string> {
  * Runs the CLI in the session's directory, where `--project .` resolves. Never
  * rejects: a CLI that cannot start is a failed run with the reason as stderr.
  */
-export async function runCli(host: Host, args: Array<string>): Promise<Run> {
+export async function runCli(host: Host, args: Array<string>, timeoutMs = CLI_TIMEOUT_MS): Promise<Run> {
   let cli = CLI_ON_PATH;
   try {
     const [found, cwd] = await Promise.all([cliOf(host), host.cwd()]);
     cli = found;
-    const ran = await host.run([cli, ...args], cwd, CLI_TIMEOUT_MS);
+    const ran = await host.run([cli, ...args], cwd, timeoutMs);
     return { cli, exitCode: ran.exitCode, stdout: ran.stdout, stderr: ran.stderr };
   } catch (error) {
     const reason = String((error as Error)?.message ?? error).slice(0, 200);
@@ -131,6 +138,7 @@ export async function runCli(host: Host, args: Array<string>): Promise<Run> {
       exitCode: -1,
       stdout: '',
       stderr: `agent-journal could not run (${reason}). Is it installed and on PATH?`,
+      error: reason,
     };
   }
 }
@@ -174,6 +182,20 @@ export function pageLimitOf(list: JournalList, isFresh: boolean): number {
 export function listLoader(host: Host) {
   let generation = 0;
   let journalDir: string | null = null;
+  let isSyncOn = false;
+  /** Read once a session: the config changes only with a new one, as the rules do. */
+  let configRead: Promise<JournalConfig> | null = null;
+
+  /** Where the journal is and whether sync is on, from the CLI's `config`. A run that fails is tried again next time. */
+  function config(): Promise<JournalConfig> {
+    configRead ??= runCli(host, configArgs()).then((run) => {
+      if (run.exitCode !== 0) configRead = null;
+      journalDir = journalDirOf(run.stdout) ?? journalDir;
+      isSyncOn = isSyncOnOf(run.stdout);
+      return { journalDir, isSyncOn };
+    });
+    return configRead;
+  }
 
   /** The filters the pane's scope and date give, for a page of a size and an offset. */
   async function filtersOf(limit: number, offset: number): Promise<Filters> {
@@ -191,13 +213,8 @@ export function listLoader(host: Host) {
     const mine = ++generation;
     const limit = pageLimitOf(await host.list.read(), isFresh);
     await host.list.update((list): JournalList => ({ ...list, status: 'loading', error: '', limit }));
-    /** Where the journal is changes only with its config, which a session does not reload. */
-    const [listed, config] = await Promise.all([
-      runCli(host, listArgs(await filtersOf(limit, 0), PANE_MAX)),
-      journalDir === null ? runCli(host, configArgs()) : null,
-    ]);
+    const [listed] = await Promise.all([runCli(host, listArgs(await filtersOf(limit, 0), PANE_MAX)), config()]);
     if (mine !== generation) return;
-    if (config) journalDir = journalDirOf(config.stdout) ?? journalDir;
     const entries = entriesOf(listed.stdout);
     /** Lines without a single id come from a CLI that prints another layout. */
     const isTooOld = listed.exitCode === 0 && entries.length === 0 && /\S/.test(listed.stdout);
@@ -253,7 +270,82 @@ export function listLoader(host: Host) {
     });
   }
 
-  return { load, loadMore, refresh, journalDir: () => journalDir };
+  return {
+    load,
+    loadMore,
+    refresh,
+    config,
+    journalDir: () => journalDir,
+    /** Whether sync is on, as far as the config has been read; off until it has. */
+    isSyncOn: () => isSyncOn,
+  };
+}
+
+/** What the mod reads from the CLI's config: where the journal is, and whether sync is on. */
+export type JournalConfig = { journalDir: string | null; isSyncOn: boolean };
+
+/** Long enough for a push over a slow network, short enough to give up on a hung one. */
+export const SYNC_TIMEOUT_MS = 60_000;
+
+/** What the session's end leaves to the hooks after its sync, of the engine's short bound for the exit. */
+const END_MARGIN_MS = 100;
+
+/** The least time worth starting a sync in: less, and git is stopped halfway through a step. */
+const END_SYNC_MIN_MS = 400;
+
+/**
+ * How long the session's end may sync for, from what is left of the exit's
+ * bound, or null when it should not: too little is left, or a sync is under
+ * way, which the end neither waits for nor runs beside.
+ */
+export function endSyncTimeoutOf(remainingMs: number, isRunning: boolean): number | null {
+  const timeoutMs = remainingMs - END_MARGIN_MS;
+  if (isRunning || timeoutMs < END_SYNC_MIN_MS) return null;
+  return Math.min(timeoutMs, SYNC_TIMEOUT_MS);
+}
+
+/** What one `sync` came to, for the pane: its line, or the reason it failed. */
+export function syncStateOf(run: Run): JournalSync {
+  /** Only a sync the config turned on runs, so the CLI is there, and a run that ended this way was stopped. */
+  if (run.exitCode === -1) return { status: 'failed', text: `sync did not finish: ${run.error ?? 'stopped'}` };
+  const line = sanitize(run.stdout.trim().split('\n')[0] ?? '');
+  if (run.exitCode === 0) return line === SYNC_OFF ? { status: 'off', text: '' } : { status: 'synced', text: line };
+  if (run.exitCode === SYNC_PUSH_FAILED && line !== '') return { status: 'failed', text: line };
+  return { status: 'failed', text: failureOf(run) };
+}
+
+/**
+ * Commits and pushes the journal folder through the CLI, which does nothing
+ * when the config leaves sync off. One sync runs at a time. A sync asked for
+ * while one runs is run once that one ends, and every caller waits for it, so
+ * the last write is always in a sync that started after it.
+ */
+export function syncer(host: Host) {
+  let running: Promise<void> | null = null;
+  let isPending = false;
+
+  async function loop(timeoutMs: number): Promise<void> {
+    do {
+      isPending = false;
+      /** Off stays quiet: a journal without sync shows nothing for it. */
+      await host.sync.update((sync): JournalSync => (sync.status === 'off' ? sync : { ...sync, status: 'syncing' }));
+      const ran = await runCli(host, syncArgs(), timeoutMs);
+      await host.sync.update(() => syncStateOf(ran));
+    } while (isPending);
+  }
+
+  function request(timeoutMs = SYNC_TIMEOUT_MS): Promise<void> {
+    if (running) {
+      isPending = true;
+      return running;
+    }
+    running = loop(timeoutMs).finally(() => {
+      running = null;
+    });
+    return running;
+  }
+
+  return { request, isRunning: () => running !== null };
 }
 
 /** The most earlier turns a follow-up question carries, so the prompt stays small. */

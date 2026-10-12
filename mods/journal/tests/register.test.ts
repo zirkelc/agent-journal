@@ -544,9 +544,151 @@ describe('register', () => {
 
     // Assert
     const runs = kept.queries().map((run) => run.argv.slice(1).join(' '));
-    expect(runs).toEqual(['list --project . --limit 201', 'config', 'list --project . --limit 200']);
+    expect(runs).toEqual(['list --project . --limit 201', 'list --project . --limit 200']);
     expect(drawn.indexOf('Newest') < drawn.indexOf('Newer')).toBe(true);
     expect(drawn).toContain('Older');
+  });
+
+  test('a write to the journal syncs it, and the journal row says how far the sync got', async ($, on) => {
+    // Arrange
+    const kept = world(on, { isSyncOn: true, sync: 'committed 2026-10-06T080000Z · pushed to origin/main\n' });
+    on('tool.call', { tool: 'Write' }, () => ({ result: 'written' }) as never);
+    await $.session.start(SESSION);
+    await $.command.run(journal());
+    await kept.clock.settle();
+
+    // Act
+    await $.tool.call({ tool: 'Write', file_path: `${JOURNAL_DIR}/2026-10-06T080000Z.md`, content: '' } as never);
+    await $.tool.call({ tool: 'Write', file_path: `${JOURNAL_DIR}/2026-10-06T080001Z.md`, content: '' } as never);
+    await kept.clock.advance(1_000);
+    await kept.clock.settle();
+    const drawn = textOf(await $.ui.render(PANE as never));
+
+    // Assert
+    const syncs = kept.queries().filter((run) => run.argv[1] === 'sync');
+    expect(syncs.length).toBe(1);
+    expect(drawn).toContain('⇅ pushed to origin/main');
+  });
+
+  test('a write to the journal syncs it in a session that never opened the pane', async ($, on) => {
+    // Arrange
+    const kept = world(on, { isSyncOn: true, sync: 'committed 2026-10-06T080000Z · no remote\n' });
+    on('tool.call', { tool: 'Write' }, () => ({ result: 'written' }) as never);
+    await $.session.start(SESSION);
+    await kept.clock.settle();
+
+    // Act
+    await $.tool.call({ tool: 'Write', file_path: `${JOURNAL_DIR}/2026-10-06T080000Z.md`, content: '' } as never);
+    await kept.clock.advance(1_000);
+    await kept.clock.settle();
+
+    // Assert
+    expect(kept.queries().filter((run) => run.argv[1] === 'sync').length).toBe(1);
+  });
+
+  test('with sync off, neither a write to the journal nor the session\u2019s end runs the CLI for it', async ($, on) => {
+    // Arrange
+    const kept = world(on);
+    on('tool.call', { tool: 'Write' }, () => ({ result: 'written' }) as never);
+    await $.session.start(SESSION);
+    await kept.clock.settle();
+
+    // Act
+    await $.tool.call({ tool: 'Write', file_path: `${JOURNAL_DIR}/2026-10-06T080000Z.md`, content: '' } as never);
+    await kept.clock.advance(1_000);
+    await kept.clock.settle();
+    await $.session.end({ reason: 'prompt_input_exit', sessionId: 'session-1', resume: { id: 'session-1' } } as never);
+
+    // Assert
+    expect(kept.runs.filter((run) => run.argv[1] === 'sync').length).toBe(0);
+  });
+
+  test('the journal row shows the git icon only when the config turns sync on', async ($, on) => {
+    // Arrange
+    const kept = world(on);
+    await $.session.start(SESSION);
+
+    // Act
+    await $.command.run(journal());
+    await kept.clock.settle();
+    const drawn = textOf(await $.ui.render(PANE as never));
+
+    // Assert
+    expect(drawn).toContain(JOURNAL_DIR);
+    expect(drawn).not.toContain('⇅');
+  });
+
+  test('a write outside the journal does not sync', async ($, on) => {
+    // Arrange
+    const kept = world(on, { isSyncOn: true });
+    on('tool.call', { tool: 'Write' }, () => ({ result: 'written' }) as never);
+    await $.session.start(SESSION);
+    await $.command.run(journal());
+    await kept.clock.settle();
+
+    // Act
+    await $.tool.call({ tool: 'Write', file_path: '/work/notes.md', content: '' } as never);
+    await kept.clock.advance(1_000);
+    await kept.clock.settle();
+
+    // Assert
+    expect(kept.queries().filter((run) => run.argv[1] === 'sync').length).toBe(0);
+  });
+
+  test('the git icon shows from the config alone, and a push that failed adds its reason', async ($, on) => {
+    // Arrange
+    const kept = world(on, {
+      isSyncOn: true,
+      sync: 'committed 2026-10-06T080000Z · push failed: could not read Username\n',
+      exitCodes: { sync: 3 },
+    });
+    on('tool.call', { tool: 'Write' }, () => ({ result: 'written' }) as never);
+    await $.session.start(SESSION);
+    await $.command.run(journal());
+    await kept.clock.settle();
+    const before = textOf(await $.ui.render(PANE as never));
+
+    // Act
+    await $.tool.call({ tool: 'Write', file_path: `${JOURNAL_DIR}/2026-10-06T080000Z.md`, content: '' } as never);
+    await kept.clock.advance(1_000);
+    await kept.clock.settle();
+    const drawn = textOf(await $.ui.render(PANE as never));
+
+    // Assert
+    expect(before).toContain('⇅ git');
+    expect(drawn).toContain('⇅ push failed: could not read Username');
+  });
+
+  test('the session\u2019s end syncs what is left', async ($, on) => {
+    // Arrange
+    const kept = world(on, { isSyncOn: true });
+    await $.session.start(SESSION);
+    await kept.clock.settle();
+
+    // Act
+    await $.session.end({ reason: 'prompt_input_exit', sessionId: 'session-1', resume: { id: 'session-1' } } as never);
+
+    // Assert
+    expect(kept.runs.filter((run) => run.argv[1] === 'sync').length).toBe(1);
+  });
+
+  test('the session\u2019s end neither waits for a sync under way nor starts another', async ($, on) => {
+    // Arrange
+    let release = () => {};
+    const kept = world(on, { isSyncOn: true, holdSync: new Promise<void>((resolve) => (release = resolve)) });
+    on('tool.call', { tool: 'Write' }, () => ({ result: 'written' }) as never);
+    await $.session.start(SESSION);
+    await kept.clock.settle();
+    await $.tool.call({ tool: 'Write', file_path: `${JOURNAL_DIR}/2026-10-06T080000Z.md`, content: '' } as never);
+    await kept.clock.advance(1_000);
+
+    // Act
+    await $.session.end({ reason: 'prompt_input_exit', sessionId: 'session-1', resume: { id: 'session-1' } } as never);
+    const syncs = kept.runs.filter((run) => run.argv[1] === 'sync').length;
+    release();
+
+    // Assert
+    expect(syncs).toBe(1);
   });
 
   test('a CLI that lists without ids is named as too old instead of an empty journal', async ($, on) => {

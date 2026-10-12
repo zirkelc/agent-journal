@@ -15,7 +15,15 @@ export type Script = {
   search?: string;
   read?: string;
   context?: string;
+  /** Whether the config turns sync on, as `config` prints it. */
+  isSyncOn?: boolean;
+  /** What `sync` prints; off when not given. */
+  sync?: string;
+  /** A sync waits for this before it answers, so a test can end the session while one runs. */
+  holdSync?: Promise<void>;
   failing?: string;
+  /** The exit code of a subcommand that prints its output and still fails, such as a sync whose push failed. */
+  exitCodes?: Record<string, number>;
   /** The main conversation as its next request reads it: the text of each message. */
   conversation?: Array<string>;
   /** A spawn waits for this before it answers, so a question can stay open while a test asks again. */
@@ -42,6 +50,7 @@ export function world(on: On, script: Script = {}) {
 
   const clock = mock.clock(on, { now: 0 });
   on('session.start', ($, e) => ({ cwd: e.cwd }));
+  on('session.end', ($, e) => ({ sessionId: e.sessionId }));
   on('session.cwd', () => ({ value: '/work' }));
   on('session.id', () => ({ value: 'session-1' }));
   on('session.model', () => ({ value: 'claude-opus-5-5[1m]' }));
@@ -95,22 +104,26 @@ export function world(on: On, script: Script = {}) {
   on('ui.toast', ($, e) => (toasts.push(e.text), { value: undefined }));
   on('ui.invalidate', () => ({ value: undefined }));
   on('prompt.fill', ($, e) => (filled.push(e.text), { value: { isFilled: true } }) as never);
-  on('process.run', ($, e): never => {
+  on('process.run', async ($, e): Promise<never> => {
     runs.push(e);
     const command = e.argv[1] ?? '';
+    if (command === 'sync') await script.holdSync;
     if (script.failing === command)
       return { value: { exitCode: 1, stdout: '', stderr: `${command} failed\n` } } as never;
     const stdout =
       command === 'config'
-        ? `journal_dir=${JOURNAL_DIR}\njournal_dir_from=config\n`
-        : command === 'list' && typeof script.list === 'function'
-          ? script.list(e.argv)
-          : (((script as Record<string, unknown>)[command] as string | undefined) ?? '');
-    return { value: { exitCode: 0, stdout, stderr: '' } } as never;
+        ? `journal_dir=${JOURNAL_DIR}\njournal_dir_from=config\nsync=${script.isSyncOn ? 'git' : 'off'}\n`
+        : command === 'sync'
+          ? (script.sync ?? 'sync is off\n')
+          : command === 'list' && typeof script.list === 'function'
+            ? script.list(e.argv)
+            : (((script as Record<string, unknown>)[command] as string | undefined) ?? '');
+    return { value: { exitCode: script.exitCodes?.[command] ?? 0, stdout, stderr: '' } } as never;
   });
 
-  /** The CLI runs a test asks about: every one but the rules made ahead at the session's start. */
-  const queries = () => runs.filter((run) => !(run.argv[1] === 'context' && !run.argv.includes('--recall')));
+  /** The CLI runs a test asks about: every one but the rules and the config read ahead at the session's start. */
+  const queries = () =>
+    runs.filter((run) => run.argv[1] !== 'config' && !(run.argv[1] === 'context' && !run.argv.includes('--recall')));
 
   return { runs, queries, opened, spawned, registered, toasts, filled, turns, clock, notes, stored };
 }

@@ -117,11 +117,23 @@ export const recallArgs = (cwd: string, sessionId: string | undefined, agent: st
 /** `config`, for the journal directory. */
 export const configArgs = (): Array<string> => ['config'];
 
+/** `sync`, which commits the journal folder and pushes it when the config turns it on. */
+export const syncArgs = (): Array<string> => ['sync'];
+
+/** What `sync` prints when the config leaves it off. */
+export const SYNC_OFF = 'sync is off';
+
+/** The exit code of a `sync` that committed but could not push. */
+export const SYNC_PUSH_FAILED = 3;
+
 /** The journal directory from `config`'s `key=value` lines. */
 export function journalDirOf(stdout: string): string | undefined {
   const match = /^journal_dir=(.+)$/m.exec(stdout);
   return match?.[1];
 }
+
+/** Whether `config`'s lines turn sync on. */
+export const isSyncOnOf = (stdout: string): boolean => /^sync=git$/m.test(stdout);
 
 /** The entries of `list` or `search` down a pipe: id, project and summary, one tab apart. */
 export function entriesOf(stdout: string): Array<Entry> {

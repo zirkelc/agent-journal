@@ -5,10 +5,11 @@ import {
   BUTTON_COLOR,
   daysOf,
   linesOf,
-  listTopRows,
+  listOuterRows,
   pathFit,
   paneView,
   projectWidth,
+  syncNote,
   visibleLines,
   windowOf,
   type PaneActions,
@@ -37,6 +38,8 @@ const MODEL: PaneModel = {
   model: 'haiku',
   sessionModel: 'claude-opus-5-5[1m]',
   journalDir: '/home/me/journal',
+  isSyncOn: false,
+  sync: { status: 'off', text: '' },
   view: 'list',
   list: {
     status: 'ready',
@@ -57,10 +60,18 @@ const MODEL: PaneModel = {
   now: new Date('2026-10-06T16:00:00Z'),
   timeZone: 'Europe/Berlin',
   bodyRows: 40,
+  isDocked: true,
   top: 0,
   date: { unit: 'all', value: '' },
   notice: '',
 };
+
+/** The blank rows drawn after the row that holds a text: what fills a docked list below its last entry. */
+function blanksAfter(tree: unknown, text: string): number {
+  const strings = textOf(tree).split(' Text ');
+  const from = strings.findIndex((part) => part.includes(text));
+  return strings.slice(from + 1).filter((part) => part === ' ').length;
+}
 
 /** The view drawn as a pane of its own, through the engine, so the tree is checked as a session checks it. */
 const VIEW = { ...PANE, requestId: 'view' } as const;
@@ -199,7 +210,7 @@ describe('pane-view', () => {
     expect(propsOf(outside, 'box:scope:project')?.backgroundColor).toBe(BUTTON_COLOR);
   });
 
-  test('the list names the journal\u2019s folder in a row above the project, and nothing before the CLI has said where it is', async ($, on) => {
+  test('the list ends in a status line with the journal\u2019s folder, and has none before the CLI has said where it is', async ($, on) => {
     // Arrange
     const set = drawsWith(on);
 
@@ -212,11 +223,30 @@ describe('pane-view', () => {
 
     // Assert
     const drawn = textOf(known);
-    const order = ['✦ Ask', 'Journal', '/home/me/journal', 'Project'].map((text) => drawn.indexOf(text));
+    const order = ['Project', 'Older', 'status', '/home/me/journal'].map((text) => drawn.indexOf(text));
     expect(order.every((at, i) => at > (order[i - 1] ?? -1))).toBe(true);
+    expect(drawn).not.toContain('Journal ');
     expect(textOf(unknown)).not.toContain('/home/me/journal');
-    expect(listTopRows(MODEL)).toBe(listTopRows({ ...MODEL, journalDir: null }) + 1);
+    expect(listOuterRows(MODEL)).toBe(listOuterRows({ ...MODEL, journalDir: null }) + 2);
     expect(textOf(chat)).not.toContain('/home/me/journal');
+  });
+
+  test('a docked list fills its room, so the status line sits on the pane\u2019s last row; an inline one ends after its entries', async ($, on) => {
+    // Arrange
+    const set = drawsWith(on);
+    const rows = MODEL.bodyRows - listOuterRows(MODEL);
+    /** Two days, each a heading over its entries, with a blank row between them. */
+    const lines = 2 + 3 + 1;
+
+    // Act
+    const docked = await $.ui.render(VIEW as never);
+    set({ ...MODEL, isDocked: false });
+    const inline = await $.ui.render(VIEW as never);
+
+    // Assert
+    expect(blanksAfter(docked, 'Older')).toBe(rows - lines);
+    expect(blanksAfter(inline, 'Older')).toBe(0);
+    expect(textOf(inline).indexOf('/home/me/journal') > textOf(inline).indexOf('Older')).toBe(true);
   });
 
   test('the labels of the project, date and model rows have one width, so their buttons line up', async ($, on) => {
@@ -391,5 +421,76 @@ describe('pane-view', () => {
     // Assert
     expect(list).toContain('Newer');
     expect(chat).toContain('Ask about past work');
+  });
+
+  test('the status line follows the path with how far the last sync got, and the path gives way to it', async ($, on) => {
+    // Arrange
+    const set = drawsWith(on);
+    const failed = { status: 'failed', text: 'committed 1 file · push failed: could not read Username' } as const;
+
+    // Act
+    set({
+      ...MODEL,
+      columns: 60,
+      journalDir: '/home/me/a/rather/long/path/to/the/journal',
+      isSyncOn: true,
+      sync: failed,
+    });
+    const drawn = textOf(await $.ui.render(VIEW as never));
+    const notes = [
+      syncNote(true, { status: 'off', text: '' }),
+      syncNote(true, { status: 'syncing', text: 'committed 1 file · up to date' }),
+      syncNote(true, { status: 'synced', text: 'committed 2026-10-06T080000Z · pushed to origin/main' }),
+      syncNote(true, { status: 'synced', text: 'nothing to commit · no remote' }),
+      syncNote(true, failed),
+    ];
+
+    // Assert
+    expect(drawn).toContain('…/path/to/the/journal');
+    expect(drawn).not.toContain('/home/me/a/rather');
+    expect(drawn).toContain('⇅ push failed: could not read Username');
+    expect(notes).toEqual([
+      { text: '⇅ git', isDim: true },
+      { text: '⇅ syncing…', isDim: true },
+      { text: '⇅ pushed to origin/main', color: 'green', isDim: false },
+      { text: '⇅ committed, no remote', color: 'green', isDim: false },
+      { text: '⇅ push failed: could not read Username', color: 'red', isDim: false },
+    ]);
+  });
+
+  test('the status line marks a journal kept in git with an icon, and shows none while sync is off', async ($, on) => {
+    // Arrange
+    const set = drawsWith(on);
+
+    // Act
+    set({ ...MODEL, isSyncOn: true });
+    const synced = textOf(await $.ui.render(VIEW as never));
+    set({ ...MODEL, isSyncOn: false });
+    const plain = textOf(await $.ui.render(VIEW as never));
+
+    // Assert
+    expect(synced.indexOf('⇅ git') > synced.indexOf('/home/me/journal')).toBe(true);
+    expect(synced.indexOf('⇅ git') > synced.indexOf('Older')).toBe(true);
+    expect(plain).not.toContain('⇅');
+    expect(syncNote(false, { status: 'off', text: '' })).toBe(null);
+  });
+
+  test('a sync note longer than its room is cut, so the status line stays one line', async ($, on) => {
+    // Arrange
+    const set = drawsWith(on);
+    const failed = {
+      status: 'failed',
+      text: '~/agent-journal is not a git repository. agent-journal sync init makes it one',
+    } as const;
+
+    // Act
+    set({ ...MODEL, columns: 60, isSyncOn: true, sync: failed });
+    const drawn = textOf(await $.ui.render(VIEW as never));
+    const cut = syncNote(true, failed, 20);
+
+    // Assert
+    expect([...(cut?.text ?? '')].length).toBe(20);
+    expect(cut?.text.endsWith('…')).toBe(true);
+    expect(drawn).toContain('⇅ ~/agent-journal is not a git repository. agent…');
   });
 });

@@ -18,8 +18,10 @@ import {
   listLoader,
   recorded,
   rulesKeeper,
+  endSyncTimeoutOf,
   runCli,
   stepOf,
+  syncer,
 } from './journal.js';
 import {
   AGENT_TYPE,
@@ -33,7 +35,7 @@ import {
   toolName,
 } from './names.js';
 import type { JournalView } from '../types';
-import { listLayoutOf, listTopRows, PADDING, paneView, SUGGESTIONS, windowOf } from './pane-view.js';
+import { listLayoutOf, listOuterRows, PADDING, paneView, SUGGESTIONS, windowOf } from './pane-view.js';
 
 const listAtom = atom({ plugin: 'agent-journal', key: 'list' } as const, {
   status: 'idle',
@@ -48,6 +50,7 @@ const openedAtom = atom({ plugin: 'agent-journal', key: 'opened' } as const, nul
 const topAtom = atom({ plugin: 'agent-journal', key: 'top' } as const, 0);
 const dateAtom = atom({ plugin: 'agent-journal', key: 'date' } as const, ALL_DATES);
 const noticeAtom = atom({ plugin: 'agent-journal', key: 'notice' } as const, '');
+const syncAtom = atom({ plugin: 'agent-journal', key: 'sync' } as const, { status: 'off', text: '' });
 
 /** The pane's choices kept in the store, so they last across sessions: which entries, and which model answers. */
 const SCOPE_KEY = 'scope';
@@ -56,7 +59,7 @@ const MODEL_KEY = 'model';
 /** How often an open question redraws its elapsed time. */
 const TICK_MS = 1_000;
 
-/** Several writes to the journal in a row reload the list once. */
+/** Several writes to the journal in a row reload the list, and sync it, once. */
 const REFRESH_DEBOUNCE_MS = 200;
 
 export const register: Register = (on) => {
@@ -74,6 +77,8 @@ export const register: Register = (on) => {
   let paneRows = 0;
   /** Waits for each search agent's answer and settles its question. */
   let waiter: ReturnType<typeof answerWaiter> | null = null;
+  /** Commits and pushes the journal folder after writes, when the config turns sync on. */
+  let sync: ReturnType<typeof syncer> | null = null;
 
   const load = (isFresh?: boolean) => loader?.load(isFresh) ?? Promise.resolve();
 
@@ -159,6 +164,7 @@ export const register: Register = (on) => {
       top: { read: () => read($, topAtom), update: (change) => update($, topAtom, change) },
       date: { read: () => read($, dateAtom), update: (change) => update($, dateAtom, change) },
       notice: { read: () => read($, noticeAtom), update: (change) => update($, noticeAtom, change) },
+      sync: { read: () => read($, syncAtom), update: (change) => update($, syncAtom, change) },
       redraw: () => $.ui.invalidate('ui.render'),
       conversationText: async () => {
         const messages = await $.session.messages({ as: 'api' });
@@ -174,6 +180,9 @@ export const register: Register = (on) => {
     };
     loader = listLoader(host);
     waiter = answerWaiter(host);
+    sync = syncer(host);
+    /** Read now, so a write before the pane is opened is known as one to the journal. */
+    void loader.config().catch(() => undefined);
     keeper = rulesKeeper(host);
     /** Made now, so the first message does not wait for the CLI. */
     void keeper.prepare().catch(() => undefined);
@@ -299,15 +308,47 @@ export const register: Register = (on) => {
     return result;
   });
 
-  /** A new entry shows in the list without a reload by hand. */
+  /**
+   * A new entry shows in the list without a reload by hand, and is committed
+   * and pushed when sync is on. The sync runs on its own, so a push never holds
+   * up the turn.
+   */
   on('tool.call', { tool: 'Write' }, async ($, e, next) => {
     const result = await next(e);
-    const dir = loader?.journalDir();
     const isRefused = 'deny' in result && Boolean(result.deny);
-    if (dir && !isRefused && String(e.file_path).startsWith(`${dir}/`)) {
-      refresh?.cancel();
-      refresh = $.clock.after(REFRESH_DEBOUNCE_MS, () => void loader?.refresh().catch(() => undefined));
-    }
+    const [bound, list, syncing] = [host, loader, sync];
+    if (isRefused || !bound || !list || !syncing) return result;
+    const path = String(e.file_path);
+    void list
+      .config()
+      .then(({ journalDir, isSyncOn }) => {
+        if (!journalDir || !path.startsWith(`${journalDir}/`)) return;
+        refresh?.cancel();
+        refresh = bound.after(REFRESH_DEBOUNCE_MS, () => {
+          /** A list nobody has opened is left for the pane to load when it opens. */
+          void bound.list
+            .read()
+            .then((shown) => (shown.status === 'idle' ? undefined : list.refresh()))
+            .catch(() => undefined);
+          if (isSyncOn) void syncing.request().catch(() => undefined);
+        });
+      })
+      .catch(() => undefined);
+    return result;
+  });
+
+  /**
+   * The last chance to commit what was written another way than the Write
+   * tool, or in the moment before the exit. The engine bounds the whole exit,
+   * so the sync gets what is left of that bound; a push it cuts short is made
+   * by the next sync.
+   */
+  on('session.end', async ($, e, next) => {
+    const timeoutMs = sync && loader?.isSyncOn() ? endSyncTimeoutOf(next.budget.remainingMs, sync.isRunning()) : null;
+    /** Beside the end step rather than before it, so the hooks after this one keep their share of the bound. */
+    const syncing = sync && timeoutMs !== null ? sync.request(timeoutMs).catch(() => undefined) : null;
+    const result = await next(e);
+    await syncing;
     return result;
   });
 
@@ -360,9 +401,9 @@ export const register: Register = (on) => {
     ]);
     if (opened !== null || view !== 'list' || list.entries.length === 0) return next(e);
     const { lines } = listLayoutOf(list, new Date());
-    const topRows = listTopRows({ scope, currentProject, list, journalDir: loader.journalDir() });
-    const current = windowOf(lines.length, paneRows, topRows, await read($, topAtom));
-    const moved = windowOf(lines.length, paneRows, topRows, current.top + e.by);
+    const outerRows = listOuterRows({ scope, currentProject, list, journalDir: loader.journalDir() });
+    const current = windowOf(lines.length, paneRows, outerRows, await read($, topAtom));
+    const moved = windowOf(lines.length, paneRows, outerRows, current.top + e.by);
     if (moved.top !== current.top) await update($, topAtom, () => moved.top);
     if (moved.top + 2 * moved.rows >= lines.length) void loader.loadMore().catch(() => undefined);
     return {};
@@ -371,7 +412,7 @@ export const register: Register = (on) => {
   on('ui.render', { component: 'Pane', requestId: 'journal' }, async ($, e, next) => {
     if (!host || e.surface === 'mobile') return next(e);
     const { Box, Text, Button, Input, Markdown } = await $.ui.resolve(e);
-    const [scope, view, list, chat, opened, top, date, notice, model, sessionModel] = await Promise.all([
+    const [scope, view, list, chat, opened, top, date, notice, syncState, model, sessionModel] = await Promise.all([
       host.scope.read(),
       read($, viewAtom),
       read($, listAtom),
@@ -380,6 +421,7 @@ export const register: Register = (on) => {
       read($, topAtom),
       read($, dateAtom),
       read($, noticeAtom),
+      read($, syncAtom),
       host.model.read(),
       $.session.model().catch(() => ''),
     ]);
@@ -389,6 +431,8 @@ export const register: Register = (on) => {
       model,
       sessionModel,
       journalDir: loader?.journalDir() ?? null,
+      isSyncOn: loader?.isSyncOn() ?? false,
+      sync: syncState,
       view,
       list,
       chat,
@@ -398,6 +442,7 @@ export const register: Register = (on) => {
       currentProject,
       now: new Date(),
       bodyRows: paneRows,
+      isDocked: e.props.placement === 'dock',
       top,
       date,
       notice,

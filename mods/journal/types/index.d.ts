@@ -37,6 +37,12 @@ export type JournalDateUnit = 'all' | 'year' | 'month' | 'day';
 /** The list's date filter: its unit, and the period as the CLI's `--date` takes it (`2026`, `2026-10`, `2026-10-07`). */
 export type JournalDate = { unit: JournalDateUnit; value: string };
 
+/**
+ * The last sync of the journal folder: off when the config leaves it off or
+ * none ran yet, and else the line the CLI printed for it.
+ */
+export type JournalSync = { status: 'off' | 'syncing' | 'synced' | 'failed'; text: string };
+
 /** Which view the pane shows under an opened entry. */
 export type JournalView = 'list' | 'chat';
 
@@ -53,6 +59,7 @@ declare module 'claude-code' {
       date: JournalDate;
       /** The first row of the list the pane shows, as the person scrolled it. */
       top: number;
+      sync: JournalSync;
     };
   }
 }

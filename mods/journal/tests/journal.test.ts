@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing';
 import type { Timer } from 'claude-code';
-import type { JournalDate, JournalList, JournalOpened, JournalTurn, JournalView } from '../types';
+import type { JournalDate, JournalList, JournalOpened, JournalSync, JournalTurn, JournalView } from '../types';
 import { type Scope, type SearchModel, TOOL_SPECS } from '../hooks/agent.js';
 import type { Cell, Host } from '../hooks/host.js';
 import { TOOL_LIST, TOOL_READ, TOOL_SEARCH, toolName } from '../hooks/names.js';
@@ -17,6 +17,10 @@ import {
   pageLimitOf,
   recorded,
   stepOf,
+  endSyncTimeoutOf,
+  SYNC_TIMEOUT_MS,
+  syncer,
+  syncStateOf,
   UNLISTED_ATTEMPTS,
   waitOn,
 } from '../hooks/journal.js';
@@ -80,6 +84,7 @@ function hostWith(spawn: Host['spawn']): Host {
     top: cell(0),
     date: cell<JournalDate>({ unit: 'all', value: '' }),
     notice: cell(''),
+    sync: cell<JournalSync>({ status: 'off', text: '' }),
     conversationText: async () => '',
     appendNote: async () => {},
     redraw: () => {},
@@ -350,5 +355,100 @@ describe('journal', () => {
 
     // Assert
     expect(result).toEqual([true, false, false]);
+  });
+
+  test('syncs asked for while one runs come to one more sync after it, which every caller waits for', async () => {
+    // Arrange
+    const runs: Array<() => void> = [];
+    const host: Host = {
+      ...hostWith(async () => ({})),
+      run: (argv) =>
+        new Promise((resolve) => {
+          runs.push(() => resolve({ exitCode: 0, stdout: `${argv[1]} done\n`, stderr: '' } as never));
+        }),
+    };
+    const sync = syncer(host);
+
+    // Act
+    const first = sync.request();
+    await settled();
+    const second = sync.request();
+    const third = sync.request();
+    runs.shift()!();
+    await settled();
+    const isWaiting = runs.length === 1;
+    runs.shift()!();
+    await Promise.all([first, second, third]);
+
+    // Assert
+    expect(isWaiting).toBe(true);
+    expect(runs.length).toBe(0);
+    expect(await host.sync.read()).toEqual({ status: 'synced', text: 'sync done' });
+  });
+
+  test('a sync run is off, synced, failed with its own line, or failed with the reason it gave', () => {
+    // Arrange
+    const run = (exitCode: number, stdout: string, stderr = '') => ({
+      cli: 'aj',
+      exitCode,
+      stdout,
+      stderr,
+      ...(exitCode === -1 ? { error: 'timed out' } : {}),
+    });
+
+    // Act
+    const states = [
+      syncStateOf(run(0, 'sync is off\n')),
+      syncStateOf(run(0, 'committed 1 file · no remote\n')),
+      syncStateOf(run(3, 'committed 1 file · push failed: timed out\n')),
+      syncStateOf(run(1, '', '~/journal is not a git repository\n')),
+      { ...syncStateOf(run(-1, '', 'agent-journal could not run (timed out). Is it installed and on PATH?')) },
+    ];
+
+    // Assert
+    expect(states).toEqual([
+      { status: 'off', text: '' },
+      { status: 'synced', text: 'committed 1 file · no remote' },
+      { status: 'failed', text: 'committed 1 file · push failed: timed out' },
+      { status: 'failed', text: '~/journal is not a git repository' },
+      { status: 'failed', text: 'sync did not finish: timed out' },
+    ]);
+  });
+
+  test('the session\u2019s end syncs only with room left in the exit\u2019s bound, and never beside a sync under way', () => {
+    // Act
+    const timeouts = [
+      endSyncTimeoutOf(1_500, false),
+      endSyncTimeoutOf(400, false),
+      endSyncTimeoutOf(1_500, true),
+      endSyncTimeoutOf(Infinity, false),
+    ];
+
+    // Assert
+    expect(timeouts).toEqual([1_400, null, null, SYNC_TIMEOUT_MS]);
+  });
+
+  test('a sync under way says so until it ends', async () => {
+    // Arrange
+    let finish = () => {};
+    const host: Host = {
+      ...hostWith(async () => ({})),
+      run: () =>
+        new Promise((resolve) => {
+          finish = () => resolve({ exitCode: 0, stdout: 'nothing to commit · up to date\n', stderr: '' } as never);
+        }),
+    };
+    const sync = syncer(host);
+
+    // Act
+    const before = sync.isRunning();
+    const done = sync.request();
+    await settled();
+    const during = sync.isRunning();
+    finish();
+    await done;
+
+    // Assert
+    expect([before, during, sync.isRunning()]).toEqual([false, true, false]);
   });
 });

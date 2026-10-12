@@ -2,7 +2,15 @@
 /* @jsx h */
 /* @jsxFrag Fragment */
 import type { ElementTable, RenderElement } from 'claude-code';
-import type { JournalDate, JournalEntry, JournalList, JournalOpened, JournalTurn, JournalView } from '../types';
+import type {
+  JournalDate,
+  JournalEntry,
+  JournalList,
+  JournalOpened,
+  JournalSync,
+  JournalTurn,
+  JournalView,
+} from '../types';
 import type { Scope, SearchModel } from './agent.js';
 import { sanitize } from './cli.js';
 import {
@@ -50,6 +58,10 @@ export type PaneModel = {
   sessionModel: string;
   /** Where the journal is, or null until the CLI has said. */
   journalDir: string | null;
+  /** Whether the config keeps the journal in git, which the Journal row marks with an icon. */
+  isSyncOn: boolean;
+  /** The last sync of the journal folder, shown after its path. */
+  sync: JournalSync;
   view: JournalView;
   list: JournalList;
   chat: Array<JournalTurn>;
@@ -63,6 +75,8 @@ export type PaneModel = {
   timeZone?: string;
   /** The rows the pane's body has room for. */
   bodyRows: number;
+  /** Whether the pane is docked, with rows of its own to fill, rather than inline, where the frame fits the tree. */
+  isDocked: boolean;
   /** The first row of the list in view, as the person scrolled it. */
   top: number;
   date: JournalDate;
@@ -168,13 +182,15 @@ export function listLayoutOf(list: JournalList, now: Date, timeZone?: string): L
 }
 
 /**
- * The rows above the list: the header and its margin, Ask and its margin, the
- * journal's folder once it is known, the scope, the date, the rule, the project's name with its margin when one
- * shows, and the margin above the list. Kept beside the views that draw them.
+ * The rows around the list. Above it: the header and its margin, Ask and its
+ * margin, the scope, the date, the rule, the project's name with its margin
+ * when one shows, and the margin above the list. Below it, once the journal's
+ * folder is known: the rule and the status line. Kept beside the views that
+ * draw them.
  */
-export function listTopRows(model: Pick<PaneModel, 'scope' | 'currentProject' | 'list' | 'journalDir'>): number {
+export function listOuterRows(model: Pick<PaneModel, 'scope' | 'currentProject' | 'list' | 'journalDir'>): number {
   const hasChip = model.scope === 'project' && (model.currentProject ?? model.list.entries[0]?.project);
-  return 2 + 2 + (model.journalDir !== null ? 1 : 0) + 1 + 1 + 1 + (hasChip ? 2 : 0) + 1;
+  return 2 + 2 + 1 + 1 + 1 + (hasChip ? 2 : 0) + 1 + (model.journalDir !== null ? 2 : 0);
 }
 
 /** Where the list's window stands: its first row, clamped, its height, and the furthest its first row goes. */
@@ -342,6 +358,36 @@ export function pathFit(path: string, width: number): string {
   return width <= 1 ? '…' : `…${chars.slice(chars.length - width + 1).join('')}`;
 }
 
+/** The mark of a journal kept in git, before what its last sync came to. */
+export const SYNC_ICON = '⇅';
+
+/**
+ * What the Journal row says about git: nothing while sync is off, else the
+ * icon, dim until a sync has said more, then in the color of how it went. A
+ * sync that worked shows only how far it got, since what it committed is the
+ * entry just written; a failure keeps its reason, which is what to act on.
+ */
+export function syncNote(
+  isSyncOn: boolean,
+  sync: JournalSync,
+  width = Infinity,
+): { text: string; color?: string; isDim: boolean } | null {
+  if (!isSyncOn) return null;
+  const done = sync.text.split(' · ').pop() ?? '';
+  const fit = (text: string) => {
+    const chars = [...`${SYNC_ICON} ${text}`];
+    return chars.length <= width ? chars.join('') : `${chars.slice(0, Math.max(width - 1, 0)).join('')}…`;
+  };
+  if (sync.status === 'syncing') return { text: fit('syncing…'), isDim: true };
+  if (sync.status === 'failed') return { text: fit(done), color: 'red', isDim: false };
+  if (sync.status === 'synced')
+    return { text: fit(done === 'no remote' ? 'committed, no remote' : done), color: 'green', isDim: false };
+  return { text: fit('git'), isDim: true };
+}
+
+/** The fewest characters of the journal's path the Journal row keeps beside a sync note. */
+const MIN_PATH_WIDTH = 10;
+
 /** The units the list narrows to, in the order the date row shows them. */
 const DATE_UNITS: ReadonlyArray<[DateUnit, string]> = [
   ['all', 'All'],
@@ -442,6 +488,8 @@ function listView(ui: Ui, actions: PaneActions, model: PaneModel): RenderElement
   const { Box, Text } = ui;
   const { list } = model;
   let rows: RenderElement | Array<RenderElement>;
+  /** How many rows the list shows, so a docked pane can fill the rest and keep the status line at its foot. */
+  let shownRows = 1;
   if (list.status === 'loading' && list.entries.length === 0) rows = <Text dimColor>Loading the journal…</Text>;
   else if (list.status === 'failed') rows = <Text color="red">{sanitize(list.error)}</Text>;
   else if (list.entries.length === 0)
@@ -453,8 +501,10 @@ function listView(ui: Ui, actions: PaneActions, model: PaneModel): RenderElement
     const { lines } = layout;
     /** One project's list says its name once, above it, so its rows need no project column. */
     const width = model.scope === 'project' ? 0 : layout.width;
-    const window = windowOf(lines.length, model.bodyRows, listTopRows(model), model.top);
-    rows = visibleLines(lines, window).map((line, at) => {
+    const window = windowOf(lines.length, model.bodyRows, listOuterRows(model), model.top);
+    const visible = visibleLines(lines, window);
+    shownRows = visible.length;
+    rows = visible.map((line, at) => {
       if (line.kind === 'entry') return entryRow(ui, actions, line.entry, line.time, width, model.columns, 'entry');
       if (line.kind === 'day')
         return (
@@ -471,24 +521,50 @@ function listView(ui: Ui, actions: PaneActions, model: PaneModel): RenderElement
       return <Text key={`line:${window.top + at}`}> </Text>;
     });
   }
+  const room = model.bodyRows - listOuterRows(model);
+  const pad =
+    model.isDocked && model.journalDir !== null
+      ? Array.from({ length: Math.max(room - shownRows, 0) }, (_, at) => <Text key={`pad:${at}`}> </Text>)
+      : [];
   return (
     <Box flexDirection="column">
       <Box flexDirection="row" marginBottom={1}>
         {actionButton(ui, model, 'open-ask', '✦ Ask', () => actions.showChat())}
       </Box>
-      {model.journalDir !== null && (
-        <Box key="dir" flexDirection="row" columnGap={1}>
-          {rowLabel(ui, 'Journal')}
-          <Text dimColor>{pathFit(sanitize(model.journalDir), Math.max(model.columns - LABEL_WIDTH - 1, 10))}</Text>
-        </Box>
-      )}
       {scopeView(ui, actions, model)}
       {dateView(ui, actions, model)}
       {ruleView(ui, model, 'rule:list')}
       {model.scope === 'project' && projectChip(ui, model.currentProject ?? list.entries[0]?.project ?? null)}
       <Box marginTop={1} flexDirection="column">
         {rows}
+        {pad}
       </Box>
+      {model.journalDir !== null && ruleView(ui, model, 'rule:status')}
+      {model.journalDir !== null && statusLine(ui, model, model.journalDir)}
+    </Box>
+  );
+}
+
+/**
+ * The list's last row: the journal's folder on the left, and what git sync
+ * says about it on the right. The path gives way to the note, down to a few
+ * characters, since the note can say what to fix; past that the note is cut,
+ * so the line stays one row, as the list's window counts it.
+ */
+function statusLine(ui: Ui, model: PaneModel, journalDir: string): RenderElement {
+  const { Box, Text } = ui;
+  const note = syncNote(model.isSyncOn, model.sync, Math.max(model.columns - MIN_PATH_WIDTH - 1, 1));
+  const noteWidth = note ? [...note.text].length + 1 : 0;
+  return (
+    <Box key="status" flexDirection="row" justifyContent="space-between" columnGap={1}>
+      <Text dimColor wrap="truncate">
+        {pathFit(sanitize(journalDir), Math.max(model.columns - noteWidth, MIN_PATH_WIDTH))}
+      </Text>
+      {note && (
+        <Text key="sync" color={note.color} dimColor={note.isDim} wrap="truncate">
+          {sanitize(note.text)}
+        </Text>
+      )}
     </Box>
   );
 }

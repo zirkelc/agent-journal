@@ -1,5 +1,5 @@
 import type { ProcessRunResult, Timer } from 'claude-code';
-import type { JournalDate, JournalList, JournalOpened, JournalTurn, JournalView } from '../types';
+import type { JournalDate, JournalList, JournalOpened, JournalSync, JournalTurn, JournalView } from '../types';
 import type { Scope, SearchModel } from './agent.js';
 
 /** One value of the mod's session state: read it, or change it from what it is. */
@@ -44,6 +44,7 @@ export type Host = {
   top: Cell<number>;
   date: Cell<JournalDate>;
   notice: Cell<string>;
+  sync: Cell<JournalSync>;
   /** The text of the main conversation as its next model request reads it, after the last compaction. */
   conversationText: () => Promise<string>;
   /** Adds a row to the main conversation that the model reads and the person does not see as typed. */
