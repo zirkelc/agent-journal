@@ -17,6 +17,12 @@ export default defineConfig({
         },
       },
       {
+        /**
+         * The spec imports a constant from the mod, whose tsconfig extends one
+         * that Claude Code writes when it loads the mod, so a fresh checkout has
+         * none. A tsconfig given as a string keeps Vite from looking one up.
+         */
+        esbuild: { tsconfigRaw: '{}' },
         test: {
           name: 'integration',
           include: ['test/integration/**/*.spec.ts'],
