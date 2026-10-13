@@ -6,8 +6,17 @@ import { afterAll, describe, expect, test } from 'vitest';
 import { RULES_MARK } from '../../adapters/claude-code/hooks/names.ts';
 import { GIT_IDENTITY, ROOT } from '../helpers.ts';
 
+/**
+ * The rules name a file path for a new entry, not a folder, so the question
+ * asks for that path as written, and names where it stands. Asked only for
+ * "the folder where you are told to write", Haiku answered NONE in about one
+ * session of four, with the rules in its context.
+ */
 const QUESTION =
-  'Reply with only the absolute path of the folder where you are told to write journal entries, or NONE.';
+  'Your context holds a standing instruction from agent-journal. Reply with only the file path that its section "Writing an entry" gives, exactly as written, or NONE if there is no such instruction.';
+
+/** The path the rules give for a new entry in a journal. */
+const entryPathIn = (journal: string): string => `${journal}/YYYY-MM-DDTHHMMSSZ.md`;
 
 /** How long one session may take, a compaction included. */
 const SESSION_TIMEOUT_MS = 240_000;
@@ -83,12 +92,8 @@ function claude(setup: Setup, prompt: string, options: { resume?: string; tools?
   return { result: (parsed.result ?? '').trim(), sessionId: parsed.session_id, debug };
 }
 
-/** A path as a model replies with it: without quotes or backticks around it, or a slash at its end. */
-const pathOf = (reply: string): string =>
-  reply
-    .trim()
-    .replace(/^[`'"]+|[`'"]+$/g, '')
-    .replace(/\/+$/, '');
+/** A path as a model replies with it, without quotes or backticks around it. */
+const pathOf = (reply: string): string => reply.trim().replace(/^[`'"]+|[`'"]+$/g, '');
 
 /** Where Claude Code filed a session's transcript, by the directory it ran in. */
 function transcriptPath(sessionId: string): string {
@@ -152,10 +157,10 @@ describe('the rules in a real session', () => {
 
       // Assert
       const delivery = deliveryOf(first.debug);
-      expect(pathOf(first.result)).toBe(session.journal);
+      expect(pathOf(first.result)).toBe(entryPathIn(session.journal));
       expect(afterFirst).toEqual([delivery]);
       expect(afterSecond).toEqual([delivery]);
-      expect(pathOf(compacted.result)).toBe(session.journal);
+      expect(pathOf(compacted.result)).toBe(entryPathIn(session.journal));
       expect(afterCompaction).toEqual([delivery, delivery]);
     },
     4 * SESSION_TIMEOUT_MS,
@@ -179,7 +184,7 @@ describe('the rules in a real session', () => {
       const isExpected = process.env.AGENT_JOURNAL_EXPECT_GUARD === 'true';
       expect(isGuarded(ran.debug)).toBe(isExpected);
       expect(ran.debug.includes('agent-journal: prompt.context bypassed')).toBe(isExpected);
-      expect(pathOf(ran.result)).toBe(session.journal);
+      expect(pathOf(ran.result)).toBe(entryPathIn(session.journal));
     },
     SESSION_TIMEOUT_MS,
   );
