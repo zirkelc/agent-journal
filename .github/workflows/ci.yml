@@ -90,6 +90,72 @@ jobs:
       - name: Test the journal pane
         run: claude plugin test .
 
+  # Real Claude Code sessions with this checkout as their plugin: the journal
+  # rules reach the model once, come back after a compaction, and an entry the
+  # session writes is committed and pushed. They cost model usage, so they run
+  # once per change (for a pull request, and on main), only after the free
+  # tests pass, and only where a credential secret is set; a fork's pull
+  # request has none, and every step after the check is then skipped. Only the
+  # two steps that need the secret can read it.
+  #
+  # Twice: as on a machine without managed settings, and with a managed settings
+  # file, which makes Claude Code seat its built-in guard. The guard skips a
+  # person's mods on prompt.context, so the rules then take the prompt.submit
+  # path. Runners allow sudo, which writing the file needs.
+  integration:
+    name: Integration (${{ matrix.guard && 'guard' || 'no guard' }})
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+    needs: [test, plugin]
+    runs-on: ubuntu-latest
+    # Above the sum of the suite's own timeouts, so a session that hangs fails
+    # with vitest's report instead of a cancelled job.
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        guard: [false, true]
+    steps:
+      - name: Check for a credential
+        id: credential
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          if [ -n "$ANTHROPIC_API_KEY" ] || [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+            echo 'present=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'No ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN secret, so the integration tests are skipped.'
+          fi
+      - uses: actions/checkout@v6
+        if: steps.credential.outputs.present
+      - uses: pnpm/action-setup@v6
+        if: steps.credential.outputs.present
+      - uses: actions/setup-node@v6
+        if: steps.credential.outputs.present
+        with:
+          node-version: 24
+          cache: 'pnpm'
+      - name: Install
+        if: steps.credential.outputs.present
+        run: pnpm install
+      - name: Install Claude Code
+        if: steps.credential.outputs.present
+        run: |
+          curl -fsSL https://claude.ai/install.sh | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Set up managed settings
+        if: steps.credential.outputs.present && matrix.guard
+        run: |
+          sudo mkdir -p /etc/claude-code
+          echo '{ "cleanupPeriodDays": 30 }' | sudo tee /etc/claude-code/managed-settings.json
+      - name: Integration tests
+        if: steps.credential.outputs.present
+        run: pnpm test:integration
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          AGENT_JOURNAL_EXPECT_GUARD: ${{ matrix.guard }}
+
   # Claude Code takes an update only when the version in the manifest changes,
   # however many commits are pushed after it. So a change to what the plugin
   # ships, made after the last version change, reaches nobody who has it

@@ -1,12 +1,13 @@
 {
   "name": "agent-journal",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "private": true,
   "type": "module",
   "description": "A journal that survives the session that wrote it",
   "packageManager": "pnpm@10.34.5",
   "scripts": {
-    "test": "vitest run",
+    "test": "vitest run --project unit",
+    "test:integration": "vitest run --project integration",
     "lint": "oxlint",
     "format": "oxfmt",
     "format:check": "oxfmt --check"

@@ -166,12 +166,11 @@ export const register: Register = (on) => {
       notice: { read: () => read($, noticeAtom), update: (change) => update($, noticeAtom, change) },
       sync: { read: () => read($, syncAtom), update: (change) => update($, syncAtom, change) },
       redraw: () => $.ui.invalidate('ui.render'),
-      conversationText: async () => {
+      conversationHas: async (text) => {
         const messages = await $.session.messages({ as: 'api' });
-        return messages
-          .flatMap((message) => message.content)
-          .map((block) => (typeof block.text === 'string' ? block.text : ''))
-          .join('\n');
+        return messages.some((message) =>
+          message.content.some((block) => typeof block.text === 'string' && block.text.includes(text)),
+        );
       },
       appendNote: async (text) => {
         await $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] } });
@@ -198,7 +197,8 @@ export const register: Register = (on) => {
    * /clear and after compaction, and subagents reuse it. So this is when the
    * main conversation may need the rules again, but they are not put into the
    * shared context, which subagents would read too: they go to the main
-   * conversation as a row of their own.
+   * conversation as a row of their own. Where Claude Code's built-in guard is
+   * seated, this hook does not run, and the prompt hook below gives them.
    */
   on('prompt.context', async ($, e, next) => {
     const result = await next(e);
@@ -213,14 +213,36 @@ export const register: Register = (on) => {
    * handed up with the compaction would be stored as one the person typed,
    * which is why they come as the same hidden row as at the start. A
    * subagent's compaction is its own, and a precompute installs nothing.
+   * Under the built-in guard this hook does not run either.
    */
   on('session.compact', async ($, e, next) => {
     const result = await next(e);
     if (!host || !keeper || e.agentId !== undefined || e.trigger === 'precompute' || !result.messages) return result;
     const delivery = keeper;
+    delivery.forget();
     host.after(0, () => void delivery.deliver().catch(() => undefined));
     return result;
   }).catch(($, e, next) => next(e));
+
+  /**
+   * Where Claude Code's built-in guard is seated (a Team or Enterprise plan,
+   * or managed settings on the machine), a person's plugin no longer runs on
+   * `prompt.context` or `session.compact`, but keeps `prompt.submit` and the
+   * context it adds. So each prompt carries the rules while the conversation
+   * lacks them: the first one, and the first after a /clear or a compaction.
+   * Without the guard, the hooks above have given them by then, and the
+   * prompt carries nothing.
+   */
+  on('prompt.submit', async ($, e, next) => {
+    const block = keeper ? await keeper.forPrompt().catch(() => null) : null;
+    return next(block ? { ...e, context: [...(e.context ?? []), block] } : e);
+  }).catch(($, e, next) => next(e));
+
+  /** A turn begins with the prompts that were waiting, so the rules a prompt carried are in the conversation now. */
+  on('turn.start', async ($, e, next) => {
+    keeper?.turnStarted();
+    return next(e);
+  });
 
   /** The search agent is this mod's own: the main model never sees it. */
   on('agent.offer', { agent: 'agent-journal:search' }, () => ({ isOffered: false }));

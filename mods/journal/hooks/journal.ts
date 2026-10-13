@@ -17,7 +17,7 @@ import {
   type Filters,
 } from './cli.js';
 import type { Host } from './host.js';
-import { CLI_IN_CHECKOUT, CLI_ON_PATH } from './names.js';
+import { CLI_IN_CHECKOUT, CLI_ON_PATH, RULES_MARK } from './names.js';
 import type { PaneActions } from './pane-view.js';
 
 /**
@@ -37,57 +37,92 @@ export async function sessionOf(host: Host): Promise<SessionNames> {
   return { cwd, sessionId, agent: agentOf(mainModel) };
 }
 
-/**
- * The mark the rules' row opens with, which says the conversation holds them.
- * A comment of the mod's own, not a sentence of the rules: those are quoted,
- * pasted and read in this very repository without the rules being there.
- */
-export const RULES_MARK = '<!-- agent-journal rules -->';
-
 /** How handing the rules to the main conversation went. */
 export type RulesOutcome = 'delivered' | 'present' | 'none';
 
 /**
  * Gives the main conversation the rules for writing the journal: a row the
- * model reads, added only when what its next request is built from does not
- * hold them yet. That is so at a session's start, after /clear and after
- * compaction, and not on a resume, which still carries them. Subagents never
- * get them, since the row goes to the main conversation alone.
+ * model reads, or a block of context on the prompt being submitted, added only
+ * when what its next request is built from does not hold them yet. That is so
+ * at a session's start, after /clear and after compaction, and not on a resume,
+ * which still carries them. Subagents never get them, since both go to the
+ * main conversation alone.
  *
  * The rules are made ahead, at the start and again for a new session id
- * (a /clear) or another model, so a delivery waits for no CLI run. One
- * delivery runs at a time: a second asked while one is under way gets its
- * outcome, so two cannot both find the rules missing and both add them.
+ * (a /clear) or another model, so a delivery waits for no CLI run. One check
+ * runs at a time, for the row and the prompt alike, so two cannot both find
+ * the rules missing and both add them. A prompt waits to enter the
+ * conversation until the turn under way ends, so the rules it carries count as
+ * given from when they are handed out until the next turn starts.
  */
 export function rulesKeeper(host: Host) {
   let made: { key: string; rules: Promise<string> } | null = null;
-  let delivering: Promise<RulesOutcome> | null = null;
+  let checks: Promise<unknown> = Promise.resolve();
+  /** The session the rules were last handed to a prompt in, while that prompt may still wait to enter. */
+  let handedTo: string | null = null;
 
-  /** The rules for the session as it is now; empty when the CLI cannot give them. */
-  async function rules(): Promise<string> {
+  async function keyOf(): Promise<{ key: string; session: SessionNames }> {
     const session = await sessionOf(host);
-    const key = `${session.sessionId}\n${session.cwd}\n${session.agent}`;
+    return { key: `${session.sessionId}\n${session.cwd}\n${session.agent}`, session };
+  }
+
+  /** The rules for the session as it is now; empty when the CLI cannot give them, which the next call tries again. */
+  async function rules(): Promise<string> {
+    const { key, session } = await keyOf();
     if (made?.key !== key) {
       const ran = runCli(host, contextArgs(session.cwd, session.sessionId, session.agent));
-      made = { key, rules: ran.then((run) => (run.exitCode === 0 ? run.stdout.trim() : '')) };
+      const making = { key, rules: ran.then((run) => (run.exitCode === 0 ? run.stdout.trim() : '')) };
+      made = making;
+      void making.rules.then((text) => {
+        if (text === '' && made === making) made = null;
+      });
     }
     return made.rules;
   }
 
-  async function deliverOnce(): Promise<RulesOutcome> {
-    const [text, conversation] = await Promise.all([rules(), host.conversationText()]);
-    if (text === '') return 'none';
-    if (conversation.includes(RULES_MARK)) return 'present';
-    await host.appendNote(`${RULES_MARK}\n${text}`);
-    return 'delivered';
+  /** Runs one check after the ones before it, whatever they came to. */
+  function exclusive<RESULT>(check: () => Promise<RESULT>): Promise<RESULT> {
+    const result = checks.then(check, check);
+    checks = result.catch(() => undefined);
+    return result;
+  }
+
+  /** Whether the conversation holds the rules, or a prompt that carries them waits to enter it. */
+  async function isGiven(): Promise<boolean> {
+    if (handedTo !== null && handedTo === (await keyOf()).key) return true;
+    return host.conversationHas(RULES_MARK);
   }
 
   function deliver(): Promise<RulesOutcome> {
-    delivering ??= deliverOnce().finally(() => (delivering = null));
-    return delivering;
+    return exclusive(async () => {
+      if (await isGiven()) return 'present';
+      const text = await rules();
+      if (text === '') return 'none';
+      await host.appendNote(`${RULES_MARK}\n${text}`);
+      return 'delivered';
+    });
   }
 
-  return { prepare: () => rules().then(() => undefined), deliver };
+  /** The rules as a block of context for the prompt being submitted, marked, or null when they are given already or the CLI gives none. */
+  function forPrompt(): Promise<string | null> {
+    return exclusive(async () => {
+      if (await isGiven()) return null;
+      const text = await rules();
+      if (text === '') return null;
+      handedTo = (await keyOf()).key;
+      return `${RULES_MARK}\n${text}`;
+    });
+  }
+
+  return {
+    prepare: () => rules().then(() => undefined),
+    deliver,
+    forPrompt,
+    /** A turn started, so a prompt that waited is in the conversation now, or was dropped. */
+    turnStarted: () => void (handedTo = null),
+    /** The conversation was compacted, so what a prompt carried is gone with it. */
+    forget: () => void (handedTo = null),
+  };
 }
 
 /** How many entries the pane loads at first, and how many more each time the list nears its end. */

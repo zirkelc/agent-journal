@@ -85,7 +85,7 @@ function hostWith(spawn: Host['spawn']): Host {
     date: cell<JournalDate>({ unit: 'all', value: '' }),
     notice: cell(''),
     sync: cell<JournalSync>({ status: 'off', text: '' }),
-    conversationText: async () => '',
+    conversationHas: async () => false,
     appendNote: async () => {},
     redraw: () => {},
   };

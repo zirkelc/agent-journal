@@ -30,3 +30,10 @@ export const CLI_ON_PATH = 'agent-journal';
 
 /** The CLI the plugin ships, relative to its root. */
 export const CLI_IN_CHECKOUT = 'bin/agent-journal';
+
+/**
+ * The mark the rules' row opens with, which says the conversation holds them.
+ * A comment of the mod's own, not a sentence of the rules: those are quoted,
+ * pasted and read in this very repository without the rules being there.
+ */
+export const RULES_MARK = '<!-- agent-journal rules -->';

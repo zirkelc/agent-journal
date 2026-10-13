@@ -1,7 +1,17 @@
 import { describe, expect, test } from 'claude-code/testing';
 import { localDayTime } from '../hooks/format.js';
-import { busyNotice, RULES_MARK } from '../hooks/journal.js';
-import { AGENT_TYPE, COMMAND, PANE_ID, PLUGIN, TOOL_LIST, TOOL_READ, TOOL_SEARCH, toolName } from '../hooks/names.js';
+import { busyNotice } from '../hooks/journal.js';
+import {
+  AGENT_TYPE,
+  COMMAND,
+  PANE_ID,
+  PLUGIN,
+  RULES_MARK,
+  TOOL_LIST,
+  TOOL_READ,
+  TOOL_SEARCH,
+  toolName,
+} from '../hooks/names.js';
 import { journal, JOURNAL_DIR, line, PANE, RECALL, SESSION, textOf, world } from './world.js';
 
 /** A turn of the wheel over the journal pane, before the hook decides where it goes. */
@@ -14,6 +24,9 @@ const SCROLL = {
   contentRows: 30,
   origin: { kind: 'person' },
 } as const;
+
+/** A prompt the person typed and sent, as the engine raises it. */
+const typed = (text: string) => ({ text, wait: false, origin: { kind: 'composer' } }) as const;
 
 describe('register', () => {
   test('registers the three tools, the hidden agent and the command at session start', async ($, on) => {
@@ -145,6 +158,174 @@ describe('register', () => {
 
     // Assert
     expect(kept.notes).toEqual([]);
+  });
+
+  test('where prompt.context does not run, the first prompt carries the rules as context, and the next one none', async ($, on) => {
+    // Arrange
+    const kept = world(on, { context: 'Standing rules.\n' });
+    await $.session.start(SESSION);
+
+    // Act
+    await $.prompt.submit(typed('first'));
+    await $.prompt.submit(typed('second'));
+
+    // Assert
+    expect(kept.prompts).toEqual([
+      { text: 'first', context: [`${RULES_MARK}\nStanding rules.`] },
+      { text: 'second', context: [] },
+    ]);
+    expect(kept.notes).toEqual([]);
+  });
+
+  test('a prompt after the rules came through prompt.context adds no second copy', async ($, on) => {
+    // Arrange
+    const kept = world(on, { context: 'Standing rules.\n' });
+    await $.session.start(SESSION);
+    await $.prompt.context({ blocks: [] } as never);
+
+    // Act
+    await $.prompt.submit(typed('first'));
+
+    // Assert
+    expect(kept.notes).toEqual([`${RULES_MARK}\nStanding rules.`]);
+    expect(kept.prompts).toEqual([{ text: 'first', context: [] }]);
+  });
+
+  test('a prompt submitted while prompt.context still appends the rules waits for it and adds no second copy', async ($, on) => {
+    // Arrange
+    let release = () => {};
+    const kept = world(on, {
+      context: 'Standing rules.\n',
+      holdAppend: new Promise<void>((resolve) => (release = resolve)),
+    });
+    await $.session.start(SESSION);
+
+    // Act
+    const delivered = $.prompt.context({ blocks: [] } as never);
+    await kept.clock.settle();
+    const submitted = $.prompt.submit(typed('first'));
+    await kept.clock.settle();
+    release();
+    await Promise.all([delivered, submitted]);
+
+    // Assert
+    expect(kept.notes.length).toBe(1);
+    expect(kept.prompts).toEqual([{ text: 'first', context: [] }]);
+  });
+
+  test('after a compaction the mod does not see, the next prompt carries the rules again', async ($, on) => {
+    // Arrange
+    const kept = world(on, { context: 'Standing rules.\n' });
+    await $.session.start(SESSION);
+    await $.prompt.submit(typed('first'));
+    await $.turn.start({ text: 'first', turnId: 'turn-1' });
+    /** The conversation as the engine leaves it after a compaction no hook of this mod ran on. */
+    kept.compactUnseen();
+
+    // Act
+    await $.prompt.submit(typed('after'));
+
+    // Assert
+    expect(kept.prompts.map((prompt) => prompt.context)).toEqual([
+      [`${RULES_MARK}\nStanding rules.`],
+      [`${RULES_MARK}\nStanding rules.`],
+    ]);
+  });
+
+  test('prompt.context while a prompt with the rules waits to enter adds no second copy', async ($, on) => {
+    // Arrange
+    let release = () => {};
+    const kept = world(on, {
+      context: 'Standing rules.\n',
+      holdSubmit: new Promise<void>((resolve) => (release = resolve)),
+    });
+    await $.session.start(SESSION);
+
+    // Act
+    const submitted = $.prompt.submit(typed('first'));
+    await kept.clock.settle();
+    await $.prompt.context({ blocks: [] } as never);
+    release();
+    await submitted;
+
+    // Assert
+    expect(kept.prompts).toEqual([{ text: 'first', context: [`${RULES_MARK}\nStanding rules.`] }]);
+    expect(kept.notes).toEqual([]);
+  });
+
+  test('prompt.context and a prompt at the same time give the rules once', async ($, on) => {
+    // Arrange
+    const kept = world(on, { context: 'Standing rules.\n' });
+    await $.session.start(SESSION);
+
+    // Act
+    await Promise.all([$.prompt.submit(typed('first')), $.prompt.context({ blocks: [] } as never)]);
+
+    // Assert
+    const copies = kept.notes.length + kept.prompts.flatMap((prompt) => prompt.context).length;
+    expect(copies).toBe(1);
+  });
+
+  test('two prompts submitted at the same time carry the rules once', async ($, on) => {
+    // Arrange
+    const kept = world(on, { context: 'Standing rules.\n' });
+    await $.session.start(SESSION);
+
+    // Act
+    await Promise.all([$.prompt.submit(typed('a')), $.prompt.submit(typed('b'))]);
+
+    // Assert
+    expect(kept.prompts).toEqual([
+      { text: 'a', context: [`${RULES_MARK}\nStanding rules.`] },
+      { text: 'b', context: [] },
+    ]);
+  });
+
+  test('a prompt into a conversation that holds the rules does not wait for the CLI', async ($, on) => {
+    // Arrange
+    const kept = world(on, {
+      context: 'Standing rules.\n',
+      conversation: [`${RULES_MARK}\nStanding rules.`],
+      holdContext: new Promise<void>(() => {}),
+    });
+    await $.session.start(SESSION);
+    let isEntered = false;
+
+    // Act
+    void $.prompt.submit(typed('first')).then(() => (isEntered = true));
+    await kept.clock.settle();
+
+    // Assert
+    expect(isEntered).toBe(true);
+    expect(kept.prompts).toEqual([{ text: 'first', context: [] }]);
+  });
+
+  test('a CLI run that failed at the start is tried again for the first prompt', async ($, on) => {
+    // Arrange
+    const kept = world(on, { context: 'Standing rules.\n', failsOnce: 'context' });
+    await $.session.start(SESSION);
+    await kept.clock.settle();
+
+    // Act
+    await $.prompt.submit(typed('first'));
+
+    // Assert
+    expect(kept.prompts).toEqual([{ text: 'first', context: [`${RULES_MARK}\nStanding rules.`] }]);
+  });
+
+  test('a compaction after a prompt carried the rules gives them again', async ($, on) => {
+    // Arrange
+    const kept = world(on, { context: 'Standing rules.\n' });
+    await $.session.start(SESSION);
+    await $.prompt.submit(typed('first'));
+    const compaction = { trigger: 'auto', messages: [{ role: 'user', text: 'The summary.', toolUses: [] }] };
+
+    // Act
+    await $.session.compact(compaction as never);
+    await kept.clock.settle();
+
+    // Assert
+    expect(kept.notes).toEqual([`${RULES_MARK}\nStanding rules.`]);
   });
 
   test('a list call runs the CLI in the session directory with the filters', async ($, on) => {

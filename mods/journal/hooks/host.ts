@@ -45,8 +45,8 @@ export type Host = {
   date: Cell<JournalDate>;
   notice: Cell<string>;
   sync: Cell<JournalSync>;
-  /** The text of the main conversation as its next model request reads it, after the last compaction. */
-  conversationText: () => Promise<string>;
+  /** Whether a text block of the main conversation, as its next model request reads it, holds this text. */
+  conversationHas: (text: string) => Promise<boolean>;
   /** Adds a row to the main conversation that the model reads and the person does not see as typed. */
   appendNote: (text: string) => Promise<void>;
   /** Draws the pane again, for what changes with time alone. */

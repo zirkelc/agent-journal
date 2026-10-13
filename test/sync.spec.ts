@@ -2,27 +2,19 @@ import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
-import { configure, type Fixture, fails, fixture, output, seed, settings } from './helpers.ts';
-
-/** A commit needs a name, and the fixture's home has no git config to give one. */
-const IDENTITY = {
-  GIT_AUTHOR_NAME: 'test',
-  GIT_AUTHOR_EMAIL: 'test@example.com',
-  GIT_COMMITTER_NAME: 'test',
-  GIT_COMMITTER_EMAIL: 'test@example.com',
-};
+import { configure, type Fixture, fails, fixture, GIT_IDENTITY, output, seed, settings } from './helpers.ts';
 
 function git(cwd: string, ...args: Array<string>): string {
   return execFileSync('git', ['-C', cwd, ...args], {
     encoding: 'utf8',
-    env: { ...process.env, ...IDENTITY, GIT_CEILING_DIRECTORIES: cwd },
+    env: { ...process.env, ...GIT_IDENTITY, GIT_CEILING_DIRECTORIES: cwd },
     stdio: ['ignore', 'pipe', 'pipe'],
   }).trim();
 }
 
 /** `sync` with the identity, as both streams and the status. */
 function sync(store: Fixture, args: Array<string> = []) {
-  return output(store, ['sync', ...args], { env: IDENTITY });
+  return output(store, ['sync', ...args], { env: GIT_IDENTITY });
 }
 
 /** Whether a path is a symlink, which `existsSync` cannot tell when it points nowhere. */
@@ -373,7 +365,7 @@ describe('sync', () => {
     // Act
     sync(store);
     git(store.journalDir, 'config', '--unset', 'core.sshCommand');
-    output(store, ['sync'], { env: { ...IDENTITY, GIT_SSH: join(bin, 'wrapper') } });
+    output(store, ['sync'], { env: { ...GIT_IDENTITY, GIT_SSH: join(bin, 'wrapper') } });
 
     // Assert
     const calls = readFileSync(logged, 'utf8').trim().split('\n');
@@ -454,7 +446,7 @@ describe('write', () => {
     sync(store, ['init']);
 
     // Act
-    const result = output(store, ['write', '--summary', 'Synced on write.'], { at: store.repo, env: IDENTITY });
+    const result = output(store, ['write', '--summary', 'Synced on write.'], { at: store.repo, env: GIT_IDENTITY });
 
     // Assert
     expect(result.status).toBe(0);
@@ -469,7 +461,7 @@ describe('write', () => {
     configure(store, ['set', 'sync', 'git']);
 
     // Act
-    const result = output(store, ['write', '--summary', 'No repository.'], { at: store.repo, env: IDENTITY });
+    const result = output(store, ['write', '--summary', 'No repository.'], { at: store.repo, env: GIT_IDENTITY });
 
     // Assert
     expect(result.status).toBe(0);
@@ -481,7 +473,7 @@ describe('write', () => {
     const store = fixture();
 
     // Act
-    const result = output(store, ['write', '--summary', 'Off.'], { at: store.repo, env: IDENTITY });
+    const result = output(store, ['write', '--summary', 'Off.'], { at: store.repo, env: GIT_IDENTITY });
 
     // Assert
     expect(result.stderr).toBe(``);

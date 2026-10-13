@@ -21,7 +21,15 @@ export type Script = {
   sync?: string;
   /** A sync waits for this before it answers, so a test can end the session while one runs. */
   holdSync?: Promise<void>;
+  /** A row appended waits for this before it is stored, so a test can submit a prompt while one is on its way. */
+  holdAppend?: Promise<void>;
+  /** A prompt waits for this before it enters the conversation, as one queued behind a running turn does. */
+  holdSubmit?: Promise<void>;
+  /** A `context` run waits for this before it answers, so a test can see what does not wait for the rules. */
+  holdContext?: Promise<void>;
   failing?: string;
+  /** A subcommand that fails on its first run only, as one that timed out once. */
+  failsOnce?: string;
   /** The exit code of a subcommand that prints its output and still fails, such as a sync whose push failed. */
   exitCodes?: Record<string, number>;
   /** The main conversation as its next request reads it: the text of each message. */
@@ -71,6 +79,7 @@ export function world(on: On, script: Script = {}) {
   });
   const turns: Array<unknown> = [];
   on('turn.complete', ($, e) => (turns.push(e), { text: '' }));
+  on('turn.start', ($, e) => ({ turnId: e.turnId }));
   /** The engine's context is the blocks it was given. */
   on('prompt.context', ($, e) => ({ blocks: e.blocks }));
   /** Every row appended, and the main conversation as its next request reads it, appended rows included. */
@@ -85,17 +94,32 @@ export function world(on: On, script: Script = {}) {
           : conversation.map((text) => ({ role: 'user', content: [{ type: 'text', text }] })),
       }) as never,
   );
-  on('session.append', ($, e, next) => {
+  on('session.append', async ($, e, next) => {
+    await script.holdAppend;
     const text = e.message.content.map((block) => String((block as { text?: unknown }).text ?? '')).join('');
     notes.push(text);
     conversation.push(text);
     return next(e);
+  });
+  /**
+   * A prompt enters with the context hooks gave it, which the session stores
+   * beside it, so the next request reads both.
+   */
+  const prompts: Array<{ text: string; context: ReadonlyArray<string> }> = [];
+  on('prompt.submit', async ($, e) => {
+    const context = e.context ?? [];
+    prompts.push({ text: e.text, context });
+    await script.holdSubmit;
+    conversation.push(e.text, ...context);
+    return { text: e.text, context };
   });
   /** A compaction leaves its summary alone, so what was appended before is gone from the next request. */
   on('session.compact', ($, e) => {
     conversation = ['The summary.'];
     return { messages: e.messages } as never;
   });
+  /** A compaction as a guard leaves it: the conversation is the summary, and no hook of a person's plugin ran on it. */
+  const compactUnseen = () => void (conversation = ['The summary.']);
   /** The store in memory: what one session sets, the next one gets. */
   const stored = new Map<string, unknown>();
   on('store.get', ($, e) => ({ value: stored.get(e.key) }) as never);
@@ -108,7 +132,9 @@ export function world(on: On, script: Script = {}) {
     runs.push(e);
     const command = e.argv[1] ?? '';
     if (command === 'sync') await script.holdSync;
-    if (script.failing === command)
+    if (command === 'context') await script.holdContext;
+    const isFailingOnce = script.failsOnce === command && runs.filter((run) => run.argv[1] === command).length === 1;
+    if (script.failing === command || isFailingOnce)
       return { value: { exitCode: 1, stdout: '', stderr: `${command} failed\n` } } as never;
     const stdout =
       command === 'config'
@@ -125,7 +151,21 @@ export function world(on: On, script: Script = {}) {
   const queries = () =>
     runs.filter((run) => run.argv[1] !== 'config' && !(run.argv[1] === 'context' && !run.argv.includes('--recall')));
 
-  return { runs, queries, opened, spawned, registered, toasts, filled, turns, clock, notes, stored };
+  return {
+    runs,
+    queries,
+    opened,
+    spawned,
+    registered,
+    toasts,
+    filled,
+    turns,
+    clock,
+    notes,
+    stored,
+    prompts,
+    compactUnseen,
+  };
 }
 
 export const SESSION = { surface: 'terminal', isInteractive: true, cwd: '/work' } as const;

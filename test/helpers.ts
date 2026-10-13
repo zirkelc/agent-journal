@@ -74,6 +74,14 @@ export function fixture(instructions?: string): Fixture {
   return { root, bin, home, journalDir: join(home, 'agent-journal'), repo };
 }
 
+/** A name for commits, which a CI runner has no git config to give. */
+export const GIT_IDENTITY = {
+  GIT_AUTHOR_NAME: 'test',
+  GIT_AUTHOR_EMAIL: 'test@example.com',
+  GIT_COMMITTER_NAME: 'test',
+  GIT_COMMITTER_EMAIL: 'test@example.com',
+};
+
 /**
  * A linked worktree of the fixture repository, on a branch of its own. It needs
  * a commit to branch from, so an empty one is made first, which also lets a test
@@ -83,13 +91,7 @@ export function worktree(store: Fixture, name: string): string {
   const git = (...args: Array<string>) =>
     execFileSync('git', ['-C', store.repo, ...args], {
       encoding: 'utf8',
-      env: {
-        ...process.env,
-        GIT_AUTHOR_NAME: 'test',
-        GIT_AUTHOR_EMAIL: 'test@example.com',
-        GIT_COMMITTER_NAME: 'test',
-        GIT_COMMITTER_EMAIL: 'test@example.com',
-      },
+      env: { ...process.env, ...GIT_IDENTITY },
     });
   git('commit', '-q', '--allow-empty', '-m', 'seed');
   const tree = join(store.home, name);
