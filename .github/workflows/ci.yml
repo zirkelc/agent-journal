@@ -171,14 +171,14 @@ jobs:
       - name: Check that shipped changes have a new version
         run: |
           # What an installed copy runs. Tests, the README and CI are not in it,
-          # and the journal pane's tests sit under mods/ but are never loaded.
-          shipped='bin adapters lib templates mods .claude-plugin .codex-plugin'
+          # and the Claude Code plugin's tests sit under adapters/ but are never loaded.
+          shipped='bin adapters lib templates .claude-plugin .codex-plugin'
 
           since=$(git log -1 --format=%H -G'"version"' -- .claude-plugin/plugin.json)
           [ -n "$since" ] || { echo 'found no version change in .claude-plugin/plugin.json'; exit 1; }
 
           # shellcheck disable=SC2086
-          changed=$(git diff --name-only "$since" HEAD -- $shipped ':(exclude)mods/*/tests')
+          changed=$(git diff --name-only "$since" HEAD -- $shipped ':(exclude)adapters/*/tests')
           if [ -n "$changed" ]; then
             echo "These shipped files changed after the version was last raised in $(git log -1 --format='%h (%s)' "$since"):"
             echo "$changed"

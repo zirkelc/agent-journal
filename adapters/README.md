@@ -4,7 +4,7 @@ An adapter is what teaches one agent to journal. It is the only part of this pro
 
 The job is short. Run the core, take the text it prints, encode that text the way your agent wants it, and hand it over at the start of every session.
 
-Claude Code is the one agent without a shell script here. Its plugin is a hooks module, [`mods/journal`](../mods/journal), which `claude-code/hooks.json` loads. The module runs the same `context` command and adds the text as a hidden row of the main conversation: at the start, after `/clear` and after compaction, whenever the conversation does not hold it, and never to a subagent. Every other agent takes the route below.
+Claude Code is the one agent without a shell script here. Its plugin is a hooks module in [`claude-code/`](claude-code), which `claude-code/hooks.json` loads. The module runs the same `context` command and adds the text as a hidden row of the main conversation: at the start, after `/clear` and after compaction, whenever the conversation does not hold it, and never to a subagent. Every other agent takes the route below.
 
 ## The contract
 
