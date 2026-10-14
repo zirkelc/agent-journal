@@ -1,10 +1,10 @@
 # Writing an adapter
 
-An adapter is what teaches one agent to journal. It is the only part of this project that knows any specific agent exists: `bin/agent-journal` has no product names in it, and `templates/INSTRUCTIONS.md` is written to be read by any model.
+An adapter teaches one agent to write the journal. It is the only part of this project that knows any specific agent exists: `bin/agent-journal` has no product names in it, and `templates/INSTRUCTIONS.md` is written to be read by any model.
 
 The job is short. Run the core, take the text it prints, encode that text the way your agent wants it, and hand it over at the start of every session.
 
-Claude Code is the one agent without a shell script here. Its plugin is a hooks module in [`claude-code/`](claude-code), which `claude-code/hooks.json` loads. The module runs the same `context` command and adds the text as a hidden row of the main conversation: at the start, after `/clear` and after compaction, whenever the conversation does not hold it, and never to a subagent. Every other agent takes the route below.
+Claude Code is the one agent without a shell script here. Its plugin is a hooks module in [`claude-code/`](claude-code), which `claude-code/hooks.json` loads. The module runs the same `context` command and adds the text as a hidden row of the main conversation. It does this at the start, after `/clear` and after compaction, each time the conversation does not hold the text. It never gives the text to a subagent. Every other agent follows the steps below.
 
 ## The contract
 
@@ -30,7 +30,7 @@ Do not parse, reformat, extend or truncate that text. Encode it and pass it on. 
 
 **Exit 0 on every path**, including a missing core, a missing template, a payload you cannot parse, and a core that returned nothing. A session should never fail because the journal was misconfigured.
 
-**Write nothing to the user.** The instruction is meant for the model. A banner about somebody's own configuration at every session start is just noise.
+**Write nothing to the user.** The instruction is for the model. A banner about the person's own configuration at every session start tells them nothing new.
 
 **Read `journal_dir` only through `bin/agent-journal`.** One config file serves every agent on the machine, which is what keeps several tools writing into one journal.
 
@@ -42,7 +42,7 @@ The contract is deliberately "text out, delivered somehow" rather than "return J
 
 An agent with no session event can still be adapted. Have its adapter write the same text into whatever instructions file that agent reads, at install time and whenever the config changes. The core does not change either way.
 
-So the first question for a new agent is not where its hooks live. It is what the agent reads at the start of every conversation, and how you put text there. It might be a hook, an instructions file, a plugin API or an environment variable. The core call above stays the same.
+So for a new agent, first find out what it reads at the start of every conversation, and how you put text there. It might be a hook, an instructions file, a plugin API or an environment variable. The core call above stays the same.
 
 Two more questions are worth answering before you write anything:
 

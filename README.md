@@ -36,7 +36,7 @@ Everything stays between you and your model.
 
 At the start of a session, the plugin injects [`INSTRUCTIONS.md`](templates/INSTRUCTIONS.md) into the context. It contains the journalling rules and the resolved values for your current project, working directory and session.
 
-The model then records important events in a new markdown file inside `~/agent-journal/`. It does so on its own, without being asked and without interrupting you.
+The model then records each important event in a new markdown file in `~/agent-journal/`. It does this without being asked and without interrupting you.
 
 ## Format
 
@@ -46,7 +46,7 @@ Each journal entry is a new markdown file. The filename is the current UTC times
 ~/agent-journal/2026-01-11T143000Z.md
 ```
 
-The file starts with frontmatter metadata, for a quick search across many files. The body contains the actual event:
+The file starts with frontmatter, so a search across many files can match single fields. The body describes what happened:
 
 ```markdown
 ---
@@ -58,8 +58,7 @@ agent: claude/opus-5
 session_id: 4eb89b17-6f7f-4264-95d4-ea5313ef277e
 ---
 
-Replaced the string-interpolated SQL in the sync path with prepare(). Added a rollback so a
-failed batch leaves nothing half-written, which is what caused Thursday's partial state.
+Replaced the string-interpolated SQL in the sync path with prepare(). Added a rollback so a failed batch leaves nothing half-written, which is what caused Thursday's partial state.
 ```
 
 ## Recall
@@ -86,7 +85,7 @@ grep -rl 'rate limit' ~/agent-journal | tail -3
 cat ~/agent-journal/2026-01-11T143000Z.md
 ```
 
-The agent can recall entries on its own, just ask "What did we work on last week?" to try it.
+The agent can also recall entries on its own. To try it, ask "What did we work on last week?".
 
 ## Install
 
@@ -98,20 +97,20 @@ Run this command:
 curl -fsSL https://raw.githubusercontent.com/zirkelc/agent-journal/main/install.sh | sh
 ```
 
-It will detect your installed agents and provide specific instructions. It also symlinks the `agent-journal` CLI into `~/.local/bin`. If that directory is not on your `$PATH`, it prints the line to add to your shell profile.
+It finds the agents installed on this machine and prints the steps for each one. It also symlinks the `agent-journal` CLI into `~/.local/bin`. If that directory is not on your `$PATH`, it prints the line to add to your shell profile.
 
 ### Claude
 
-Requires Claude Code 2.1.287 or later, since the plugin runs as a [mod](https://code.claude.com/docs/en/plugins/mods/overview): a hooks module that Claude Code loads itself. Install the plugin:
+The plugin needs Claude Code 2.1.287 or later, because it is a [mod](https://code.claude.com/docs/en/plugins/mods/overview), a hooks module that Claude Code loads itself. Install the plugin:
 
 ```
 /plugin marketplace add zirkelc/agent-plugins
 /plugin install agent-journal@zirkelc
 ```
 
-Then open a new session and ask Claude to write a journal entry. By default, it will write to the directory `~/agent-journal/`.
+Then open a new session and ask Claude to write a journal entry. By default, it writes to the directory `~/agent-journal/`.
 
-The rules for writing the journal reach the main conversation as a hidden message when the session starts, and again after `/clear` or a compaction. On a Team or Enterprise plan, or on a machine with managed settings, Claude Code loads a [built-in guard](https://code.claude.com/docs/en/plugins/mods/admin#know-what-happens-by-default) that keeps plugins out of the session's start-up context. There, the rules come with your first prompt instead, and with the first prompt after `/clear` or a compaction. A prompt that you send while a compaction runs can miss them: the rules come again with the prompt after it.
+The rules for writing the journal reach the main conversation as a hidden message when the session starts, and again after `/clear` or a compaction. On a Team or Enterprise plan, or on a machine with managed settings, Claude Code loads a [built-in guard](https://code.claude.com/docs/en/plugins/mods/admin#know-what-happens-by-default) that keeps plugins out of the session's start-up context. There, the rules come with your first prompt instead, and with the first prompt after `/clear` or a compaction. A prompt that you send while a compaction runs can miss them. The prompt after it brings them again.
 
 #### The journal pane
 
@@ -140,10 +139,9 @@ codex plugin marketplace add zirkelc/agent-journal
 codex plugin add agent-journal@zirkelc
 ```
 
-Codex reviews a hook before it runs it, so one step is left. Start Codex, run `/hooks`, and trust `agent-journal`. Until you do, the hook is skipped without a word.
+Codex reviews a hook before it runs it, so one step is left. Start Codex, run `/hooks`, and trust `agent-journal`. Until you do, Codex skips the hook and shows no message.
 
-Then open a new session and ask Codex to write a journal entry.
-By default, it will write to the directory `~/agent-journal/`.
+Then open a new session and ask Codex to write a journal entry. By default, it writes to the directory `~/agent-journal/`.
 
 #### Permissions
 
@@ -160,11 +158,10 @@ Use the full path rather than `~`. `writable_roots` only applies in `workspace-w
 
 ### CLI
 
-> [!NOTE] 
+> [!NOTE]
 > You need to run the [shell installation](#shell) to make the CLI available.
 
-The CLI is optional and only required if you want to interact with `agent-journal` manually from your shell. 
-It provides a thin interface over `ls` and `grep` for common commands:
+The CLI is optional. You need it only to work with the journal from your shell. It is a thin layer over `ls` and `grep` for common commands:
 
 | command | same as | description |
 | --- | --- | --- |
@@ -177,7 +174,7 @@ It provides a thin interface over `ls` and `grep` for common commands:
 | `aj install` | | which agents are on this machine, and how to wire each one up |
 | `aj help` | | every command and option |
 
-`list` is the default command if not given, so `aj` and `aj list` are the same. 
+`list` is the default command, so `aj` and `aj list` are the same.
 
 Entries are listed oldest first, so the newest is nearest the prompt. Each line starts with the entry ID, which `aj read` takes as it is. In a terminal the columns are aligned. Down a pipe they are separated by one tab each (ID, project, summary), so `aj list | cut -f1` gives the IDs, and an entry with no project has an empty field.
 
@@ -213,7 +210,7 @@ The config lives in `~/.config/agent-journal/config` and you can edit the file d
 journal_dir=~/agent-journal
 ```
 
-If you have the [`agent-journal`](#cli) installed, you can change the config through `agent-journal config set <key> <value>`:
+If you have the [CLI](#cli) installed, you can change the config with `agent-journal config set <key> <value>`:
 
 | key | default | description |
 | --- | --- | --- |
@@ -222,14 +219,14 @@ If you have the [`agent-journal`](#cli) installed, you can change the config thr
 
 ## Git sync
 
-The journal can keep itself in a git repository: each new entry is committed, and pushed when the branch has a remote. It is off by default. To turn it on:
+agent-journal can keep the journal in a git repository. It commits each new entry, and it pushes when the branch has a remote. Sync is off by default. To turn it on:
 
 ```sh
 aj sync init                                  # commit only, on this machine
 aj sync init git@github.com:you/journal.git   # commit and push
 ```
 
-`aj sync init` makes the journal folder a git repository if it is not one yet, adds the URL as `origin`, sets `sync=git`, and makes the first commit. If the folder is already a repository, it uses it. The journal folder must be the root of its own repository: a folder inside a larger repository (for example your notes or your dotfiles) is refused, because a push sends the whole branch, with your other commits too. To turn sync off, run `aj config unset sync`.
+`aj sync init` makes the journal folder a git repository if it is not one yet, adds the URL as `origin`, sets `sync=git`, and makes the first commit. If the folder is already a repository, it uses it. The journal folder must be the root of its own repository. `aj sync init` refuses a folder inside a larger repository (for example your notes or your dotfiles), because a push sends the whole branch, with your other commits too. To turn sync off, run `aj config unset sync`.
 
 To make a new private repository on GitHub for the journal, use the [GitHub CLI](https://cli.github.com) after `aj sync init`. It adds the repository as `origin` and pushes the first commit, and every later sync pushes to it:
 
@@ -242,11 +239,11 @@ Use your own journal folder in `--source` if you changed `journal_dir`.
 
 When sync is on, `aj sync` runs:
 
-- in Claude Code, after the model writes an entry, and once more when the session ends if the exit leaves time for it. It runs in the background, so a push never holds up the turn. In the pane, the status line under the list shows the journal folder and, for a synced journal, `⇅` with the result of the last sync: green after a push, red with the reason after a failure.
+- in Claude Code, after the model writes an entry, and once more when the session ends if the exit leaves time for it. It runs in the background, so the turn does not wait for a push. In the pane, the status line under the list shows the journal folder and, for a synced journal, `⇅` with the result of the last sync: green after a push, red with the reason after a failure.
 - after `aj write`.
 - when you run `aj sync` yourself, for example for entries that Codex wrote.
 
-Each sync commits every file in the journal folder. The commit names a single new entry by its ID and summary. Then it pushes the current branch. If the remote has commits that this machine does not have (another machine pushed first, or the repository was made with a README), it rebases onto them and pushes again; entries have unique file names, so this does not conflict. If the push fails (no network, no credentials), the commit stays, and the next sync pushes it. A sync commits nothing on a detached HEAD or while a merge, rebase or bisect is open.
+Each sync commits every file in the journal folder. The commit names a single new entry by its ID and summary. Then it pushes the current branch. If the remote has commits that this machine does not have (another machine pushed first, or you created the repository with a README), it rebases onto them and pushes again; entries have unique file names, so this does not conflict. If the push fails (no network, no credentials), the commit stays, and the next sync pushes it. A sync commits nothing on a detached HEAD or while a merge, rebase or bisect is open.
 
 A sync never waits for input: git does not prompt for a password, ssh runs in batch mode (also with your own `core.sshCommand`), and the journal's commits are not signed, so no passphrase dialog opens.
 
@@ -255,7 +252,7 @@ A sync never waits for input: git does not prompt for a password, ssh runs in ba
 
 ## Credits
 
-The idea for an agent journal is inspired by [Malaiac's Claude Diary](https://github.com/Malaiac/claude/tree/main/templates/diary).
+The idea for an agent journal comes from [Malaiac's Claude Diary](https://github.com/Malaiac/claude/tree/main/templates/diary).
 
 ## License
 
