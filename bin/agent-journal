@@ -10,7 +10,7 @@
 #   agent-journal sync    [init [URL]]
 #   agent-journal context [--cwd DIR] [--session-id ID] [--agent A] [--recall]
 #
-# `context` is left out of the help, since only the adapters and the journal
+# `context` is left out of the help, since only the agent hooks and the journal
 # pane call it. It prints the text a session should be given: templates/INSTRUCTIONS.md,
 # resolved against the settings and against where the session is. With --recall
 # it prints templates/RECALL.md instead, the text for a model that only reads the

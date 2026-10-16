@@ -552,7 +552,7 @@ describe('the bare form', () => {
     expect(flag).toBe(asked);
   });
 
-  test(`should keep context out of the help, since only the adapters call it`, () => {
+  test(`should keep context out of the help, since only the agent hooks call it`, () => {
     // Arrange
     const store = fixture();
 
