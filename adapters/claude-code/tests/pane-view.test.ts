@@ -1,0 +1,538 @@
+import { describe, expect, test } from 'claude-code/testing';
+import type { On } from 'claude-code';
+import type { JournalTurn } from '../types';
+import {
+  BUTTON_COLOR,
+  daysOf,
+  linesOf,
+  listOuterRows,
+  pathFit,
+  paneView,
+  projectWidth,
+  syncNote,
+  visibleLines,
+  windowOf,
+  type PaneActions,
+  type PaneModel,
+} from '../hooks/pane-view.js';
+import { colorOf } from '../hooks/format.js';
+import { nodeOf, PANE, propsOf, textOf } from './world.js';
+
+const NOTHING: PaneActions = {
+  chooseScope: () => {},
+  chooseModel: () => {},
+  chooseDateUnit: () => {},
+  stepDate: () => {},
+  ask: () => {},
+  open: () => {},
+  back: () => {},
+  showChat: () => {},
+  showList: () => {},
+  clearChat: () => {},
+  sendToPrompt: () => {},
+  close: () => {},
+};
+
+const MODEL: PaneModel = {
+  scope: 'all',
+  model: 'haiku',
+  sessionModel: 'claude-opus-5-5[1m]',
+  journalDir: '/home/me/journal',
+  isSyncOn: false,
+  sync: { status: 'off', text: '' },
+  view: 'list',
+  list: {
+    status: 'ready',
+    entries: [
+      { id: '2026-10-05T090000Z', project: 'claude-quick-actions', summary: 'Older' },
+      { id: '2026-10-06T143000Z', project: 'nebula', summary: 'Middle' },
+      { id: '2026-10-06T150000Z', project: 'repo', summary: 'Newer' },
+    ],
+    error: '',
+    limit: 200,
+    hasMore: false,
+  },
+  chat: [],
+  opened: null,
+  columns: 80,
+  surface: 'terminal',
+  currentProject: 'agent-journal',
+  now: new Date('2026-10-06T16:00:00Z'),
+  timeZone: 'Europe/Berlin',
+  bodyRows: 40,
+  isDocked: true,
+  top: 0,
+  date: { unit: 'all', value: '' },
+  notice: '',
+};
+
+/** The blank rows drawn after the row that holds a text: what fills a docked list below its last entry. */
+function blanksAfter(tree: unknown, text: string): number {
+  const strings = textOf(tree).split(' Text ');
+  const from = strings.findIndex((part) => part.includes(text));
+  return strings.slice(from + 1).filter((part) => part === ' ').length;
+}
+
+/** The view drawn as a pane of its own, through the engine, so the tree is checked as a session checks it. */
+const VIEW = { ...PANE, requestId: 'view' } as const;
+
+/** Draws the view for a model through a test pane, on a surface. */
+function drawsWith(on: On) {
+  let model = MODEL;
+  on('ui.render', { component: 'Pane', requestId: 'view' }, async ($, e) =>
+    paneView((await $.ui.resolve(e)) as never, NOTHING, model),
+  );
+  return (next: PaneModel) => {
+    model = next;
+  };
+}
+
+describe('pane-view', () => {
+  test('entries are grouped by local day, newest first, with only the time per entry', () => {
+    // Act
+    const days = daysOf(MODEL.list.entries, MODEL.now, MODEL.timeZone);
+
+    // Assert
+    expect(days.map((day) => day.heading)).toEqual(['Today, Tuesday 2026-10-06', 'Yesterday, Monday 2026-10-05']);
+    expect(days[0]!.rows.map((row) => `${row.time} ${row.entry.summary}`)).toEqual(['17:00 Newer', '16:30 Middle']);
+  });
+
+  test('a window inside a day shows that day\u2019s heading over its first row, and the list ends with a loading note', () => {
+    // Arrange
+    const lines = linesOf(daysOf(MODEL.list.entries, MODEL.now, MODEL.timeZone), true);
+
+    // Act
+    const window = windowOf(lines.length, 10, 7, 1);
+    const shown = visibleLines(lines, window);
+    const clamped = windowOf(lines.length, 10, 7, 99);
+
+    // Assert
+    expect(lines.map((line) => line.kind)).toEqual(['day', 'entry', 'entry', 'gap', 'day', 'entry', 'more']);
+    expect(window).toEqual({ top: 1, rows: 3, maxTop: 4 });
+    expect(shown.map((line) => (line.kind === 'entry' ? line.entry.summary : line.kind))).toEqual([
+      'day',
+      'Middle',
+      'gap',
+    ]);
+    expect(shown[0]).toEqual({ kind: 'day', heading: 'Today, Tuesday 2026-10-06' });
+    expect(clamped.top).toBe(4);
+  });
+
+  test('the project column fits the longest name up to its limit', () => {
+    // Act
+    const width = projectWidth(MODEL.list.entries);
+
+    // Assert
+    expect(width).toBe(12);
+  });
+
+  test('the header is the title with the logo star, bold in the theme color of Claude', async ($, on) => {
+    // Arrange
+    drawsWith(on);
+
+    // Act
+    const tree = await $.ui.render(VIEW as never);
+
+    // Assert
+    const header = JSON.stringify(tree);
+    expect(header).toContain('{"type":"Text","props":{"bold":true,"color":"claude"},"children":["✦ AGENT JOURNAL"]}');
+  });
+
+  test('the list shows day rows, then per entry three buttons in one hover group: dim time, project on its color, summary', async ($, on) => {
+    // Arrange
+    drawsWith(on);
+
+    // Act
+    const tree = await $.ui.render(VIEW as never);
+    const drawn = JSON.stringify(tree);
+
+    // Assert
+    expect(drawn).toContain('AGENT JOURNAL');
+    expect(drawn).toContain('"key":"open-ask"');
+    expect(drawn).toContain('Today, Tuesday 2026-10-06');
+    expect(drawn).toContain('claude-quic…');
+    const time = propsOf(tree, 'entry:time:2026-10-06T150000Z');
+    const project = propsOf(tree, 'entry:project:2026-10-06T150000Z');
+    const summary = propsOf(tree, 'entry:2026-10-06T150000Z');
+    expect(time).toEqual(expect.objectContaining({ label: '17:00  ', dimColor: true }));
+    expect(project?.label).toBe('repo'.padEnd(12, ' '));
+    expect(summary).toEqual(expect.objectContaining({ label: '  Newer', plain: true }));
+    expect(summary?.dimColor).toBe(undefined);
+    const scopes = ['entry:time:', 'entry:project:', 'entry:'].map(
+      (prefix) => nodeOf(tree, `${prefix}2026-10-06T150000Z`)?.hover?.scope,
+    );
+    expect(scopes).toEqual(Array(3).fill('row:entry:2026-10-06T150000Z'));
+    expect(drawn).toContain(`"backgroundColor":"${colorOf('repo')}"`);
+  });
+
+  test('the header holds Back outside the list and Close, Ask leads the list, and a rule follows the project row', async ($, on) => {
+    // Arrange
+    const set = drawsWith(on);
+
+    // Act
+    const list = await $.ui.render(VIEW as never);
+    set({ ...MODEL, view: 'chat' });
+    const chat = await $.ui.render(VIEW as never);
+
+    // Assert
+    expect(propsOf(list, 'back')).toBe(undefined);
+    expect(propsOf(list, 'open-ask')).toEqual(expect.objectContaining({ label: '✦ Ask', plain: true }));
+    expect(propsOf(list, 'box:open-ask')).toEqual(expect.objectContaining({ backgroundColor: BUTTON_COLOR }));
+    expect(propsOf(list, 'close')).toEqual(expect.objectContaining({ label: '✕ Close' }));
+    expect(propsOf(list, 'box:close')?.backgroundColor).toBe(undefined);
+    expect(propsOf(list, 'close')?.dimColor).toBe(undefined);
+    expect(JSON.stringify(list)).toContain('─'.repeat(80));
+    expect(propsOf(chat, 'back')).toEqual(expect.objectContaining({ label: '← Back' }));
+    expect(propsOf(chat, 'open-ask')).toBe(undefined);
+  });
+
+  test('the current project\u2019s list names it once on its color and drops the project column', async ($, on) => {
+    // Arrange
+    const set = drawsWith(on);
+    set({ ...MODEL, scope: 'project' });
+
+    // Act
+    const tree = await $.ui.render(VIEW as never);
+    const drawn = JSON.stringify(tree);
+
+    // Assert
+    expect(drawn).toContain(`"backgroundColor":"${colorOf('agent-journal')}"`);
+    expect(drawn).toContain('"agent-journal"');
+    expect(propsOf(tree, 'entry:project:2026-10-06T150000Z')).toBe(undefined);
+    expect(propsOf(tree, 'entry:2026-10-06T150000Z')?.label).toBe('Newer');
+  });
+
+  test('the scope is two buttons, the chosen one on color, the other dim, the current one named', async ($, on) => {
+    // Arrange
+    const set = drawsWith(on);
+
+    // Act
+    const all = await $.ui.render(VIEW as never);
+    set({ ...MODEL, scope: 'project', currentProject: null });
+    const outside = await $.ui.render(VIEW as never);
+
+    // Assert
+    expect(propsOf(all, 'box:scope:all')?.backgroundColor).toBe(BUTTON_COLOR);
+    expect(propsOf(all, 'scope:all')?.dimColor).toBe(undefined);
+    expect(propsOf(all, 'box:scope:project')?.backgroundColor).toBe(undefined);
+    expect(propsOf(all, 'scope:project')).toEqual(
+      expect.objectContaining({ label: 'Current (agent-journal)', dimColor: true }),
+    );
+    expect(propsOf(outside, 'scope:project')?.label).toBe('Current');
+    expect(propsOf(outside, 'box:scope:project')?.backgroundColor).toBe(BUTTON_COLOR);
+  });
+
+  test('the list ends in a status line with the journal\u2019s folder, and has none before the CLI has said where it is', async ($, on) => {
+    // Arrange
+    const set = drawsWith(on);
+
+    // Act
+    const known = await $.ui.render(VIEW as never);
+    set({ ...MODEL, journalDir: null });
+    const unknown = await $.ui.render(VIEW as never);
+    set({ ...MODEL, view: 'chat' });
+    const chat = await $.ui.render(VIEW as never);
+
+    // Assert
+    const drawn = textOf(known);
+    const order = ['Project', 'Older', 'status', '/home/me/journal'].map((text) => drawn.indexOf(text));
+    expect(order.every((at, i) => at > (order[i - 1] ?? -1))).toBe(true);
+    expect(drawn).not.toContain('Journal ');
+    expect(textOf(unknown)).not.toContain('/home/me/journal');
+    expect(listOuterRows(MODEL)).toBe(listOuterRows({ ...MODEL, journalDir: null }) + 2);
+    expect(textOf(chat)).not.toContain('/home/me/journal');
+  });
+
+  test('a docked list fills its room, so the status line sits on the pane\u2019s last row; an inline one ends after its entries', async ($, on) => {
+    // Arrange
+    const set = drawsWith(on);
+    const rows = MODEL.bodyRows - listOuterRows(MODEL);
+    /** Two days, each a heading over its entries, with a blank row between them. */
+    const lines = 2 + 3 + 1;
+
+    // Act
+    const docked = await $.ui.render(VIEW as never);
+    set({ ...MODEL, isDocked: false });
+    const inline = await $.ui.render(VIEW as never);
+
+    // Assert
+    expect(blanksAfter(docked, 'Older')).toBe(rows - lines + 1);
+    expect(blanksAfter(inline, 'Older')).toBe(1);
+    expect(textOf(inline).indexOf('/home/me/journal') > textOf(inline).indexOf('Older')).toBe(true);
+  });
+
+  test('the list ends in an empty row, which points down while more rows are below or older entries wait', async ($, on) => {
+    // Arrange
+    const set = drawsWith(on);
+    const many = Array.from({ length: 60 }, (_, at) => ({
+      id: `2026-10-06T${String(Math.floor(at / 60) + 10).padStart(2, '0')}${String(at % 60).padStart(2, '0')}00Z`,
+      project: 'repo',
+      summary: `Entry ${at}`,
+    }));
+    const long = { ...MODEL, list: { ...MODEL.list, entries: many } };
+    const outer = listOuterRows(long);
+
+    // Act
+    set(long);
+    const top = textOf(await $.ui.render(VIEW as never));
+    set({ ...long, top: many.length + 1 - (MODEL.bodyRows - outer) });
+    const end = textOf(await $.ui.render(VIEW as never));
+    set({ ...long, top: many.length, list: { ...long.list, hasMore: true } });
+    const older = textOf(await $.ui.render(VIEW as never));
+    set(MODEL);
+    const few = textOf(await $.ui.render(VIEW as never));
+
+    // Assert
+    expect(top).toContain('↓ more');
+    expect(top.indexOf('↓ more') < top.indexOf('/home/me/journal')).toBe(true);
+    expect(end).not.toContain('↓');
+    expect(older).toContain('↓ more');
+    expect(few).not.toContain('↓');
+    expect(listOuterRows(MODEL)).toBe(listOuterRows({ ...MODEL, journalDir: null }) + 2);
+  });
+
+  test('the labels of the project, date and model rows have one width, so their buttons line up', async ($, on) => {
+    // Arrange
+    const set = drawsWith(on);
+
+    // Act
+    const list = JSON.stringify(await $.ui.render(VIEW as never));
+    set({ ...MODEL, view: 'chat' });
+    const chat = JSON.stringify(await $.ui.render(VIEW as never));
+
+    // Assert
+    expect(list).toContain('"Project"');
+    expect(list).toContain('"Date   "');
+    expect(chat).toContain('"Project"');
+    expect(chat).toContain('"Model  "');
+  });
+
+  test('a path too long for its room keeps its end', () => {
+    // Act
+    const result = [pathFit('/home/me/journal', 20), pathFit('/home/me/journal', 8)];
+
+    // Assert
+    expect(result).toEqual(['/home/me/journal', '…journal']);
+  });
+
+  test('the chat shows the model questions go to, as buttons with the session\u2019s own named', async ($, on) => {
+    // Arrange
+    const set = drawsWith(on);
+    set({ ...MODEL, view: 'chat' });
+
+    // Act
+    const haiku = await $.ui.render(VIEW as never);
+    set({ ...MODEL, view: 'chat', model: 'inherit' });
+    const session = await $.ui.render(VIEW as never);
+    set({ ...MODEL, view: 'list' });
+    const list = await $.ui.render(VIEW as never);
+
+    // Assert
+    expect(propsOf(haiku, 'box:model:haiku')?.backgroundColor).toBe(BUTTON_COLOR);
+    expect(propsOf(haiku, 'model:sonnet')).toEqual(expect.objectContaining({ label: 'Sonnet', dimColor: true }));
+    expect(propsOf(haiku, 'model:opus')?.label).toBe('Opus');
+    expect(propsOf(haiku, 'model:inherit')?.label).toBe('Session (opus-5-5)');
+    expect(propsOf(session, 'box:model:inherit')?.backgroundColor).toBe(BUTTON_COLOR);
+    expect(propsOf(session, 'box:model:haiku')?.backgroundColor).toBe(undefined);
+    expect(propsOf(list, 'model:haiku')).toBe(undefined);
+  });
+
+  test('an opened entry shows its summary in a box, then its fields and its body as markdown, on every surface with input', async ($, on) => {
+    // Arrange
+    const set = drawsWith(on);
+    set({
+      ...MODEL,
+      opened: {
+        id: '2026-10-06T143000Z',
+        status: 'ready',
+        text: '---\ndate: 2026-10-06T14:30:00Z\nproject: nebula\nsummary: "Shipped it"\nsession_id: s-1\n---\n\n## Notes\n\n- one\n',
+      },
+    });
+
+    // Act
+    const drawn = await Promise.all(
+      (['terminal', 'desktop'] as const).map(async (surface) =>
+        JSON.stringify(await $.ui.render({ ...VIEW, surface } as never)),
+      ),
+    );
+
+    // Assert
+    for (const text of drawn) {
+      expect(text.indexOf('Shipped it') < text.indexOf('2026-10-06 16:30')).toBe(true);
+      expect(text).toContain('"borderStyle":"round"');
+      expect(text).not.toContain('Summary');
+      expect(text).toContain('2026-10-06 16:30  (2026-10-06T14:30:00Z)');
+      expect(text).toContain('Shipped it');
+      expect(text).toContain('"type":"Markdown"');
+      expect(text).toContain('## Notes');
+      expect(text).toContain('"key":"back"');
+    }
+  });
+
+  test('an answered turn shows its answer without the Sources line, its sources as dim buttons, and a status line', async ($, on) => {
+    // Arrange
+    const chat: Array<JournalTurn> = [
+      {
+        status: 'answered',
+        question: 'what did we fix?',
+        answer: 'You fixed the race.\n\nSources: 2026-10-06T143000Z',
+        agentId: 'a',
+        startedAt: 0,
+        endedAt: 9_000,
+        steps: ['listing this project', 'reading 2026-10-06T143000Z'],
+        seen: [],
+      },
+    ];
+    const set = drawsWith(on);
+    set({ ...MODEL, view: 'chat', chat });
+
+    // Act
+    const tree = await $.ui.render(VIEW as never);
+    const drawn = JSON.stringify(tree);
+
+    // Assert
+    expect(drawn).toContain('› what did we fix?');
+    expect(drawn).toContain('You fixed the race.');
+    expect(drawn).not.toContain('Sources: 2026');
+    expect(drawn).toContain('Sources (1)');
+    expect(drawn).toContain('≡ ');
+    expect(propsOf(tree, 'source:0:2026-10-06T143000Z')).toEqual(
+      expect.objectContaining({ label: '• Middle', plain: true, dimColor: true }),
+    );
+    expect(drawn).toContain('✻ ');
+    expect(drawn).toContain('Answered in 9s · 2 steps');
+  });
+
+  test('an open turn shows the agent\u2019s steps and the time so far', async ($, on) => {
+    // Arrange
+    const chat: Array<JournalTurn> = [
+      {
+        status: 'asking',
+        question: 'and before?',
+        answer: '',
+        agentId: 'b',
+        startedAt: MODEL.now.getTime() - 12_000,
+        endedAt: 0,
+        steps: ['searching "fix", this project'],
+        seen: [],
+      },
+    ];
+    const set = drawsWith(on);
+    set({ ...MODEL, view: 'chat', chat });
+
+    // Act
+    const drawn = JSON.stringify(await $.ui.render(VIEW as never));
+
+    // Assert
+    expect(drawn).toContain('⏺ ');
+    expect(drawn).toContain('searching \\"fix\\", this project');
+    expect(drawn).toContain('"color":"green"');
+    expect(drawn).toContain('Searching… 12s · 1 step');
+    expect(drawn).not.toContain('"key":"clear"');
+  });
+
+  test('the empty chat offers questions to press, the scope, and an input between two rules', async ($, on) => {
+    // Arrange
+    const set = drawsWith(on);
+    set({ ...MODEL, view: 'chat' });
+
+    // Act
+    const tree = await $.ui.render(VIEW as never);
+    const drawn = JSON.stringify(tree);
+
+    // Assert
+    expect(propsOf(tree, 'suggest:1')).toEqual(
+      expect.objectContaining({ label: '› What did we fix last week?', plain: true }),
+    );
+    expect(propsOf(tree, 'box:scope:all')?.backgroundColor).toBe(BUTTON_COLOR);
+    expect(propsOf(tree, 'ask')?.label).toBe(undefined);
+    expect(drawn).toContain('❯ ');
+    expect(drawn).toContain('─'.repeat(80));
+    expect(drawn).not.toContain('"key":"open-ask"');
+  });
+
+  test('every view draws within the engine’s rules', async ($, on) => {
+    // Arrange
+    const set = drawsWith(on);
+
+    // Act
+    const list = textOf(await $.ui.render(VIEW as never));
+    set({ ...MODEL, view: 'chat' });
+    const chat = textOf(await $.ui.render(VIEW as never));
+
+    // Assert
+    expect(list).toContain('Newer');
+    expect(chat).toContain('Ask about past work');
+  });
+
+  test('the status line follows the path with how far the last sync got, and the path gives way to it', async ($, on) => {
+    // Arrange
+    const set = drawsWith(on);
+    const failed = { status: 'failed', text: 'committed 1 file · push failed: could not read Username' } as const;
+
+    // Act
+    set({
+      ...MODEL,
+      columns: 60,
+      journalDir: '/home/me/a/rather/long/path/to/the/journal',
+      isSyncOn: true,
+      sync: failed,
+    });
+    const drawn = textOf(await $.ui.render(VIEW as never));
+    const notes = [
+      syncNote(true, { status: 'off', text: '' }),
+      syncNote(true, { status: 'syncing', text: 'committed 1 file · up to date' }),
+      syncNote(true, { status: 'synced', text: 'committed 2026-10-06T080000Z · pushed to origin/main' }),
+      syncNote(true, { status: 'synced', text: 'nothing to commit · no remote' }),
+      syncNote(true, failed),
+    ];
+
+    // Assert
+    expect(drawn).toContain('…/path/to/the/journal');
+    expect(drawn).not.toContain('/home/me/a/rather');
+    expect(drawn).toContain('⇅ push failed: could not read Username');
+    expect(notes).toEqual([
+      { text: '⇅ git', isDim: true },
+      { text: '⇅ syncing…', isDim: true },
+      { text: '⇅ pushed to origin/main', color: 'green', isDim: false },
+      { text: '⇅ committed, no remote', color: 'green', isDim: false },
+      { text: '⇅ push failed: could not read Username', color: 'red', isDim: false },
+    ]);
+  });
+
+  test('the status line marks a journal kept in git with an icon, and shows none while sync is off', async ($, on) => {
+    // Arrange
+    const set = drawsWith(on);
+
+    // Act
+    set({ ...MODEL, isSyncOn: true });
+    const synced = textOf(await $.ui.render(VIEW as never));
+    set({ ...MODEL, isSyncOn: false });
+    const plain = textOf(await $.ui.render(VIEW as never));
+
+    // Assert
+    expect(synced.indexOf('⇅ git') > synced.indexOf('/home/me/journal')).toBe(true);
+    expect(synced.indexOf('⇅ git') > synced.indexOf('Older')).toBe(true);
+    expect(plain).not.toContain('⇅');
+    expect(syncNote(false, { status: 'off', text: '' })).toBe(null);
+  });
+
+  test('a sync note longer than its room is cut, so the status line stays one line', async ($, on) => {
+    // Arrange
+    const set = drawsWith(on);
+    const failed = {
+      status: 'failed',
+      text: '~/agent-journal is not a git repository. agent-journal sync init makes it one',
+    } as const;
+
+    // Act
+    set({ ...MODEL, columns: 60, isSyncOn: true, sync: failed });
+    const drawn = textOf(await $.ui.render(VIEW as never));
+    const cut = syncNote(true, failed, 20);
+
+    // Assert
+    expect([...(cut?.text ?? '')].length).toBe(20);
+    expect(cut?.text.endsWith('…')).toBe(true);
+    expect(drawn).toContain('⇅ ~/agent-journal is not a git repository. agent…');
+  });
+});

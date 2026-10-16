@@ -67,7 +67,7 @@ describe('output', () => {
     const payload = JSON.stringify({ session_id: 'no-cwd', hook_event_name: 'SessionStart' });
 
     // Act
-    const result = hook(store, { stdin: payload, at: store.repo, env: { CLAUDE_PROJECT_DIR: '' } });
+    const result = hook(store, { stdin: payload, at: store.repo });
 
     // Assert
     expect(fields(result!.hookSpecificOutput.additionalContext)[`project`]).toBe(`repo`);
@@ -125,13 +125,18 @@ describe('failure', () => {
     execFileSync(HOOK, [], {
       encoding: 'utf8',
       input,
-      env: { ...process.env, HOME: store.home, XDG_CONFIG_HOME: join(store.home, 'config'), CLAUDE_PLUGIN_ROOT: store.root },
+      env: {
+        ...process.env,
+        HOME: store.home,
+        XDG_CONFIG_HOME: join(store.home, 'config'),
+        PLUGIN_ROOT: store.root,
+      },
     });
 
   test(`should say nothing and succeed when the instructions are missing`, () => {
     // Arrange
     const store = fixture();
-    rmSync(join(store.root, 'INSTRUCTIONS.md'));
+    rmSync(join(store.root, 'templates', 'INSTRUCTIONS.md'));
 
     // Act
     const result = silent(store, JSON.stringify({ cwd: store.repo }));
@@ -202,15 +207,14 @@ describe('the agent it reports', () => {
       cwd: store.repo,
       hook_event_name: 'SessionStart',
       source: 'startup',
-      model: 'claude-opus-5',
+      model: 'gpt-5.1-codex',
     });
 
     // Act
     const result = fields(hook(store, { stdin: payload })!.hookSpecificOutput.additionalContext);
 
     // Assert
-    /** The product name is already in the agent, so `claude/claude-opus-5` would say it twice. */
-    expect(result.agent).toBe('claude/opus-5');
+    expect(result.agent).toBe('codex/gpt-5.1-codex');
   });
 
   test(`should name the agent alone when the payload carries no model`, () => {
@@ -227,7 +231,7 @@ describe('the agent it reports', () => {
 
     // Assert
     /** Documented as not guaranteed, so its absence is ordinary rather than a fault. */
-    expect(result.agent).toBe('claude');
+    expect(result.agent).toBe('codex');
   });
 
   test(`should keep the fields apart when the payload has neither id nor model`, () => {
@@ -243,7 +247,7 @@ describe('the agent it reports', () => {
      * The three values are read positionally, so an empty one in the middle is
      * where the next field would slide into its place.
      */
-    expect(result.agent).toBe('claude');
+    expect(result.agent).toBe('codex');
     expect(result.session_id).toBe(undefined);
     expect(result.cwd).toBe(tilde(store, store.repo));
   });

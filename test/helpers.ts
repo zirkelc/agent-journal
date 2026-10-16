@@ -15,7 +15,12 @@ for (const key of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR
 }
 
 export const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-export const HOOK = join(ROOT, 'adapters', 'claude-code', 'session-start.sh');
+/**
+ * The session-start adapter the shell tests drive. Claude Code takes the rules
+ * through its hooks module instead, so the shell path is Codex's, and with it
+ * everything the adapters share in `common.sh`.
+ */
+export const HOOK = join(ROOT, 'adapters', 'codex', 'session-start.sh');
 
 /**
  * Every case gets its own plugin root, so a test can give the core instructions
@@ -55,10 +60,12 @@ export function fixture(instructions?: string): Fixture {
   copyFileSync(join(ROOT, 'adapters', 'common.sh'), join(root, 'adapters', 'common.sh'));
   mkdirSync(join(root, 'lib'), { recursive: true });
   copyFileSync(join(ROOT, 'lib', 'install.sh'), join(root, 'lib', 'install.sh'));
+  mkdirSync(join(root, 'templates'), { recursive: true });
   writeFileSync(
-    join(root, 'INSTRUCTIONS.md'),
-    instructions ?? readFileSync(join(ROOT, 'INSTRUCTIONS.md'), 'utf8'),
+    join(root, 'templates', 'INSTRUCTIONS.md'),
+    instructions ?? readFileSync(join(ROOT, 'templates', 'INSTRUCTIONS.md'), 'utf8'),
   );
+  copyFileSync(join(ROOT, 'templates', 'RECALL.md'), join(root, 'templates', 'RECALL.md'));
 
   mkdirSync(repo, { recursive: true });
   execFileSync('git', ['init', '-q', repo]);
@@ -66,6 +73,14 @@ export function fixture(instructions?: string): Fixture {
   /** Where the default lands once `HOME` points at the fixture. */
   return { root, bin, home, journalDir: join(home, 'agent-journal'), repo };
 }
+
+/** A name for commits, which a CI runner has no git config to give. */
+export const GIT_IDENTITY = {
+  GIT_AUTHOR_NAME: 'test',
+  GIT_AUTHOR_EMAIL: 'test@example.com',
+  GIT_COMMITTER_NAME: 'test',
+  GIT_COMMITTER_EMAIL: 'test@example.com',
+};
 
 /**
  * A linked worktree of the fixture repository, on a branch of its own. It needs
@@ -76,13 +91,7 @@ export function worktree(store: Fixture, name: string): string {
   const git = (...args: Array<string>) =>
     execFileSync('git', ['-C', store.repo, ...args], {
       encoding: 'utf8',
-      env: {
-        ...process.env,
-        GIT_AUTHOR_NAME: 'test',
-        GIT_AUTHOR_EMAIL: 'test@example.com',
-        GIT_COMMITTER_NAME: 'test',
-        GIT_COMMITTER_EMAIL: 'test@example.com',
-      },
+      env: { ...process.env, ...GIT_IDENTITY },
     });
   git('commit', '-q', '--allow-empty', '-m', 'seed');
   const tree = join(store.home, name);
@@ -167,9 +176,7 @@ export function terminal(
   if (options.stdoutTo) command += ` > ${quote(options.stdoutTo)}`;
 
   const argv =
-    process.platform === 'darwin'
-      ? ['-q', '/dev/null', 'sh', '-c', command]
-      : ['-qec', command, '/dev/null'];
+    process.platform === 'darwin' ? ['-q', '/dev/null', 'sh', '-c', command] : ['-qec', command, '/dev/null'];
 
   /** Not checked for status, because a refusal is laid out like anything else. */
   const result = spawnSync('script', argv, {
@@ -279,6 +286,13 @@ export function context(store: Fixture, options: RunOptions = {}): string {
   return run(store, args, options);
 }
 
+/** The text a reader of the journal is given, `context --recall`. */
+export function recall(store: Fixture, options: RunOptions = {}): string {
+  const args = ['context', '--recall', '--cwd', options.cwd ?? store.repo];
+  if (options.sessionId !== undefined) args.push('--session-id', options.sessionId);
+  return run(store, args, options);
+}
+
 function parse(out: string): Record<string, string> {
   const result: Record<string, string> = {};
   for (const line of out.split('\n')) {
@@ -322,7 +336,7 @@ export function tilde(store: Fixture, path: string): string {
   return path === store.home ? '~' : path.replace(`${store.home}/`, '~/');
 }
 
-/** The Claude Code adapter, run as Claude Code runs it. */
+/** The Codex adapter, run as Codex runs it. */
 export function hook(store: Fixture, options: RunOptions = {}): Record<string, any> | null {
   const payload =
     options.stdin ??
@@ -337,7 +351,7 @@ export function hook(store: Fixture, options: RunOptions = {}): Record<string, a
     encoding: 'utf8',
     cwd: options.at,
     input: payload,
-    env: baseEnv(store, { CLAUDE_PLUGIN_ROOT: store.root, ...options.env }),
+    env: baseEnv(store, { PLUGIN_ROOT: store.root, ...options.env }),
   });
 
   return out.trim() ? JSON.parse(out) : null;

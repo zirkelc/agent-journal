@@ -1,16 +1,4 @@
 {
-  "hooks": {
-    "SessionStart": [
-      {
-        "matcher": "startup|clear|compact",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/adapters/claude-code/session-start.sh\"",
-            "timeout": 10
-          }
-        ]
-      }
-    ]
-  }
+  "description": "The journal for Claude Code as one hooks module: the rules for writing it in every conversation's context, and the /agent-journal pane with its search agent.",
+  "modules": ["./hooks/register.tsx"]
 }

@@ -136,7 +136,16 @@ describe('list', () => {
     seed(store, ENTRIES);
     writeFileSync(
       join(store.journalDir, '2026-08-10T120000Z.md'),
-      ['---', 'date: 2026-08-10T12:00:00Z', 'project: nebula', 'summary: "Saved on Windows."', '---', '', 'A CRLF body.', ''].join('\r\n'),
+      [
+        '---',
+        'date: 2026-08-10T12:00:00Z',
+        'project: nebula',
+        'summary: "Saved on Windows."',
+        '---',
+        '',
+        'A CRLF body.',
+        '',
+      ].join('\r\n'),
     );
 
     // Act
@@ -387,6 +396,19 @@ describe('read', () => {
     expect(result.stderr).toContain('matches 4 entries');
   });
 
+  test(`should list every match of an ambiguous prefix, whatever offset was given`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ENTRIES);
+
+    // Act
+    const result = fails(store, ['read', '2026-08', '--offset', '2']);
+
+    // Assert
+    expect(result.stderr).toContain('matches 4 entries');
+    expect(result.stderr.match(/\d{4}-\d{2}-\d{2}T\d{6}Z/g)?.length).toBe(4);
+  });
+
   test(`should show ids that tell apart two matches from the same minute`, () => {
     // Arrange
     const store = fixture();
@@ -528,6 +550,19 @@ describe('the bare form', () => {
     // Assert
     expect(asked).toContain('usage: agent-journal');
     expect(flag).toBe(asked);
+  });
+
+  test(`should keep context out of the help, since only the adapters call it`, () => {
+    // Arrange
+    const store = fixture();
+
+    // Act
+    const asked = run(store, ['help']);
+    const listed = run(store, ['context', '--cwd', store.repo]);
+
+    // Assert
+    expect(asked).not.toContain('context');
+    expect(listed).toContain('agent-journal');
   });
 
   test(`should explain itself on stderr and fail when it was a mistake`, () => {
@@ -731,6 +766,44 @@ describe('the exact output', () => {
     );
   });
 
+  test(`should skip the most recent matches of a filter by the offset, then apply the limit`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ENTRIES);
+
+    // Act
+    const all = rows(run(store, ['list', '--all']));
+    const page = rows(run(store, ['list', '--offset', '1', '--limit', '2']));
+
+    // Assert
+    expect(page.map((row) => row.id)).toEqual(all.slice(-3, -1).map((row) => row.id));
+  });
+
+  test(`should print nothing when the offset is past every match`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ENTRIES);
+
+    // Act
+    const listed = run(store, ['list', '--offset', '99']);
+
+    // Assert
+    expect(listed).toBe('');
+  });
+
+  test(`should refuse an offset that is not a number`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ENTRIES);
+
+    // Act
+    const result = fails(store, ['list', '--offset', 'x']);
+
+    // Assert
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('--offset takes a number');
+  });
+
   test(`should apply a range before the limit`, () => {
     // Arrange
     const store = fixture();
@@ -747,7 +820,10 @@ describe('the exact output', () => {
     // Arrange
     const store = fixture();
     /** Older than the limit reaches, so its long name must not widen the column. */
-    seed(store, [{ stem: '2026-08-01T080000Z', project: 'a-much-longer-project-name', summary: 'Out of reach.' }, ...ENTRIES]);
+    seed(store, [
+      { stem: '2026-08-01T080000Z', project: 'a-much-longer-project-name', summary: 'Out of reach.' },
+      ...ENTRIES,
+    ]);
 
     // Act
     const shown = terminal(store, ['list', '--limit', '3'], { env: { NO_COLOR: '1' } });
@@ -762,7 +838,6 @@ describe('the exact output', () => {
       ].join('\n'),
     );
   });
-
 });
 
 describe('files that are not entries it can read', () => {
@@ -1128,4 +1203,3 @@ describe('local days', () => {
     expect(listed).toEqual(['The 8th, first second.']);
   });
 });
-

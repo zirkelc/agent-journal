@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { accessSync, constants, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 import { ROOT } from './helpers.js';
 
@@ -13,25 +13,34 @@ import { ROOT } from './helpers.js';
 type Agent = {
   name: string;
   manifest: string;
-  /** The only variable that agent substitutes, and so the only one a path may use. */
-  rootVar: string;
-  /**
-   * Whether the hook command wraps the path in double quotes, so a plugin root
-   * with a space in it stays one word when the shell runs it.
-   */
-  quoted: boolean;
-};
+} & (
+  | {
+      /** The agent runs a shell command at session start. */
+      kind: 'command';
+      /** The only variable that agent substitutes, and so the only one a path may use. */
+      rootVar: string;
+      /**
+       * Whether the hook command wraps the path in double quotes, so a plugin root
+       * with a space in it stays one word when the shell runs it.
+       */
+      quoted: boolean;
+    }
+  | {
+      /** The agent loads a hooks module, which runs inside it and needs no command. */
+      kind: 'module';
+    }
+);
 
 const AGENTS: Array<Agent> = [
   {
     name: 'Claude Code',
     manifest: join('.claude-plugin', 'plugin.json'),
-    rootVar: 'CLAUDE_PLUGIN_ROOT',
-    quoted: true,
+    kind: 'module',
   },
   {
     name: 'Codex',
     manifest: join('.codex-plugin', 'plugin.json'),
+    kind: 'command',
     rootVar: 'PLUGIN_ROOT',
     quoted: false,
   },
@@ -92,7 +101,11 @@ describe.each(AGENTS)('the $name plugin', (agent) => {
     expect(plugin.commands).toBeUndefined();
     expect(plugin.skills).toBeUndefined();
   });
+});
 
+const COMMAND_AGENTS = AGENTS.flatMap((agent) => (agent.kind === 'command' ? [agent] : []));
+
+describe.each(COMMAND_AGENTS)('the $name hook command', (agent) => {
   test(`should name a hook script that exists and can be run`, () => {
     // Arrange
     const hooks = read(read(agent.manifest).hooks);
@@ -135,6 +148,28 @@ describe.each(AGENTS)('the $name plugin', (agent) => {
   });
 });
 
+describe('the Claude Code hooks module', () => {
+  /**
+   * Claude Code runs the plugin as one hooks module: it puts the rules into each
+   * conversation's context itself, so there is no shell command to run at
+   * session start, and the journal pane lives in the same module.
+   */
+  test(`should load one module and no command hook`, () => {
+    // Arrange
+    const plugin = read(join('.claude-plugin', 'plugin.json'));
+    const hooks = read(plugin.hooks);
+
+    // Act
+    const modules: Array<string> = hooks.modules;
+
+    // Assert
+    expect(hooks.hooks).toBeUndefined();
+    expect(modules.length).toBe(1);
+    expect(statSync(join(ROOT, dirname(plugin.hooks), modules[0]!)).isFile()).toBe(true);
+    expect(statSync(join(ROOT, plugin.types)).isFile()).toBe(true);
+  });
+});
+
 describe('the Codex marketplace', () => {
   test(`should offer this repository as the plugin it holds`, () => {
     // Arrange, Act
@@ -150,42 +185,20 @@ describe('the Codex marketplace', () => {
   });
 });
 
-describe('the two adapters', () => {
-  function deliver(directory: string): string {
-    return execFileSync(join(ROOT, 'adapters', directory, 'session-start.sh'), {
+describe('the Codex adapter', () => {
+  test(`should name itself and the session`, () => {
+    // Arrange, Act
+    const out = execFileSync(join(ROOT, 'adapters', 'codex', 'session-start.sh'), {
       encoding: 'utf8',
       input: JSON.stringify({ session_id: 'shared-1', cwd: ROOT, source: 'startup' }),
-      env: { ...process.env, CLAUDE_PLUGIN_ROOT: ROOT, PLUGIN_ROOT: ROOT },
+      env: { ...process.env, PLUGIN_ROOT: ROOT },
     });
-  }
-
-  /**
-   * They share `common.sh`, so the same payload has to come out the same apart
-   * from the one thing each is meant to answer differently. Comparing the rest
-   * is what stops one drifting when the other is fixed.
-   */
-  test(`should encode the same session identically but for the agent it names`, () => {
-    // Arrange
-    const claude = deliver('claude-code');
-    const codex = deliver('codex');
-
-    // Act
-    const withoutAgent = (rendered: string) => rendered.replaceAll(/agent`?: `?\w+/g, 'agent: X');
+    const rendered = JSON.parse(out).hookSpecificOutput;
 
     // Assert
-    expect(withoutAgent(claude)).toBe(withoutAgent(codex));
-    expect(claude).not.toBe(codex);
-  });
-
-  test(`should each name themselves`, () => {
-    // Arrange, Act
-    const rendered = (out: string) => JSON.parse(out).hookSpecificOutput;
-
-    // Assert
-    expect(rendered(deliver('claude-code')).hookEventName).toBe('SessionStart');
-    expect(rendered(deliver('claude-code')).additionalContext).toContain('`agent`: `claude`');
-    expect(rendered(deliver('codex')).additionalContext).toContain('`agent`: `codex`');
-    expect(rendered(deliver('codex')).additionalContext).toContain('shared-1');
+    expect(rendered.hookEventName).toBe('SessionStart');
+    expect(rendered.additionalContext).toContain('`agent`: `codex`');
+    expect(rendered.additionalContext).toContain('shared-1');
   });
 });
 

@@ -1,0 +1,919 @@
+import { describe, expect, test } from 'claude-code/testing';
+import { localDayTime } from '../hooks/format.js';
+import { busyNotice } from '../hooks/journal.js';
+import {
+  AGENT_TYPE,
+  COMMAND,
+  PANE_ID,
+  PLUGIN,
+  RULES_MARK,
+  TOOL_LIST,
+  TOOL_READ,
+  TOOL_SEARCH,
+  toolName,
+} from '../hooks/names.js';
+import { journal, JOURNAL_DIR, line, PANE, RECALL, SESSION, textOf, world } from './world.js';
+
+/** A turn of the wheel over the journal pane, before the hook decides where it goes. */
+const SCROLL = {
+  component: 'Pane',
+  requestId: PANE_ID,
+  offset: 0,
+  by: 1,
+  bodyRows: 30,
+  contentRows: 30,
+  origin: { kind: 'person' },
+} as const;
+
+/** A prompt the person typed and sent, as the engine raises it. */
+const typed = (text: string) => ({ text, wait: false, origin: { kind: 'composer' } }) as const;
+
+describe('register', () => {
+  test('registers the three tools, the hidden agent and the command at session start', async ($, on) => {
+    // Arrange
+    const kept = world(on);
+
+    // Act
+    await $.session.start(SESSION);
+
+    // Assert
+    expect(kept.registered.tools).toEqual(['list', 'search', 'read']);
+    expect(kept.registered.commands).toEqual([COMMAND]);
+    expect(kept.registered.agents.length).toBe(1);
+    const agent = kept.registered.agents[0]!;
+    expect(agent.model).toBe('inherit');
+    expect(agent.tools).toEqual([toolName(TOOL_LIST), toolName(TOOL_SEARCH), toolName(TOOL_READ)]);
+    expect(agent.disallowedTools).toEqual(['Write', 'Edit', 'NotebookEdit', 'Bash']);
+  });
+
+  test('the search agent is hidden from the main model and its tools are deferred, matched by their names', async ($, on) => {
+    // Arrange
+    world(on);
+    on('tool.describe', ($, e) => ({ name: e.tool, description: '', isDeferred: false }) as never);
+    await $.session.start(SESSION);
+
+    // Act
+    const offer = await $.agent.offer({ agent: AGENT_TYPE, description: '', source: 'plugin' } as never);
+    const tools = await Promise.all(
+      [TOOL_LIST, TOOL_SEARCH, TOOL_READ].map((name) =>
+        $.tool.describe({ tool: toolName(name), description: 'Reads the journal.' } as never),
+      ),
+    );
+
+    // Assert
+    expect(offer.isOffered).toBe(false);
+    expect(tools.map((tool) => (tool as { isDeferred: boolean }).isDeferred)).toEqual([true, true, true]);
+  });
+
+  test('the rules for writing the journal go to the main conversation as a marked row of their own, once', async ($, on) => {
+    // Arrange
+    const kept = world(on, { context: 'Standing rules.\n\n## Journal\n' });
+    await $.session.start(SESSION);
+    const engine = { name: 'claudeMd', text: 'Project rules.' };
+
+    // Act
+    const [result] = await Promise.all([
+      $.prompt.context({ blocks: [engine] } as never),
+      $.prompt.context({ blocks: [engine] } as never),
+    ]);
+    await $.prompt.context({ blocks: [engine] } as never);
+
+    // Assert
+    expect(result.blocks).toEqual([engine]);
+    expect(kept.notes).toEqual([`${RULES_MARK}\nStanding rules.\n\n## Journal`]);
+    const made = kept.runs.filter((run) => run.argv[1] === 'context');
+    expect(made.length).toBe(1);
+    expect(made[0]!.argv.slice(1)).toEqual([
+      'context',
+      '--cwd',
+      '/work',
+      '--session-id',
+      'session-1',
+      '--agent',
+      'claude/opus-5-5',
+    ]);
+  });
+
+  test('a conversation that holds the rules\u2019 mark, as a resumed one does, gets no second copy, and their text alone is no mark', async ($, on) => {
+    // Arrange
+    const resumed = world(on, { context: 'Standing rules.\n', conversation: ['hi', `${RULES_MARK}\nStanding rules.`] });
+    await $.session.start(SESSION);
+
+    // Act
+    await $.prompt.context({ blocks: [] } as never);
+
+    // Assert
+    expect(resumed.notes).toEqual([]);
+  });
+
+  test('rules quoted in the conversation without the mark do not count as given', async ($, on) => {
+    // Arrange
+    const kept = world(on, { context: 'Standing rules.\n', conversation: ['Look at this: Standing rules.'] });
+    await $.session.start(SESSION);
+
+    // Act
+    await $.prompt.context({ blocks: [] } as never);
+
+    // Assert
+    expect(kept.notes.length).toBe(1);
+  });
+
+  test('a CLI that cannot give the rules adds nothing', async ($, on) => {
+    // Arrange
+    const kept = world(on, { failing: 'context' });
+    await $.session.start(SESSION);
+
+    // Act
+    await $.prompt.context({ blocks: [] } as never);
+
+    // Assert
+    expect(kept.notes).toEqual([]);
+  });
+
+  test('a compaction brings the rules back once, even with the context read again at the same time', async ($, on) => {
+    // Arrange
+    const kept = world(on, { context: 'Standing rules.\n' });
+    await $.session.start(SESSION);
+    await $.prompt.context({ blocks: [] } as never);
+    const compaction = { trigger: 'auto', messages: [{ role: 'user', text: 'The summary.', toolUses: [] }] };
+
+    // Act
+    await $.session.compact(compaction as never);
+    await Promise.all([kept.clock.settle(), $.prompt.context({ blocks: [] } as never)]);
+
+    // Assert
+    expect(kept.notes.length).toBe(2);
+  });
+
+  test('a subagent\u2019s compaction and a precompute give the main conversation nothing', async ($, on) => {
+    // Arrange
+    const kept = world(on, { context: 'Standing rules.\n', conversation: [`${RULES_MARK}\nStanding rules.`] });
+    await $.session.start(SESSION);
+    const compaction = { trigger: 'auto', messages: [{ role: 'user', text: 'The summary.', toolUses: [] }] };
+
+    // Act
+    await $.session.compact({ ...compaction, agentId: 'agent-1' } as never);
+    await $.session.compact({ ...compaction, trigger: 'precompute' } as never);
+    await kept.clock.settle();
+
+    // Assert
+    expect(kept.notes).toEqual([]);
+  });
+
+  test('where prompt.context does not run, the first prompt carries the rules as context, and the next one none', async ($, on) => {
+    // Arrange
+    const kept = world(on, { context: 'Standing rules.\n' });
+    await $.session.start(SESSION);
+
+    // Act
+    await $.prompt.submit(typed('first'));
+    await $.prompt.submit(typed('second'));
+
+    // Assert
+    expect(kept.prompts).toEqual([
+      { text: 'first', context: [`${RULES_MARK}\nStanding rules.`] },
+      { text: 'second', context: [] },
+    ]);
+    expect(kept.notes).toEqual([]);
+  });
+
+  test('a prompt after the rules came through prompt.context adds no second copy', async ($, on) => {
+    // Arrange
+    const kept = world(on, { context: 'Standing rules.\n' });
+    await $.session.start(SESSION);
+    await $.prompt.context({ blocks: [] } as never);
+
+    // Act
+    await $.prompt.submit(typed('first'));
+
+    // Assert
+    expect(kept.notes).toEqual([`${RULES_MARK}\nStanding rules.`]);
+    expect(kept.prompts).toEqual([{ text: 'first', context: [] }]);
+  });
+
+  test('a prompt submitted while prompt.context still appends the rules waits for it and adds no second copy', async ($, on) => {
+    // Arrange
+    let release = () => {};
+    const kept = world(on, {
+      context: 'Standing rules.\n',
+      holdAppend: new Promise<void>((resolve) => (release = resolve)),
+    });
+    await $.session.start(SESSION);
+
+    // Act
+    const delivered = $.prompt.context({ blocks: [] } as never);
+    await kept.clock.settle();
+    const submitted = $.prompt.submit(typed('first'));
+    await kept.clock.settle();
+    release();
+    await Promise.all([delivered, submitted]);
+
+    // Assert
+    expect(kept.notes.length).toBe(1);
+    expect(kept.prompts).toEqual([{ text: 'first', context: [] }]);
+  });
+
+  test('after a compaction the mod does not see, the next prompt carries the rules again', async ($, on) => {
+    // Arrange
+    const kept = world(on, { context: 'Standing rules.\n' });
+    await $.session.start(SESSION);
+    await $.prompt.submit(typed('first'));
+    await $.turn.start({ text: 'first', turnId: 'turn-1' });
+    /** The conversation as the engine leaves it after a compaction no hook of this mod ran on. */
+    kept.compactUnseen();
+
+    // Act
+    await $.prompt.submit(typed('after'));
+
+    // Assert
+    expect(kept.prompts.map((prompt) => prompt.context)).toEqual([
+      [`${RULES_MARK}\nStanding rules.`],
+      [`${RULES_MARK}\nStanding rules.`],
+    ]);
+  });
+
+  test('prompt.context while a prompt with the rules waits to enter adds no second copy', async ($, on) => {
+    // Arrange
+    let release = () => {};
+    const kept = world(on, {
+      context: 'Standing rules.\n',
+      holdSubmit: new Promise<void>((resolve) => (release = resolve)),
+    });
+    await $.session.start(SESSION);
+
+    // Act
+    const submitted = $.prompt.submit(typed('first'));
+    await kept.clock.settle();
+    await $.prompt.context({ blocks: [] } as never);
+    release();
+    await submitted;
+
+    // Assert
+    expect(kept.prompts).toEqual([{ text: 'first', context: [`${RULES_MARK}\nStanding rules.`] }]);
+    expect(kept.notes).toEqual([]);
+  });
+
+  test('prompt.context and a prompt at the same time give the rules once', async ($, on) => {
+    // Arrange
+    const kept = world(on, { context: 'Standing rules.\n' });
+    await $.session.start(SESSION);
+
+    // Act
+    await Promise.all([$.prompt.submit(typed('first')), $.prompt.context({ blocks: [] } as never)]);
+
+    // Assert
+    const copies = kept.notes.length + kept.prompts.flatMap((prompt) => prompt.context).length;
+    expect(copies).toBe(1);
+  });
+
+  test('two prompts submitted at the same time carry the rules once', async ($, on) => {
+    // Arrange
+    const kept = world(on, { context: 'Standing rules.\n' });
+    await $.session.start(SESSION);
+
+    // Act
+    await Promise.all([$.prompt.submit(typed('a')), $.prompt.submit(typed('b'))]);
+
+    // Assert
+    expect(kept.prompts).toEqual([
+      { text: 'a', context: [`${RULES_MARK}\nStanding rules.`] },
+      { text: 'b', context: [] },
+    ]);
+  });
+
+  test('a prompt into a conversation that holds the rules does not wait for the CLI', async ($, on) => {
+    // Arrange
+    const kept = world(on, {
+      context: 'Standing rules.\n',
+      conversation: [`${RULES_MARK}\nStanding rules.`],
+      holdContext: new Promise<void>(() => {}),
+    });
+    await $.session.start(SESSION);
+    let isEntered = false;
+
+    // Act
+    void $.prompt.submit(typed('first')).then(() => (isEntered = true));
+    await kept.clock.settle();
+
+    // Assert
+    expect(isEntered).toBe(true);
+    expect(kept.prompts).toEqual([{ text: 'first', context: [] }]);
+  });
+
+  test('a CLI run that failed at the start is tried again for the first prompt', async ($, on) => {
+    // Arrange
+    const kept = world(on, { context: 'Standing rules.\n', failsOnce: 'context' });
+    await $.session.start(SESSION);
+    await kept.clock.settle();
+
+    // Act
+    await $.prompt.submit(typed('first'));
+
+    // Assert
+    expect(kept.prompts).toEqual([{ text: 'first', context: [`${RULES_MARK}\nStanding rules.`] }]);
+  });
+
+  test('a compaction after a prompt carried the rules gives them again', async ($, on) => {
+    // Arrange
+    const kept = world(on, { context: 'Standing rules.\n' });
+    await $.session.start(SESSION);
+    await $.prompt.submit(typed('first'));
+    const compaction = { trigger: 'auto', messages: [{ role: 'user', text: 'The summary.', toolUses: [] }] };
+
+    // Act
+    await $.session.compact(compaction as never);
+    await kept.clock.settle();
+
+    // Assert
+    expect(kept.notes).toEqual([`${RULES_MARK}\nStanding rules.`]);
+  });
+
+  test('a list call runs the CLI in the session directory with the filters', async ($, on) => {
+    // Arrange
+    const kept = world(on, { list: line('2026-10-05T143000Z', 'repo', 'Did a thing') });
+    await $.session.start(SESSION);
+
+    // Act
+    const result = await $.tool.call({ tool: toolName(TOOL_LIST), since: '2026-09-28', project: '.' } as never);
+
+    // Assert
+    expect(kept.queries().length).toBe(1);
+    expect(kept.queries()[0]!.argv.slice(1)).toEqual([
+      'list',
+      '--since',
+      '2026-09-28',
+      '--project',
+      '.',
+      '--limit',
+      '50',
+    ]);
+    expect(kept.queries()[0]!.init?.cwd).toBe('/work');
+    expect(JSON.stringify(result)).toContain('Did a thing');
+  });
+
+  test('a search text that would read as a flag is refused before the CLI runs', async ($, on) => {
+    // Arrange
+    const kept = world(on);
+    await $.session.start(SESSION);
+
+    // Act
+    const result = await $.tool.call({ tool: toolName(TOOL_SEARCH), text: '--all' } as never);
+
+    // Assert
+    expect(kept.queries().length).toBe(0);
+    expect(JSON.stringify(result)).toContain('must not start with');
+  });
+
+  test('a read call takes only an entry id', async ($, on) => {
+    // Arrange
+    const kept = world(on);
+    await $.session.start(SESSION);
+
+    // Act
+    const results = await Promise.all(
+      ['../secrets', '2026-10-07'].map((id) => $.tool.call({ tool: toolName(TOOL_READ), id } as never)),
+    );
+
+    // Assert
+    expect(kept.queries().length).toBe(0);
+    for (const result of results) expect(JSON.stringify(result)).toContain('not an entry id');
+  });
+
+  test('/agent-journal with a question opens the pane and asks the agent with the recall text', async ($, on) => {
+    // Arrange
+    const kept = world(on, { context: RECALL });
+    await $.session.start(SESSION);
+
+    // Act
+    const result = await $.command.run(journal('what did we fix last week?'));
+    await kept.clock.settle();
+
+    // Assert
+    expect(result.text).not.toContain('did not start');
+    expect(kept.opened.map((open) => open.id)).toEqual([PANE_ID]);
+    const drawn = textOf(await $.ui.render(PANE as never));
+    expect(drawn).toContain('› what did we fix last week?');
+    const recall = kept.queries().find((run) => run.argv[1] === 'context')!;
+    expect(recall.argv.slice(1)).toEqual([
+      'context',
+      '--recall',
+      '--cwd',
+      '/work',
+      '--session-id',
+      'session-1',
+      '--agent',
+      'claude/opus-5-5',
+    ]);
+    expect(kept.spawned.length).toBe(1);
+    expect(JSON.stringify(kept.spawned[0])).toContain(`"subagent_type":"${AGENT_TYPE}"`);
+    expect((kept.spawned[0] as { prompt: string }).prompt).toContain('The recall text.');
+    expect((kept.spawned[0] as { prompt: string }).prompt).toContain('what did we fix last week?');
+    expect((kept.spawned[0] as { prompt: string }).prompt).toContain('pass `project` `.`');
+  });
+
+  test('a spawn that gives no agent fails its question and leaves the chat free for the next', async ($, on) => {
+    // Arrange
+    const kept = world(on, { context: RECALL });
+    await $.session.start(SESSION);
+
+    // Act
+    const first = await $.command.run(journal('first?'));
+    const second = await $.command.run(journal('second?'));
+    await kept.clock.settle();
+
+    // Assert
+    expect(first.text).toBe('The search started without an agent to wait for.');
+    expect(second.text).toBe('The search started without an agent to wait for.');
+    expect(kept.spawned.length).toBe(2);
+  });
+
+  test('a question while another is open starts nothing and says so, in the reply and under the input', async ($, on) => {
+    // Arrange
+    let release = () => {};
+    const holdSpawn = new Promise<void>((resolve) => (release = resolve));
+    const kept = world(on, { context: RECALL, holdSpawn });
+    await $.session.start(SESSION);
+    const first = $.command.run(journal('first?'));
+    for (let turn = 0; turn < 50 && kept.spawned.length === 0; turn++) await Promise.resolve();
+
+    // Act
+    const reply = await $.command.run(journal('second?'));
+    await $.ui.render(PANE as never);
+    await $.ui.input({ plugin: PLUGIN, key: 'ask', text: 'third?' });
+    const drawn = textOf(await $.ui.render(PANE as never));
+    release();
+    await first;
+
+    // Assert
+    expect(reply.text).toBe(busyNotice('second?'));
+    expect(kept.spawned.length).toBe(1);
+    expect(drawn).toContain(busyNotice('third?'));
+  });
+
+  test('a suggested question in the pane is asked through the slash command', async ($, on) => {
+    // Arrange
+    const kept = world(on, { context: RECALL });
+    await $.session.start(SESSION);
+    await $.command.run(journal());
+    await kept.clock.settle();
+    await $.ui.render(PANE as never);
+    await $.ui.press({ plugin: PLUGIN, key: 'open-ask' });
+    await $.ui.render(PANE as never);
+
+    // Act
+    await $.ui.press({ plugin: PLUGIN, key: 'suggest:0' });
+    await kept.clock.settle();
+
+    // Assert
+    expect(kept.spawned.length).toBe(1);
+    expect((kept.spawned[0] as { prompt: string }).prompt).toContain('What did we do today?');
+  });
+
+  test('a question goes to Haiku until another model is picked in the Ask view, and the pick is stored', async ($, on) => {
+    // Arrange
+    const kept = world(on, { context: RECALL });
+    await $.session.start(SESSION);
+    await $.command.run(journal());
+    await kept.clock.settle();
+    await $.ui.render(PANE as never);
+    await $.ui.press({ plugin: PLUGIN, key: 'open-ask' });
+    await $.ui.render(PANE as never);
+    await $.ui.press({ plugin: PLUGIN, key: 'suggest:0' });
+    await kept.clock.settle();
+    const first = kept.spawned[0] as { model?: string };
+
+    // Act
+    await $.ui.press({ plugin: PLUGIN, key: 'model:sonnet' });
+    await kept.clock.settle();
+    const drawn = await $.ui.render(PANE as never);
+    await $.ui.input({ plugin: PLUGIN, key: 'ask', text: 'and on Sonnet?' });
+    await kept.clock.settle();
+
+    // Assert
+    expect(first.model).toBe('haiku');
+    expect(kept.spawned.length).toBe(2);
+    expect((kept.spawned[1] as { model?: string }).model).toBe('sonnet');
+    expect(kept.stored.get('model')).toBe('sonnet');
+    expect(JSON.stringify(drawn)).toContain('Session (opus-5-5)');
+  });
+
+  test('a question asked on the session\u2019s model names no model, so the agent type\u2019s inherit applies', async ($, on) => {
+    // Arrange
+    const kept = world(on, { context: RECALL });
+    kept.stored.set('model', 'inherit');
+    await $.session.start(SESSION);
+
+    // Act
+    await $.command.run(journal('anything?'));
+    await kept.clock.settle();
+
+    // Assert
+    expect(kept.spawned.length).toBe(1);
+    expect((kept.spawned[0] as { model?: string }).model).toBe(undefined);
+  });
+
+  test('a stored model the Ask view no longer offers counts as Haiku', async ($, on) => {
+    // Arrange
+    const kept = world(on, { context: RECALL });
+    kept.stored.set('model', 'gpt-4');
+    await $.session.start(SESSION);
+
+    // Act
+    await $.command.run(journal('anything?'));
+    await kept.clock.settle();
+
+    // Assert
+    expect((kept.spawned[0] as { model?: string }).model).toBe('haiku');
+  });
+
+  test('the project choice is stored, and a later session opens on it', async ($, on) => {
+    // Arrange
+    const kept = world(on, { list: line('2026-10-05T143000Z', 'repo', 'Newer') });
+    await $.session.start(SESSION);
+    await $.command.run(journal());
+    await kept.clock.settle();
+    await $.ui.render(PANE as never);
+
+    // Act
+    await $.ui.press({ plugin: PLUGIN, key: 'scope:all' });
+    await kept.clock.settle();
+
+    // Assert
+    expect(kept.stored.get('scope')).toBe('all');
+    const lists = kept.queries().filter((run) => run.argv[1] === 'list');
+    expect(lists.at(-1)!.argv.slice(1)).toEqual(['list', '--limit', '201']);
+  });
+
+  test('a session with a stored project choice lists by it, and an unknown one counts as the current project', async ($, on) => {
+    // Arrange
+    const kept = world(on, { list: line('2026-10-05T143000Z', 'repo', 'Newer') });
+    kept.stored.set('scope', 'all');
+    await $.session.start(SESSION);
+
+    // Act
+    await $.command.run(journal());
+    await kept.clock.settle();
+    kept.stored.set('scope', 'everything');
+    await $.ui.render(PANE as never);
+    await $.ui.press({ plugin: PLUGIN, key: 'date:all' });
+    await kept.clock.settle();
+
+    // Assert
+    const lists = kept.queries().filter((run) => run.argv[1] === 'list');
+    expect(lists[0]!.argv.slice(1)).toEqual(['list', '--limit', '201']);
+    expect(lists.at(-1)!.argv.slice(1)).toEqual(['list', '--project', '.', '--limit', '201']);
+  });
+
+  test('the list names the journal\u2019s folder once the CLI has said where it is', async ($, on) => {
+    // Arrange
+    const kept = world(on, { list: line('2026-10-05T143000Z', 'repo', 'Newer') });
+    await $.session.start(SESSION);
+
+    // Act
+    await $.command.run(journal());
+    await kept.clock.settle();
+    const drawn = textOf(await $.ui.render(PANE as never));
+
+    // Assert
+    expect(drawn).toContain(JOURNAL_DIR);
+  });
+
+  test('a recall the CLI cannot give fails the question without starting the agent', async ($, on) => {
+    // Arrange
+    const kept = world(on, { failing: 'context' });
+    await $.session.start(SESSION);
+
+    // Act
+    await $.command.run(journal('anything?'));
+    await kept.clock.settle();
+    const drawn = textOf(await $.ui.render(PANE as never));
+
+    // Assert
+    expect(kept.spawned.length).toBe(0);
+    expect(drawn).toContain('context failed');
+  });
+
+  test('/agent-journal alone lists the current project newest first', async ($, on) => {
+    // Arrange
+    const kept = world(on, {
+      list: [line('2026-10-04T090000Z', 'repo', 'Older'), line('2026-10-05T143000Z', 'repo', 'Newer')].join('\n'),
+    });
+    await $.session.start(SESSION);
+
+    // Act
+    const result = await $.command.run(journal());
+    await kept.clock.settle();
+    const drawn = textOf(await $.ui.render(PANE as never));
+
+    // Assert
+    expect(result).toEqual({});
+    const listed = kept.queries().find((run) => run.argv[1] === 'list')!;
+    expect(listed.argv.slice(1)).toEqual(['list', '--project', '.', '--limit', '201']);
+    expect(drawn.indexOf('Newer') < drawn.indexOf('Older')).toBe(true);
+  });
+
+  test('the list scrolls its own rows, keeps the engine\u2019s window, and loads the next page near its end', async ($, on) => {
+    // Arrange
+    const entries = Array.from({ length: 230 }, (_, at) => {
+      const day = String(1 + Math.floor(at / 10)).padStart(2, '0');
+      return line(`2026-09-${day}T${10 + (at % 10)}0000Z`, 'repo', `Entry ${at}`);
+    });
+    const kept = world(on, { list: entries.join('\n') });
+    await $.session.start(SESSION);
+    await $.command.run(journal());
+    await kept.clock.settle();
+    const first = textOf(await $.ui.render(PANE as never));
+
+    // Act
+    const scrolled = await $.ui.scroll({ ...SCROLL, by: 5 } as never);
+    const later = textOf(await $.ui.render(PANE as never));
+    await $.ui.scroll({ ...SCROLL, by: 1_000 } as never);
+    await kept.clock.settle();
+
+    // Assert
+    expect(first).toContain('Entry 229');
+    expect(first).not.toContain('Entry 100');
+    expect(scrolled).toEqual({});
+    expect(later).not.toContain('Entry 229');
+    expect(later).toContain('Entry 224');
+    const pages = kept
+      .queries()
+      .filter((run) => run.argv[1] === 'list')
+      .map((run) => run.argv.slice(2).join(' '));
+    expect(pages).toEqual(['--project . --limit 201', '--project . --limit 201 --offset 200']);
+  });
+
+  test('the next page asks past the entries loaded and goes under them, oldest last', async ($, on) => {
+    // Arrange
+    const journalLines = Array.from({ length: 300 }, (_, at) => {
+      const day = String(1 + Math.floor(at / 10)).padStart(2, '0');
+      const month = at < 150 ? '08' : '09';
+      return line(`2026-${month}-${day}T${10 + (at % 10)}0000Z`, 'repo', `Entry ${at}`);
+    });
+    /** Prints like the CLI: the newest `limit` after skipping `offset`, oldest first. */
+    const page = (argv: ReadonlyArray<string>) => {
+      const value = (flag: string) => Number(argv[argv.indexOf(flag) + 1] ?? 0);
+      const offset = argv.includes('--offset') ? value('--offset') : 0;
+      const end = journalLines.length - offset;
+      return journalLines.slice(Math.max(end - value('--limit'), 0), end).join('\n');
+    };
+    const kept = world(on, { list: page });
+    await $.session.start(SESSION);
+    await $.command.run(journal());
+    await kept.clock.settle();
+    await $.ui.render(PANE as never);
+
+    // Act
+    await $.ui.scroll({ ...SCROLL, by: 1_000 } as never);
+    await kept.clock.settle();
+    await $.ui.scroll({ ...SCROLL, by: 1_000 } as never);
+    const end = textOf(await $.ui.render(PANE as never));
+
+    // Assert
+    expect(end).toContain('Entry 0');
+    expect(end).not.toContain('Loading older entries');
+    const pages = kept
+      .queries()
+      .filter((run) => run.argv[1] === 'list')
+      .map((run) => run.argv.slice(2).join(' '));
+    expect(pages).toEqual(['--project . --limit 201', '--project . --limit 201 --offset 200']);
+  });
+
+  test('a date unit narrows the list to today\u2019s period, and a step goes one period back', async ($, on) => {
+    // Arrange
+    const kept = world(on, { list: line('2026-10-05T143000Z', 'repo', 'Did a thing') });
+    await $.session.start(SESSION);
+    await $.command.run(journal());
+    await kept.clock.settle();
+    await $.ui.render(PANE as never);
+    const month = localDayTime(new Date()).day.slice(0, 7);
+
+    // Act
+    await $.ui.press({ plugin: PLUGIN, key: 'date:month' });
+    await kept.clock.settle();
+    const drawn = textOf(await $.ui.render(PANE as never));
+    await $.ui.press({ plugin: PLUGIN, key: 'date:back' });
+    await kept.clock.settle();
+
+    // Assert
+    const dates = kept
+      .queries()
+      .filter((run) => run.argv[1] === 'list')
+      .map((run) => run.argv[run.argv.indexOf('--date') + 1]);
+    const [year, number] = month.split('-').map(Number) as [number, number];
+    const before = number === 1 ? `${year - 1}-12` : `${year}-${String(number - 1).padStart(2, '0')}`;
+    expect(dates.slice(1)).toEqual([month, before]);
+    expect(drawn).toContain('‹');
+    expect(drawn).toContain('›');
+  });
+
+  test('a new entry written to the journal joins the list from the newest page alone', async ($, on) => {
+    // Arrange
+    let lines = [line('2026-10-04T090000Z', 'repo', 'Older'), line('2026-10-05T143000Z', 'repo', 'Newer')];
+    const kept = world(on, { list: () => lines.join('\n') });
+    on('tool.call', { tool: 'Write' }, () => ({ result: 'written' }) as never);
+    await $.session.start(SESSION);
+    await $.command.run(journal());
+    await kept.clock.settle();
+    await $.ui.render(PANE as never);
+    lines = [...lines, line('2026-10-06T080000Z', 'repo', 'Newest')];
+
+    // Act
+    await $.tool.call({ tool: 'Write', file_path: `${JOURNAL_DIR}/2026-10-06T080000Z.md`, content: '' } as never);
+    await kept.clock.advance(1_000);
+    const drawn = textOf(await $.ui.render(PANE as never));
+
+    // Assert
+    const runs = kept.queries().map((run) => run.argv.slice(1).join(' '));
+    expect(runs).toEqual(['list --project . --limit 201', 'list --project . --limit 200']);
+    expect(drawn.indexOf('Newest') < drawn.indexOf('Newer')).toBe(true);
+    expect(drawn).toContain('Older');
+  });
+
+  test('a write to the journal syncs it, and the journal row says how far the sync got', async ($, on) => {
+    // Arrange
+    const kept = world(on, { isSyncOn: true, sync: 'committed 2026-10-06T080000Z · pushed to origin/main\n' });
+    on('tool.call', { tool: 'Write' }, () => ({ result: 'written' }) as never);
+    await $.session.start(SESSION);
+    await $.command.run(journal());
+    await kept.clock.settle();
+
+    // Act
+    await $.tool.call({ tool: 'Write', file_path: `${JOURNAL_DIR}/2026-10-06T080000Z.md`, content: '' } as never);
+    await $.tool.call({ tool: 'Write', file_path: `${JOURNAL_DIR}/2026-10-06T080001Z.md`, content: '' } as never);
+    await kept.clock.advance(1_000);
+    await kept.clock.settle();
+    const drawn = textOf(await $.ui.render(PANE as never));
+
+    // Assert
+    const syncs = kept.queries().filter((run) => run.argv[1] === 'sync');
+    expect(syncs.length).toBe(1);
+    expect(drawn).toContain('⇅ pushed to origin/main');
+  });
+
+  test('a write to the journal syncs it in a session that never opened the pane', async ($, on) => {
+    // Arrange
+    const kept = world(on, { isSyncOn: true, sync: 'committed 2026-10-06T080000Z · no remote\n' });
+    on('tool.call', { tool: 'Write' }, () => ({ result: 'written' }) as never);
+    await $.session.start(SESSION);
+    await kept.clock.settle();
+
+    // Act
+    await $.tool.call({ tool: 'Write', file_path: `${JOURNAL_DIR}/2026-10-06T080000Z.md`, content: '' } as never);
+    await kept.clock.advance(1_000);
+    await kept.clock.settle();
+
+    // Assert
+    expect(kept.queries().filter((run) => run.argv[1] === 'sync').length).toBe(1);
+  });
+
+  test('with sync off, neither a write to the journal nor the session\u2019s end runs the CLI for it', async ($, on) => {
+    // Arrange
+    const kept = world(on);
+    on('tool.call', { tool: 'Write' }, () => ({ result: 'written' }) as never);
+    await $.session.start(SESSION);
+    await kept.clock.settle();
+
+    // Act
+    await $.tool.call({ tool: 'Write', file_path: `${JOURNAL_DIR}/2026-10-06T080000Z.md`, content: '' } as never);
+    await kept.clock.advance(1_000);
+    await kept.clock.settle();
+    await $.session.end({ reason: 'prompt_input_exit', sessionId: 'session-1', resume: { id: 'session-1' } } as never);
+
+    // Assert
+    expect(kept.runs.filter((run) => run.argv[1] === 'sync').length).toBe(0);
+  });
+
+  test('the journal row shows the git icon only when the config turns sync on', async ($, on) => {
+    // Arrange
+    const kept = world(on);
+    await $.session.start(SESSION);
+
+    // Act
+    await $.command.run(journal());
+    await kept.clock.settle();
+    const drawn = textOf(await $.ui.render(PANE as never));
+
+    // Assert
+    expect(drawn).toContain(JOURNAL_DIR);
+    expect(drawn).not.toContain('⇅');
+  });
+
+  test('a write outside the journal does not sync', async ($, on) => {
+    // Arrange
+    const kept = world(on, { isSyncOn: true });
+    on('tool.call', { tool: 'Write' }, () => ({ result: 'written' }) as never);
+    await $.session.start(SESSION);
+    await $.command.run(journal());
+    await kept.clock.settle();
+
+    // Act
+    await $.tool.call({ tool: 'Write', file_path: '/work/notes.md', content: '' } as never);
+    await kept.clock.advance(1_000);
+    await kept.clock.settle();
+
+    // Assert
+    expect(kept.queries().filter((run) => run.argv[1] === 'sync').length).toBe(0);
+  });
+
+  test('the git icon shows from the config alone, and a push that failed adds its reason', async ($, on) => {
+    // Arrange
+    const kept = world(on, {
+      isSyncOn: true,
+      sync: 'committed 2026-10-06T080000Z · push failed: could not read Username\n',
+      exitCodes: { sync: 3 },
+    });
+    on('tool.call', { tool: 'Write' }, () => ({ result: 'written' }) as never);
+    await $.session.start(SESSION);
+    await $.command.run(journal());
+    await kept.clock.settle();
+    const before = textOf(await $.ui.render(PANE as never));
+
+    // Act
+    await $.tool.call({ tool: 'Write', file_path: `${JOURNAL_DIR}/2026-10-06T080000Z.md`, content: '' } as never);
+    await kept.clock.advance(1_000);
+    await kept.clock.settle();
+    const drawn = textOf(await $.ui.render(PANE as never));
+
+    // Assert
+    expect(before).toContain('⇅ git');
+    expect(drawn).toContain('⇅ push failed: could not read Username');
+  });
+
+  test('the session\u2019s end syncs what is left', async ($, on) => {
+    // Arrange
+    const kept = world(on, { isSyncOn: true });
+    await $.session.start(SESSION);
+    await kept.clock.settle();
+
+    // Act
+    await $.session.end({ reason: 'prompt_input_exit', sessionId: 'session-1', resume: { id: 'session-1' } } as never);
+
+    // Assert
+    expect(kept.runs.filter((run) => run.argv[1] === 'sync').length).toBe(1);
+  });
+
+  test('the session\u2019s end neither waits for a sync under way nor starts another', async ($, on) => {
+    // Arrange
+    let release = () => {};
+    const kept = world(on, { isSyncOn: true, holdSync: new Promise<void>((resolve) => (release = resolve)) });
+    on('tool.call', { tool: 'Write' }, () => ({ result: 'written' }) as never);
+    await $.session.start(SESSION);
+    await kept.clock.settle();
+    await $.tool.call({ tool: 'Write', file_path: `${JOURNAL_DIR}/2026-10-06T080000Z.md`, content: '' } as never);
+    await kept.clock.advance(1_000);
+
+    // Act
+    await $.session.end({ reason: 'prompt_input_exit', sessionId: 'session-1', resume: { id: 'session-1' } } as never);
+    const syncs = kept.runs.filter((run) => run.argv[1] === 'sync').length;
+    release();
+
+    // Assert
+    expect(syncs).toBe(1);
+  });
+
+  test('a CLI that lists without ids is named as too old instead of an empty journal', async ($, on) => {
+    // Arrange
+    const kept = world(on, { list: '2026-10-06 16:04  repo  An entry in the old layout\n' });
+    await $.session.start(SESSION);
+
+    // Act
+    await $.command.run(journal());
+    await kept.clock.settle();
+    const drawn = textOf(await $.ui.render(PANE as never));
+
+    // Assert
+    expect(drawn).toContain('agent-journal is older than this mod');
+    expect(drawn).not.toContain('No entries yet.');
+  });
+
+  test('the CLI of the checkout is found through a linked plugin root', async ($, on) => {
+    // Arrange
+    const kept = world(on, {
+      list: line('2026-10-05T143000Z', 'repo', 'Did a thing'),
+      lands: (path) => (path === '/repo/bin/agent-journal' ? path : path.includes('/bin/') ? undefined : '/repo'),
+    });
+    await $.session.start(SESSION);
+
+    // Act
+    await $.tool.call({ tool: toolName(TOOL_LIST) } as never);
+
+    // Assert
+    expect(kept.queries()[0]!.argv[0]).toBe('/repo/bin/agent-journal');
+  });
+
+  test('a spawn of the search agent by this mod is allowed, any other goes on to the checks', async ($, on) => {
+    // Arrange
+    world(on);
+    on('tool.check', () => ({ decision: 'ask', reason: 'the engine decides' }));
+    await $.session.start(SESSION);
+
+    // Act
+    const other = await $.tool.check({ tool: 'Agent', input: { subagent_type: 'general-purpose' } });
+    const tool = await $.tool.check({ tool: toolName(TOOL_LIST), input: {} });
+
+    // Assert
+    expect(other.decision).toBe('ask');
+    expect(tool.decision).toBe('allow');
+  });
+});

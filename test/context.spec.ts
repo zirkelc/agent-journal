@@ -61,7 +61,7 @@ describe('the rules', () => {
   test(`should print nothing when the instructions are missing`, () => {
     // Arrange
     const store = fixture();
-    rmSync(join(store.root, 'INSTRUCTIONS.md'));
+    rmSync(join(store.root, 'templates', 'INSTRUCTIONS.md'));
 
     // Act
     const result = context(store);
@@ -206,6 +206,6 @@ describe('the agent', () => {
     // Assert
     /** A label with nothing after it would read as a field the model must invent. */
     expect(fields(rendered).agent).toBe(undefined);
-    expect(rendered).not.toContain('agent:');
+    expect(rendered).not.toContain('- `agent`: `');
   });
 });

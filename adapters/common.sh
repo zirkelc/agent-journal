@@ -88,7 +88,7 @@ journal_agent() {
   fi
 }
 
-# Prints the instruction on stdin as the JSON both agents read at session start.
+# Prints the instruction on stdin as the JSON a SessionStart hook answers with.
 journal_emit_context() {
   awk '
     function escape(s) {

@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 /** `run` here is the installer script, so the one that drives the binary is renamed. */
 import { type Fixture, fails, fixture, output as capture, ROOT, run as runBin } from './helpers.js';
@@ -84,6 +84,18 @@ describe('install.sh', () => {
     }
   });
 
+  test(`should copy every file the Claude Code plugin's manifest and hooks name`, () => {
+    // Arrange, Act
+    const installed = install();
+
+    // Assert
+    const manifest = JSON.parse(readFileSync(join(installed.dataDir, '.claude-plugin', 'plugin.json'), 'utf8'));
+    const hooksFile = join(installed.dataDir, manifest.hooks);
+    const hooks = JSON.parse(readFileSync(hooksFile, 'utf8'));
+    const named = [manifest.types, ...hooks.modules.map((module: string) => join(dirname(manifest.hooks), module))];
+    for (const path of named) expect(existsSync(join(installed.dataDir, path))).toBe(true);
+  });
+
   test(`should render the instruction when run through the symlink`, () => {
     // Arrange
     const installed = install();
@@ -140,14 +152,7 @@ describe('install.sh', () => {
   test(`should say how to reach the commands when the bin directory is off PATH`, () => {
     // Arrange, Act
     const home = realpathSync(mkdtempSync(join(tmpdir(), 'agent-journal-install-')));
-    const output = run(home, [
-      '--prefix',
-      join(home, 'opt'),
-      '--source',
-      ROOT,
-      '--dir',
-      join(home, 'journal'),
-    ]);
+    const output = run(home, ['--prefix', join(home, 'opt'), '--source', ROOT, '--dir', join(home, 'journal')]);
 
     // Assert
     expect(output).toContain('is not on your PATH');
@@ -181,14 +186,7 @@ describe('install.sh', () => {
     const elsewhere = join(installed.home, 'elsewhere');
 
     // Act
-    const again = run(installed.home, [
-      '--prefix',
-      installed.prefix,
-      '--source',
-      ROOT,
-      '--dir',
-      elsewhere,
-    ]);
+    const again = run(installed.home, ['--prefix', installed.prefix, '--source', ROOT, '--dir', elsewhere]);
 
     // Assert
     /** Without this the entries would go somewhere nobody is looking. */
@@ -201,14 +199,7 @@ describe('install.sh', () => {
     const installed = install();
 
     // Act
-    const again = run(installed.home, [
-      '--prefix',
-      installed.prefix,
-      '--source',
-      ROOT,
-      '--dir',
-      installed.journalDir,
-    ]);
+    const again = run(installed.home, ['--prefix', installed.prefix, '--source', ROOT, '--dir', installed.journalDir]);
 
     // Assert
     expect(again).toContain('left as it is');
@@ -220,20 +211,11 @@ describe('install.sh', () => {
     const installed = install();
 
     // Act
-    const again = run(installed.home, [
-      '--prefix',
-      installed.prefix,
-      '--source',
-      ROOT,
-      '--dir',
-      installed.journalDir,
-    ]);
+    const again = run(installed.home, ['--prefix', installed.prefix, '--source', ROOT, '--dir', installed.journalDir]);
 
     // Assert
     expect(again).toContain('are linked into');
-    expect(realpathSync(join(installed.binDir, 'aj'))).toBe(
-      join(installed.dataDir, 'bin', 'agent-journal'),
-    );
+    expect(realpathSync(join(installed.binDir, 'aj'))).toBe(join(installed.dataDir, 'bin', 'agent-journal'));
   });
 });
 

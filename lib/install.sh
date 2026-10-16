@@ -78,7 +78,11 @@ journal_harness_manual() {
 journal_harness_note() {
   case $1 in
     claude)
-      printf '%s\n' 'Start a new session and ask it to write a journal entry.'
+      # The plugin is a hooks module, which older versions do not load, and
+      # they say nothing about it: the journal would just stay empty.
+      printf '%s\n' \
+        'Needs Claude Code 2.1.287 or later (claude --version).' \
+        'Start a new session and ask it to write a journal entry.'
       ;;
     codex)
       # Codex will not run a hook it has not been shown. This is the one step
