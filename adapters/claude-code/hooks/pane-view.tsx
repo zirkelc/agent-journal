@@ -13,6 +13,7 @@ import type {
 } from '../types';
 import type { Scope, SearchModel } from './agent.js';
 import { sanitize } from './cli.js';
+import { IS_ASK_ON } from './names.js';
 import {
   colorOf,
   column,
@@ -183,14 +184,14 @@ export function listLayoutOf(list: JournalList, now: Date, timeZone?: string): L
 
 /**
  * The rows around the list. Above it: the header and its margin, Ask and its
- * margin, the scope, the date, the rule, the project's name with its margin
+ * margin while the pane answers questions, the scope, the date, the rule, the project's name with its margin
  * when one shows, and the margin above the list. Below it: the row that ends
  * the list, and once the journal's folder is known, the rule and the status
  * line. Kept beside the views that draw them.
  */
 export function listOuterRows(model: Pick<PaneModel, 'scope' | 'currentProject' | 'list' | 'journalDir'>): number {
   const hasChip = model.scope === 'project' && (model.currentProject ?? model.list.entries[0]?.project);
-  return 2 + 2 + 1 + 1 + 1 + (hasChip ? 2 : 0) + 1 + 1 + (model.journalDir !== null ? 2 : 0);
+  return 2 + (IS_ASK_ON ? 2 : 0) + 1 + 1 + 1 + (hasChip ? 2 : 0) + 1 + 1 + (model.journalDir !== null ? 2 : 0);
 }
 
 /** Where the list's window stands: its first row, clamped, its height, and the furthest its first row goes. */
@@ -532,9 +533,11 @@ function listView(ui: Ui, actions: PaneActions, model: PaneModel): RenderElement
       : [];
   return (
     <Box flexDirection="column">
-      <Box flexDirection="row" marginBottom={1}>
-        {actionButton(ui, model, 'open-ask', '✦ Ask', () => actions.showChat())}
-      </Box>
+      {IS_ASK_ON && (
+        <Box flexDirection="row" marginBottom={1}>
+          {actionButton(ui, model, 'open-ask', '✦ Ask', () => actions.showChat())}
+        </Box>
+      )}
       {scopeView(ui, actions, model)}
       {dateView(ui, actions, model)}
       {ruleView(ui, model, 'rule:list')}

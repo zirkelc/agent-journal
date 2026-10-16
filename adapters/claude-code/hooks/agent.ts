@@ -1,5 +1,5 @@
 import type { ToolSpec } from 'claude-code';
-import { AGENT_NAME, AGENT_TOOLS, DENIED_TOOLS, TOOL_LIST, TOOL_READ, TOOL_SEARCH } from './names.js';
+import { TOOL_LIST, TOOL_READ, TOOL_SEARCH } from './names.js';
 
 /** How the agent's last line starts, the one that names the entries it used. */
 export const SOURCES_PREFIX = 'Sources:';
@@ -30,7 +30,7 @@ export const searchModelOf = (value: unknown): SearchModel =>
  * The agent's whole system prompt. It holds only what never changes: the clock,
  * the journal and the session arrive with each question, from the CLI.
  */
-const SYSTEM_PROMPT = [
+export const AGENT_PROMPT = [
   'You answer one question about past work from the user’s journal, then stop.',
   '',
   `You can only read the journal, with three tools: \`${TOOL_LIST}\` lists entries by date and project, \`${TOOL_SEARCH}\` finds a text in summaries and bodies, \`${TOOL_READ}\` returns one entry in full. Each takes the same filters the question’s context describes.`,
@@ -39,21 +39,6 @@ const SYSTEM_PROMPT = [
   '',
   `End with one last line, \`${SOURCES_PREFIX} \` followed by the id of every entry you used, comma-separated (\`${SOURCES_PREFIX} 2026-01-11T143000Z, 2026-01-12T091500Z\`). The reader shows those entries as a list of sources under the answer, so the answer itself does not need to name them.`,
 ].join('\n');
-
-/**
- * The agent type, registered once per load. It runs on the session's model
- * unless a question names another, so the model can change between questions.
- */
-export const agentSpec = () => ({
-  name: AGENT_NAME,
-  description: 'Answers a question about past work from the agent journal. Started only by /agent-journal.',
-  prompt: SYSTEM_PROMPT,
-  tools: AGENT_TOOLS,
-  disallowedTools: DENIED_TOOLS,
-  omitClaudeMd: true as const,
-  model: 'inherit',
-  maxTurns: 12,
-});
 
 const SCOPE_TEXT: Record<Scope, string> = {
   project:

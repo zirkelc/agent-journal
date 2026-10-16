@@ -5,7 +5,25 @@ export const PLUGIN = 'agent-journal';
 export const PANE_ID = 'journal';
 export const PANE_TITLE = 'Journal';
 export const COMMAND = 'agent-journal';
-export const COMMAND_DESCRIPTION = 'Open the journal, or ask it a question: /agent-journal what did we fix last week?';
+
+/**
+ * Whether the pane answers questions about the journal (its Ask view, and
+ * `/agent-journal <question>`), with the search agent and its three tools.
+ *
+ * Off for now, because the Claude Code plugin directory does not list a mod
+ * whose permission hook answers `allow`, and without one the search cannot
+ * run in auto mode. The auto mode classifier denies a spawn that no model
+ * response asked for, and Claude Code ignores an allow rule for the agent
+ * there (it would bypass the classifier). In the other modes the three tools
+ * ask the person each time unless they allow them. The code stays, and a
+ * later version may answer from the main conversation or with plain model
+ * calls instead of an agent.
+ */
+export const IS_ASK_ON: boolean = false;
+
+export const COMMAND_DESCRIPTION = IS_ASK_ON
+  ? 'Open the journal, or ask it a question: /agent-journal what did we fix last week?'
+  : 'Open the journal';
 
 /** The search agent: its short name, and the type the engine lists it under. */
 export const AGENT_NAME = 'search';
