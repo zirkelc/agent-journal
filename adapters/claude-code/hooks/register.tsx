@@ -124,13 +124,6 @@ export const register: Register = (on) => {
         const found = await $.session.messages({ agentId }).catch(() => null);
         return Array.isArray(found) ? found : [];
       },
-      isFile: async (path) => {
-        try {
-          return (await $.fs.stat(path)).kind === 'file';
-        } catch {
-          return false;
-        }
-      },
       realPath: async (path) => {
         try {
           return (await $.fs.stat(path, { resolve: true })).realPath;

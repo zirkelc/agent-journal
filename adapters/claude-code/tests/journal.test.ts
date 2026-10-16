@@ -66,7 +66,6 @@ function hostWith(spawn: Host['spawn']): Host {
     mainModel: async () => 'claude-opus-5-5',
     agentStatus: async () => undefined,
     agentMessages: async () => [],
-    isFile: async () => false,
     realPath: async () => undefined,
     run: async () => ({ exitCode: 0, stdout: 'The recall text.\n', stderr: '' }) as never,
     spawn,
@@ -402,7 +401,7 @@ describe('journal', () => {
       syncStateOf(run(0, 'committed 1 file · no remote\n')),
       syncStateOf(run(3, 'committed 1 file · push failed: timed out\n')),
       syncStateOf(run(1, '', '~/journal is not a git repository\n')),
-      { ...syncStateOf(run(-1, '', 'agent-journal could not run (timed out). Is it installed and on PATH?')) },
+      { ...syncStateOf(run(-1, '', 'agent-journal could not run (timed out).')) },
     ];
 
     // Assert

@@ -43,9 +43,6 @@ export const AGENT_TOOLS: ReadonlyArray<string> = [toolName(TOOL_LIST), toolName
 /** What the agent must never have, whatever it inherits. */
 export const DENIED_TOOLS: ReadonlyArray<string> = ['Write', 'Edit', 'NotebookEdit', 'Bash'];
 
-/** The executable on `PATH`, where the installer links it. */
-export const CLI_ON_PATH = 'agent-journal';
-
 /** The CLI the plugin ships, relative to its root. */
 export const CLI_IN_CHECKOUT = 'bin/agent-journal';
 

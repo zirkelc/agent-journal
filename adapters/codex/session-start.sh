@@ -30,25 +30,20 @@ set -u
 # broken pipe.
 payload=$(cat)
 
-self=$0
-case $self in
-  */*) ;;
-  *) self=./$self ;;
-esac
-root=${PLUGIN_ROOT:-$(cd "$(dirname "$self")/../.." 2>/dev/null && pwd)}
+# Codex names the plugin root. Every path is written out from it in full, and
+# none is worked out from where this script sits.
+[ -n "${PLUGIN_ROOT:-}" ] || exit 0
+[ -x "$PLUGIN_ROOT/bin/agent-journal" ] || exit 0
+[ -r "$PLUGIN_ROOT/adapters/common.sh" ] || exit 0
 
-[ -n "$root" ] || exit 0
-[ -x "$root/bin/agent-journal" ] || exit 0
-[ -r "$root/adapters/common.sh" ] || exit 0
-
-. "$root/adapters/common.sh"
+. "$PLUGIN_ROOT/adapters/common.sh"
 
 journal_read_payload <<EOF
 $payload
 EOF
 
 # Without a cwd in the payload, the core falls back to the directory it runs in.
-out=$("$root/bin/agent-journal" context \
+out=$("$PLUGIN_ROOT/bin/agent-journal" context \
   --cwd "$cwd" \
   --session-id "$session_id" \
   --agent "$(journal_agent codex)" 2>/dev/null) || exit 0

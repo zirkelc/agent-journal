@@ -22,7 +22,6 @@ export type Host = {
   agentStatus: (agentId: string) => Promise<string | undefined>;
   /** One agent's transcript, as role and text; empty when it cannot be read. */
   agentMessages: (agentId: string) => Promise<ReadonlyArray<{ role: string; text: string }>>;
-  isFile: (path: string) => Promise<boolean>;
   /** Where a path lands with every link followed, or undefined when it leads nowhere. */
   realPath: (path: string) => Promise<string | undefined>;
   run: (argv: Array<string>, cwd: string, timeoutMs: number) => Promise<ProcessRunResult>;
