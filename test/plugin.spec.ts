@@ -188,7 +188,7 @@ describe('the Codex marketplace', () => {
 describe('the Codex adapter', () => {
   test(`should name itself and the session`, () => {
     // Arrange, Act
-    const out = execFileSync(join(ROOT, 'adapters', 'codex', 'session-start.sh'), {
+    const out = execFileSync(join(ROOT, 'codex', 'session-start.sh'), {
       encoding: 'utf8',
       input: JSON.stringify({ session_id: 'shared-1', cwd: ROOT, source: 'startup' }),
       env: { ...process.env, PLUGIN_ROOT: ROOT },

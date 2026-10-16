@@ -34,9 +34,9 @@ payload=$(cat)
 # none is worked out from where this script sits.
 [ -n "${PLUGIN_ROOT:-}" ] || exit 0
 [ -x "$PLUGIN_ROOT/bin/agent-journal" ] || exit 0
-[ -r "$PLUGIN_ROOT/adapters/common.sh" ] || exit 0
+[ -r "$PLUGIN_ROOT/codex/hook-json.sh" ] || exit 0
 
-. "$PLUGIN_ROOT/adapters/common.sh"
+. "$PLUGIN_ROOT/codex/hook-json.sh"
 
 journal_read_payload <<EOF
 $payload

@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpath
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterAll, describe, expect, test } from 'vitest';
-import { RULES_MARK } from '../../adapters/claude-code/hooks/names.ts';
+import { RULES_MARK } from '../../claude-code/hooks/names.ts';
 import { GIT_IDENTITY, ROOT } from '../helpers.ts';
 
 /**
