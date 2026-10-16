@@ -16,6 +16,7 @@ import {
   type PaneModel,
 } from '../hooks/pane-view.js';
 import { colorOf } from '../hooks/format.js';
+import { IS_ASK_ON } from '../hooks/names.js';
 import { nodeOf, PANE, propsOf, textOf } from './world.js';
 
 const NOTHING: PaneActions = {
@@ -148,7 +149,6 @@ describe('pane-view', () => {
 
     // Assert
     expect(drawn).toContain('AGENT JOURNAL');
-    expect(drawn).toContain('"key":"open-ask"');
     expect(drawn).toContain('Today, Tuesday 2026-10-06');
     expect(drawn).toContain('claude-quic…');
     const time = propsOf(tree, 'entry:time:2026-10-06T150000Z');
@@ -165,7 +165,7 @@ describe('pane-view', () => {
     expect(drawn).toContain(`"backgroundColor":"${colorOf('repo')}"`);
   });
 
-  test('the header holds Back outside the list and Close, Ask leads the list, and a rule follows the project row', async ($, on) => {
+  test('the header holds Back outside the list and Close, Ask leads the list while the pane answers questions, and a rule follows the project row', async ($, on) => {
     // Arrange
     const set = drawsWith(on);
 
@@ -176,8 +176,7 @@ describe('pane-view', () => {
 
     // Assert
     expect(propsOf(list, 'back')).toBe(undefined);
-    expect(propsOf(list, 'open-ask')).toEqual(expect.objectContaining({ label: '✦ Ask', plain: true }));
-    expect(propsOf(list, 'box:open-ask')).toEqual(expect.objectContaining({ backgroundColor: BUTTON_COLOR }));
+    expect(propsOf(list, 'open-ask')?.label).toBe(IS_ASK_ON ? '✦ Ask' : undefined);
     expect(propsOf(list, 'close')).toEqual(expect.objectContaining({ label: '✕ Close' }));
     expect(propsOf(list, 'box:close')?.backgroundColor).toBe(undefined);
     expect(propsOf(list, 'close')?.dimColor).toBe(undefined);

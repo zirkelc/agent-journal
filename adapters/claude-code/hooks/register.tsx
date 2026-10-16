@@ -3,7 +3,7 @@
 /* @jsxFrag Fragment */
 import type { Register, Timer } from 'claude-code';
 import { atom, read, update } from 'claude-code';
-import { agentSpec, scopeOf, searchModelOf, TOOL_SPECS } from './agent.js';
+import { AGENT_PROMPT, scopeOf, searchModelOf, TOOL_SPECS } from './agent.js';
 import { capped, entriesOf, InputError, listArgs, readArgs, searchArgs, type Filters } from './cli.js';
 import { ALL_DATES, entryOfText } from './format.js';
 import type { Host } from './host.js';
@@ -24,9 +24,13 @@ import {
   syncer,
 } from './journal.js';
 import {
+  AGENT_NAME,
+  AGENT_TOOLS,
   AGENT_TYPE,
   COMMAND,
   COMMAND_DESCRIPTION,
+  DENIED_TOOLS,
+  IS_ASK_ON,
   PANE_ID,
   PANE_TITLE,
   TOOL_LIST,
@@ -186,8 +190,26 @@ export const register: Register = (on) => {
     /** Made now, so the first message does not wait for the CLI. */
     void keeper.prepare().catch(() => undefined);
     currentProject = projectOf(await $.session.repo().catch(() => null));
-    for (const spec of TOOL_SPECS) await $.tool.register(spec);
-    await $.agent.register(agentSpec());
+    /** The tools and the agent that answer the pane's questions, while it answers any (see IS_ASK_ON). */
+    if (IS_ASK_ON) {
+      for (const spec of TOOL_SPECS) await $.tool.register(spec);
+      /**
+       * The agent type. It runs on the session's model unless a question names
+       * another, so the model can change between questions. Its permission mode
+       * is the session's, and the person's own rules decide its spawn and its tool
+       * calls.
+       */
+      await $.agent.register({
+        name: AGENT_NAME,
+        description: 'Answers a question about past work from the agent journal. Started only by /agent-journal.',
+        prompt: AGENT_PROMPT,
+        tools: AGENT_TOOLS,
+        disallowedTools: DENIED_TOOLS,
+        omitClaudeMd: true,
+        model: 'inherit',
+        maxTurns: 12,
+      });
+    }
     await $.command.register({ name: COMMAND, description: COMMAND_DESCRIPTION });
     return started;
   });
@@ -244,68 +266,56 @@ export const register: Register = (on) => {
     return next(e);
   });
 
-  /** The search agent is this mod's own: the main model never sees it. */
-  on('agent.offer', { agent: 'agent-journal:search' }, () => ({ isOffered: false }));
+  /** The search agent and its tools, while the pane answers questions (see IS_ASK_ON). */
+  if (IS_ASK_ON) {
+    /** The search agent is this mod's own: the main model never sees it. */
+    on('agent.offer', { agent: 'agent-journal:search' }, () => ({ isOffered: false }));
 
-  /** The main model may find the journal tools, but they take no room in its prompt. */
-  on('tool.describe', { tool: /^mcp__agent-journal__(list|search|read)$/ }, async ($, e, next) => ({
-    ...(await next(e)),
-    isDeferred: true,
-  }));
+    /** The main model may find the journal tools, but they take no room in its prompt. */
+    on('tool.describe', { tool: /^mcp__agent-journal__(list|search|read)$/ }, async ($, e, next) => ({
+      ...(await next(e)),
+      isDeferred: true,
+    }));
 
-  /**
-   * A spawn this mod makes comes from no model response, so the auto mode
-   * classifier has no verdict for it and denies it. Approves only the search
-   * agent when this mod itself starts it, and the three tools, which only read
-   * the journal. Every other call goes through the normal checks.
-   */
-  on('tool.check', { tool: 'Agent' }, ($, e, next) => {
-    const input = e.input as { subagent_type?: string } | undefined;
-    const isOwnSpawn = next.origin?.plugin === $.plugin.name && input?.subagent_type === AGENT_TYPE;
-    return isOwnSpawn ? { decision: 'allow', reason: 'started by /agent-journal' } : next(e);
-  });
-  on('tool.check', { tool: /^mcp__agent-journal__(list|search|read)$/ }, () => ({
-    decision: 'allow',
-    reason: 'reads the journal',
-  }));
-
-  on('tool.call', { tool: /^mcp__agent-journal__(list|search|read)$/ }, async ($, e, next) => {
-    if (!host) return next(e);
-    const input = e as unknown as Record<string, unknown>;
-    const filters: Filters = {
-      since: typeof input.since === 'string' ? input.since : undefined,
-      until: typeof input.until === 'string' ? input.until : undefined,
-      project: typeof input.project === 'string' ? input.project : undefined,
-      limit: typeof input.limit === 'number' ? input.limit : undefined,
-    };
-    let args: Array<string>;
-    try {
-      if (e.tool === toolName(TOOL_LIST)) args = listArgs(filters);
-      else if (e.tool === toolName(TOOL_SEARCH)) args = searchArgs(String(input.text ?? ''), filters);
-      else if (e.tool === toolName(TOOL_READ)) args = readArgs(String(input.id ?? ''));
-      else return { deny: `unknown journal tool ${e.tool}` };
-    } catch (error) {
-      if (error instanceof InputError) return { deny: error.message };
-      throw error;
-    }
-    const ran = await runCli(host, args);
-    const agentId = e.agentId;
-    if (agentId) {
-      const found =
-        ran.exitCode !== 0 ? [] : e.tool === toolName(TOOL_READ) ? entryOfText(ran.stdout) : entriesOf(ran.stdout);
-      await update($, chatAtom, (chat) => {
-        const seen = chat.flatMap((turn) => turn.seen);
-        const step = stepOf(e.tool, input, { isOk: ran.exitCode === 0, entries: found }, seen);
-        return recorded(chat, agentId, step, found);
-      }).catch(() => undefined);
-    }
-    if (ran.exitCode !== 0) return { deny: failureOf(ran) };
-    return { result: capped(ran.stdout) || 'No entries match.' };
-  });
+    on('tool.call', { tool: /^mcp__agent-journal__(list|search|read)$/ }, async ($, e, next) => {
+      if (!host) return next(e);
+      const input = e as unknown as Record<string, unknown>;
+      const filters: Filters = {
+        since: typeof input.since === 'string' ? input.since : undefined,
+        until: typeof input.until === 'string' ? input.until : undefined,
+        project: typeof input.project === 'string' ? input.project : undefined,
+        limit: typeof input.limit === 'number' ? input.limit : undefined,
+      };
+      let args: Array<string>;
+      try {
+        if (e.tool === toolName(TOOL_LIST)) args = listArgs(filters);
+        else if (e.tool === toolName(TOOL_SEARCH)) args = searchArgs(String(input.text ?? ''), filters);
+        else if (e.tool === toolName(TOOL_READ)) args = readArgs(String(input.id ?? ''));
+        else return { deny: `unknown journal tool ${e.tool}` };
+      } catch (error) {
+        if (error instanceof InputError) return { deny: error.message };
+        throw error;
+      }
+      const ran = await runCli(host, args);
+      const agentId = e.agentId;
+      if (agentId) {
+        const found =
+          ran.exitCode !== 0 ? [] : e.tool === toolName(TOOL_READ) ? entryOfText(ran.stdout) : entriesOf(ran.stdout);
+        await update($, chatAtom, (chat) => {
+          const seen = chat.flatMap((turn) => turn.seen);
+          const step = stepOf(e.tool, input, { isOk: ran.exitCode === 0, entries: found }, seen);
+          return recorded(chat, agentId, step, found);
+        }).catch(() => undefined);
+      }
+      if (ran.exitCode !== 0) return { deny: failureOf(ran) };
+      return { result: capped(ran.stdout) || 'No entries match.' };
+    });
+  }
 
   on('command.run', { command: 'agent-journal' }, async ($, e, next) => {
     if (!host) return next(e);
-    const question = e.args.trim();
+    /** Text after the command is a question only while the pane answers questions. */
+    const question = IS_ASK_ON ? e.args.trim() : '';
     const isPlaced = await host.openPane();
     void load().catch(() => undefined);
     const waiting = isPlaced ? '' : ' The journal pane is waiting for a wider terminal.';
@@ -320,15 +330,17 @@ export const register: Register = (on) => {
     return { text: `Asking the journal: ${question}${waiting}` };
   });
 
-  /** The search agent's last turn is its answer. */
-  on('turn.complete', async ($, e, next) => {
-    const result = await next(e);
-    const agentId = e.agentId;
-    if (!agentId) return result;
-    if (!host || !waiter || !isAskingFor(await read($, chatAtom), agentId)) return result;
-    await waiter.turnEnded(agentId, typeof e.answer === 'string' ? e.answer : '', Boolean(e.isAborted));
-    return result;
-  });
+  if (IS_ASK_ON) {
+    /** The search agent's last turn is its answer. */
+    on('turn.complete', async ($, e, next) => {
+      const result = await next(e);
+      const agentId = e.agentId;
+      if (!agentId) return result;
+      if (!host || !waiter || !isAskingFor(await read($, chatAtom), agentId)) return result;
+      await waiter.turnEnded(agentId, typeof e.answer === 'string' ? e.answer : '', Boolean(e.isAborted));
+      return result;
+    });
+  }
 
   /**
    * A new entry shows in the list without a reload by hand, and is committed
@@ -374,25 +386,25 @@ export const register: Register = (on) => {
     return result;
   });
 
-  /**
-   * A spawn made from a Button's or an Input's own closure reaches the auto
-   * mode classifier without this mod's permission hook, which then denies it for
-   * want of a verdict. Made inside a hook, as from the slash command, the hook
-   * approves it. So the pane's questions are asked here, and the press or the
-   * submit is answered without its closure.
-   */
-  on('ui.press', async ($, e, next) => {
-    if (!host || e.plugin !== $.plugin.name || !e.element.startsWith('suggest:')) return next(e);
-    const question = SUGGESTIONS[Number(e.element.slice('suggest:'.length))];
-    if (question === undefined) return next(e);
-    await askFrom(host, question);
-    return { element: e.element };
-  });
-  on('ui.input', async ($, e, next) => {
-    if (!host || e.plugin !== $.plugin.name || e.element !== 'ask' || e.kind !== 'submit') return next(e);
-    await askFrom(host, e.value);
-    return { element: e.element, value: e.value };
-  });
+  if (IS_ASK_ON) {
+    /**
+     * The pane's questions are asked here, in a hook, rather than from a
+     * Button's or an Input's own closure, and the press or the submit is answered
+     * without its closure.
+     */
+    on('ui.press', async ($, e, next) => {
+      if (!host || e.plugin !== $.plugin.name || !e.element.startsWith('suggest:')) return next(e);
+      const question = SUGGESTIONS[Number(e.element.slice('suggest:'.length))];
+      if (question === undefined) return next(e);
+      await askFrom(host, question);
+      return { element: e.element };
+    });
+    on('ui.input', async ($, e, next) => {
+      if (!host || e.plugin !== $.plugin.name || e.element !== 'ask' || e.kind !== 'submit') return next(e);
+      await askFrom(host, e.value);
+      return { element: e.element, value: e.value };
+    });
+  }
 
   /** Esc steps back: from an entry to the view under it, from the chat to the list. In the list it closes the pane. */
   on('ui.close', async ($, e, next) => {
