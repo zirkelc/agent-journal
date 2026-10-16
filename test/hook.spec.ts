@@ -145,6 +145,23 @@ describe('failure', () => {
     expect(result).toBe(``);
   });
 
+  /** The plugin root comes from the agent alone, so the script reaches no path that it works out itself. */
+  test(`should say nothing and succeed without a plugin root`, () => {
+    // Arrange
+    const store = fixture();
+    const { PLUGIN_ROOT: _, ...env } = process.env;
+
+    // Act
+    const result = execFileSync(HOOK, [], {
+      encoding: 'utf8',
+      input: JSON.stringify({ cwd: store.repo }),
+      env: { ...env, HOME: store.home, XDG_CONFIG_HOME: join(store.home, 'config') },
+    });
+
+    // Assert
+    expect(result).toBe(``);
+  });
+
   test(`should survive stdin that is not JSON`, () => {
     // Arrange
     const store = fixture();

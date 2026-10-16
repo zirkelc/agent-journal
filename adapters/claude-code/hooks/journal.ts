@@ -17,7 +17,7 @@ import {
   type Filters,
 } from './cli.js';
 import type { Host } from './host.js';
-import { CLI_IN_CHECKOUT, CLI_ON_PATH, RULES_MARK } from './names.js';
+import { CLI_IN_CHECKOUT, RULES_MARK } from './names.js';
 import type { PaneActions } from './pane-view.js';
 
 /**
@@ -132,10 +132,10 @@ export const PANE_PAGE = 200;
 const PANE_MAX = 100_000;
 
 /**
- * The CLI of the checkout the mod runs from, when there is one, so a developer
- * gets the CLI of the same commit; otherwise the one the installer put on `PATH`.
- * The root is followed through links first: a mod loaded through a link in a
- * mods folder would otherwise look for the CLI next to the link.
+ * The CLI the plugin ships, and no other: never one on `PATH`, so the mod runs
+ * one known program, of the same commit as itself. The root is followed through
+ * links first: a mod loaded through a link in a mods folder would otherwise
+ * look for the CLI next to the link.
  */
 /** The CLI each host found, looked for once: the plugin root does not move during a session. */
 const clis = new WeakMap<Host, Promise<string>>();
@@ -151,8 +151,7 @@ function cliOf(host: Host): Promise<string> {
 
 async function findCli(host: Host): Promise<string> {
   const root = (await host.realPath(host.pluginRoot)) ?? host.pluginRoot;
-  const local = `${root}/${CLI_IN_CHECKOUT}`;
-  return (await host.isFile(local)) ? local : CLI_ON_PATH;
+  return `${root}/${CLI_IN_CHECKOUT}`;
 }
 
 /**
@@ -160,7 +159,7 @@ async function findCli(host: Host): Promise<string> {
  * rejects: a CLI that cannot start is a failed run with the reason as stderr.
  */
 export async function runCli(host: Host, args: Array<string>, timeoutMs = CLI_TIMEOUT_MS): Promise<Run> {
-  let cli = CLI_ON_PATH;
+  let cli = `${host.pluginRoot}/${CLI_IN_CHECKOUT}`;
   try {
     const [found, cwd] = await Promise.all([cliOf(host), host.cwd()]);
     cli = found;
@@ -172,7 +171,7 @@ export async function runCli(host: Host, args: Array<string>, timeoutMs = CLI_TI
       cli,
       exitCode: -1,
       stdout: '',
-      stderr: `agent-journal could not run (${reason}). Is it installed and on PATH?`,
+      stderr: `agent-journal could not run (${reason}).`,
       error: reason,
     };
   }

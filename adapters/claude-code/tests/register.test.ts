@@ -627,6 +627,23 @@ describe('register', () => {
     expect(drawn).not.toContain('No entries yet.');
   });
 
+  test('the CLI is always the plugin\u2019s own, never one on PATH, even when its file is not found', async ($, on) => {
+    // Arrange
+    const kept = world(on, {
+      list: line('2026-10-05T143000Z', 'repo', 'Did a thing'),
+      lands: (path) => (path.includes('/bin/') ? undefined : '/repo'),
+    });
+    await $.session.start(SESSION);
+
+    // Act
+    await $.command.run(journal());
+    await kept.clock.settle();
+
+    // Assert
+    const listed = kept.queries().find((run) => run.argv[1] === 'list');
+    expect(listed?.argv[0]).toBe('/repo/bin/agent-journal');
+  });
+
   test('the CLI of the checkout is found through a linked plugin root', async ($, on) => {
     // Arrange
     const kept = world(on, {
