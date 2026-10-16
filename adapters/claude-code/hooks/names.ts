@@ -1,11 +1,11 @@
 /** The plugin's name, as its manifest declares it. */
 export const PLUGIN = 'agent-journal';
 
-/** The pane's id, and the slash command that opens it. */
+/** The pane's id and title, and the slash command that opens it. */
 export const PANE_ID = 'journal';
 export const PANE_TITLE = 'Journal';
-export const COMMAND = 'journal';
-export const COMMAND_DESCRIPTION = 'Open the journal, or ask it a question: /journal what did we fix last week?';
+export const COMMAND = 'agent-journal';
+export const COMMAND_DESCRIPTION = 'Open the journal, or ask it a question: /agent-journal what did we fix last week?';
 
 /** The search agent: its short name, and the type the engine lists it under. */
 export const AGENT_NAME = 'search';

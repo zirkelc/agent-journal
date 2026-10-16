@@ -379,7 +379,7 @@ describe('register', () => {
     for (const result of results) expect(JSON.stringify(result)).toContain('not an entry id');
   });
 
-  test('/journal with a question opens the pane and asks the agent with the recall text', async ($, on) => {
+  test('/agent-journal with a question opens the pane and asks the agent with the recall text', async ($, on) => {
     // Arrange
     const kept = world(on, { context: RECALL });
     await $.session.start(SESSION);
@@ -593,7 +593,7 @@ describe('register', () => {
     expect(drawn).toContain('context failed');
   });
 
-  test('/journal alone lists the current project newest first', async ($, on) => {
+  test('/agent-journal alone lists the current project newest first', async ($, on) => {
     // Arrange
     const kept = world(on, {
       list: [line('2026-10-04T090000Z', 'repo', 'Older'), line('2026-10-05T143000Z', 'repo', 'Newer')].join('\n'),

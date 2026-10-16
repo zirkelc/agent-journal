@@ -114,9 +114,9 @@ The rules for writing the journal reach the main conversation as a hidden messag
 
 #### The journal pane
 
-`/journal` opens a pane beside the conversation. It lists the entries of the current project, or of all projects, grouped by day, and narrows them to a year, a month or a day. Press an entry to read it, or send it to the prompt.
+`/agent-journal` opens a pane beside the conversation. It lists the entries of the current project, or of all projects, grouped by day, and narrows them to a year, a month or a day. Press an entry to read it, or send it to the prompt.
 
-**Ask** answers questions about the journal, such as "what did we fix last week?", with the entries it used as sources. Follow-up questions work. `/journal what did we fix last week?` asks from the prompt. A search agent answers it, on Haiku unless you pick another model in the Ask view. The pane keeps your project choice and your model for the next session. It can only list, search and read entries, and it runs in your session like any other subagent, so each question costs a few model requests.
+**Ask** answers questions about the journal, such as "what did we fix last week?", with the entries it used as sources. Follow-up questions work. `/agent-journal what did we fix last week?` asks from the prompt. A search agent answers it, on Haiku unless you pick another model in the Ask view. The pane keeps your project choice and your model for the next session. It can only list, search and read entries, and it runs in your session like any other subagent, so each question costs a few model requests.
 
 #### Permissions
 

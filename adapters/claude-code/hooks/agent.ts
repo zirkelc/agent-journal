@@ -46,7 +46,7 @@ const SYSTEM_PROMPT = [
  */
 export const agentSpec = () => ({
   name: AGENT_NAME,
-  description: 'Answers a question about past work from the agent journal. Started only by /journal.',
+  description: 'Answers a question about past work from the agent journal. Started only by /agent-journal.',
   prompt: SYSTEM_PROMPT,
   tools: AGENT_TOOLS,
   disallowedTools: DENIED_TOOLS,

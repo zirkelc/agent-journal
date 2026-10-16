@@ -262,7 +262,7 @@ export const register: Register = (on) => {
   on('tool.check', { tool: 'Agent' }, ($, e, next) => {
     const input = e.input as { subagent_type?: string } | undefined;
     const isOwnSpawn = next.origin?.plugin === $.plugin.name && input?.subagent_type === AGENT_TYPE;
-    return isOwnSpawn ? { decision: 'allow', reason: 'started by /journal' } : next(e);
+    return isOwnSpawn ? { decision: 'allow', reason: 'started by /agent-journal' } : next(e);
   });
   on('tool.check', { tool: /^mcp__agent-journal__(list|search|read)$/ }, () => ({
     decision: 'allow',
@@ -303,7 +303,7 @@ export const register: Register = (on) => {
     return { result: capped(ran.stdout) || 'No entries match.' };
   });
 
-  on('command.run', { command: 'journal' }, async ($, e, next) => {
+  on('command.run', { command: 'agent-journal' }, async ($, e, next) => {
     if (!host) return next(e);
     const question = e.args.trim();
     const isPlaced = await host.openPane();

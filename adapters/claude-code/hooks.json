@@ -1,4 +1,4 @@
 {
-  "description": "The journal for Claude Code as one hooks module: the rules for writing it in every conversation's context, and the /journal pane with its search agent.",
+  "description": "The journal for Claude Code as one hooks module: the rules for writing it in every conversation's context, and the /agent-journal pane with its search agent.",
   "modules": ["./hooks/register.tsx"]
 }

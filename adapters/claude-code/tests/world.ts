@@ -185,7 +185,7 @@ export const PANE = {
   },
 } as const;
 
-/** `/journal`, with what follows it. */
+/** `/agent-journal`, with what follows it. */
 export const journal = (args = '') =>
   ({
     command: COMMAND,
