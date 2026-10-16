@@ -126,6 +126,18 @@ describe('pane-view', () => {
     expect(width).toBe(12);
   });
 
+  test('the header is the title with the logo star, bold in the theme color of Claude', async ($, on) => {
+    // Arrange
+    drawsWith(on);
+
+    // Act
+    const tree = await $.ui.render(VIEW as never);
+
+    // Assert
+    const header = JSON.stringify(tree);
+    expect(header).toContain('{"type":"Text","props":{"bold":true,"color":"claude"},"children":["✦ AGENT JOURNAL"]}');
+  });
+
   test('the list shows day rows, then per entry three buttons in one hover group: dim time, project on its color, summary', async ($, on) => {
     // Arrange
     drawsWith(on);

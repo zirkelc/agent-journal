@@ -259,8 +259,9 @@ function headerView(ui: Ui, actions: PaneActions, model: PaneModel): RenderEleme
   const back = model.opened !== null ? () => actions.back() : () => actions.showList();
   return (
     <Box flexDirection="row" justifyContent="space-between" marginBottom={1}>
-      <Text bold color="cyan">
-        AGENT JOURNAL
+      {/* The star and the color are the logo's, and the theme key follows the person's theme. */}
+      <Text bold color="claude">
+        ✦ AGENT JOURNAL
       </Text>
       <Box flexDirection="row" columnGap={2}>
         {!isList && actionButton(ui, model, 'back', '← Back', back, 'neutral')}
