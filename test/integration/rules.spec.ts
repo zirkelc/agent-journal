@@ -116,10 +116,13 @@ function transcript(sessionId: string): Array<Record<string, unknown>> {
  * The rows that carry the rules, each by how it got there: a hidden row the mod
  * appended (`isMeta`), or context a hook added to a prompt (its attachment type).
  * A compaction summary that only mentions the rules is no such row: only the
- * mark counts.
+ * mark counts. Claude Code also stores copies of the API requests it sends
+ * (`api-request-blob`), which hold the rules that are already in the
+ * conversation, so they are no delivery either.
  */
 function rulesRows(sessionId: string): Array<string> {
   return transcript(sessionId)
+    .filter((row) => row.type !== 'api-request-blob')
     .filter((row) => JSON.stringify(row).includes(RULES_MARK))
     .map((row) => {
       const attachment = row.attachment as { type?: string } | undefined;
