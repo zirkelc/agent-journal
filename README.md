@@ -26,7 +26,7 @@ Nothing leaves your machine unless you turn on git sync.
 
 - **No server, no account, no API requests.** The plugin runs locally and makes no network requests of its own.
 - **No hidden tool calls.** Entries are written by the model's own file-writing tool, in your session, in front of you. Nothing runs between sessions.
-- **A read-only hook.** At session start, a hook (a shell script in [`adapters/`](adapters/) for Codex, a hooks module for Claude Code) reads `~/.config/agent-journal/config` and runs `git rev-parse` to name the project. It writes no files.
+- **A read-only hook.** At session start, a hook (a shell script in [`codex/`](codex/) for Codex, a hooks module for Claude Code) reads `~/.config/agent-journal/config` and runs `git rev-parse` to name the project. It writes no files.
 - **Your own files.** Entries are plain markdown in a directory you choose. Delete one and it is gone.
 - **Sync only when you turn it on.** [Git sync](#git-sync) is off by default. When you turn it on, the entries go to the git remote that you choose, and nowhere else.
 
@@ -114,13 +114,13 @@ The rules for writing the journal reach the main conversation as a hidden messag
 
 #### What the plugin runs and reads
 
-The Claude Code plugin is a hooks module in [`adapters/claude-code/`](adapters/claude-code/). It does this:
+The Claude Code plugin is a hooks module in [`claude-code/`](claude-code/). It does this:
 
 - **Programs.** It runs one program, the plugin's own [`bin/agent-journal`](bin/agent-journal), which is a readable POSIX shell script and not a compiled program. It never runs an `agent-journal` from your `PATH`. The script makes the journal rules for the session, lists and reads entries for the pane, and runs git sync. It uses standard shell tools (such as `awk`, `grep` and `ls`) and `git`. It runs `git rev-parse` to name the project of a directory. When git sync is on, it also commits the journal folder and pushes it (`git add`, `git commit`, `git pull --rebase`, `git push`). A push to an SSH remote makes git start `ssh` in batch mode, so it never asks for a password.
 - **What it reads.** It reads the conversation only to find out whether the journal rules are already in it. It looks for the rules' mark and reads nothing else from the messages. Through the script, it reads `~/.config/agent-journal/config` and the journal folder. It checks where the plugin's own folder is, to find the script.
 - **What it sends.** It sends no text from the conversation anywhere. The rules go into your own session, as a hidden message or as context of your prompt. Entries leave your machine only through git sync, to the remote that you set.
 - **Hooks.** It adds the rules to a prompt's context when the conversation does not hold them. It watches calls of the Write tool that write into the journal folder, to refresh the pane and to sync, and it does not change those calls.
-- **Agents.** It starts no agent. The code for a search agent is in the plugin, but it is turned off in this version.
+- **Agents.** It starts no agent. The code for a search agent is in the plugin, but it is turned off in this version. If it were on, the agent would get only your question and three tools that list, search and read the journal entries.
 
 #### The journal pane
 

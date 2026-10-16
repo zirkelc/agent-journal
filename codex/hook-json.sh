@@ -1,17 +1,12 @@
-# Shared by the session-start adapters. Sourced, never run.
+# The JSON half of the Codex session-start hook. Sourced, never run.
 #
-# More than one agent happens to have settled on the same session-start contract:
-# a JSON payload on stdin, and a JSON document on stdout whose `additionalContext`
-# reaches the model. The parts that are the same for all of them live here, so a
-# fix to one is a fix to each. What differs stays in each adapter: the variable
-# naming the plugin root, the name it journals under, and any quirk of its own.
+# Codex sends a JSON payload on stdin and reads a JSON document on stdout whose
+# `additionalContext` reaches the model. This file reads the one and writes the
+# other, so the hook itself only finds the plugin and runs the core. Another
+# agent with the same contract can copy it.
 #
-# Sharing this file is a convenience rather than part of the contract. An adapter
-# is free to ignore it, and one written for an agent that delivers its
-# instruction some other way probably will.
-#
-# Nothing here writes to stderr or returns non-zero. An adapter must never fail
-# a session, and it cannot honour that if its helpers do not.
+# Nothing here writes to stderr or returns non-zero. The hook must never fail a
+# session, and it cannot honour that if its helpers do not.
 
 # Reads a hook payload on stdin and sets `cwd`, `session_id` and `model` from it.
 #

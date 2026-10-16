@@ -18,9 +18,9 @@ export const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 /**
  * The session-start adapter the shell tests drive. Claude Code takes the rules
  * through its hooks module instead, so the shell path is Codex's, and with it
- * everything the adapters share in `common.sh`.
+ * its helpers in `hook-json.sh`.
  */
-export const HOOK = join(ROOT, 'adapters', 'codex', 'session-start.sh');
+export const HOOK = join(ROOT, 'codex', 'session-start.sh');
 
 /**
  * Every case gets its own plugin root, so a test can give the core instructions
@@ -51,13 +51,13 @@ export function fixture(instructions?: string): Fixture {
   copyFileSync(join(ROOT, 'bin', 'agent-journal'), bin);
 
   /**
-   * The adapters and the `install` command are reached from the plugin root, so
+   * The Codex helpers and the `install` command are reached from the plugin root, so
    * a fixture that omits them is a fixture where those paths silently do
    * nothing. They are copied rather than symlinked so a case is free to replace
    * one.
    */
-  mkdirSync(join(root, 'adapters'), { recursive: true });
-  copyFileSync(join(ROOT, 'adapters', 'common.sh'), join(root, 'adapters', 'common.sh'));
+  mkdirSync(join(root, 'codex'), { recursive: true });
+  copyFileSync(join(ROOT, 'codex', 'hook-json.sh'), join(root, 'codex', 'hook-json.sh'));
   mkdirSync(join(root, 'lib'), { recursive: true });
   copyFileSync(join(ROOT, 'lib', 'install.sh'), join(root, 'lib', 'install.sh'));
   mkdirSync(join(root, 'templates'), { recursive: true });

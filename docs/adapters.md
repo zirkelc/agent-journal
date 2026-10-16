@@ -4,7 +4,7 @@ An adapter teaches one agent to write the journal. It is the only part of this p
 
 The job is short. Run the core, take the text it prints, encode that text the way your agent wants it, and hand it over at the start of every session.
 
-Claude Code is the one agent without a shell script here. Its plugin is a hooks module in [`claude-code/`](claude-code), which `claude-code/hooks.json` loads. The module runs the same `context` command and adds the text as a hidden row of the main conversation. It does this at the start, after `/clear` and after compaction, each time the conversation does not hold the text. It never gives the text to a subagent. Every other agent follows the steps below.
+Each agent has its own folder at the repository root. Codex has a shell script in [`codex/`](../codex). Claude Code has no shell script: its plugin is a hooks module in [`claude-code/`](../claude-code), which `claude-code/hooks.json` loads. The module runs the same `context` command and adds the text as a hidden row of the main conversation. It does this at the start, after `/clear` and after compaction, each time the conversation does not hold the text. It never gives the text to a subagent. Every other agent follows the steps below.
 
 ## The contract
 
@@ -38,7 +38,7 @@ Do not parse, reformat, extend or truncate that text. Encode it and pass it on. 
 
 ## Delivery is different for every agent
 
-The contract is deliberately "text out, delivered somehow" rather than "return JSON from a hook". Codex takes a `SessionStart` hook and reads `hookSpecificOutput.additionalContext` from stdout, while Claude Code's hooks module adds the text as a row of the main conversation. The shared parts of a shell adapter live in `common.sh` instead of in the core.
+The contract is deliberately "text out, delivered somehow" rather than "return JSON from a hook". Codex takes a `SessionStart` hook and reads `hookSpecificOutput.additionalContext` from stdout, while Claude Code's hooks module adds the text as a row of the main conversation. The JSON parts of the Codex script are in `codex/hook-json.sh`, not in the core.
 
 An agent with no session event can still be adapted. Have its adapter write the same text into whatever instructions file that agent reads, at install time and whenever the config changes. The core does not change either way.
 
@@ -51,19 +51,20 @@ Two more questions are worth answering before you write anything:
 
 ## Steps
 
-1. **Make a directory** for it, `adapters/<agent>/`. Everything specific to that agent belongs there and nowhere else.
-2. **Write the delivery script.** Resolve the project root the way that agent documents, source `../common.sh` if its payload is JSON on stdin, then call the core, encode and print. `codex/session-start.sh` is about forty lines and is a complete example to copy.
-3. **Build the `agent` value.** Your agent's name, plus `/model` when the payload carries one; `common.sh` has `journal_agent` for this. Strip a redundant product prefix from the model if there is one, so it reads `claude/opus-5` rather than `claude/claude-opus-5`.
+1. **Make a directory** for it at the repository root, `<agent>/`. Everything specific to that agent belongs there and nowhere else. Keep it apart from the other agents' folders: the Claude Code plugin directory holds a plugin for review when a script or a config points at a folder that holds the mod's files.
+2. **Write the delivery script.** Resolve the project root the way that agent documents, copy `codex/hook-json.sh` into your folder and source it if the payload is JSON on stdin, then call the core, encode and print. `codex/session-start.sh` is about forty lines and is a complete example to copy.
+3. **Build the `agent` value.** Your agent's name, plus `/model` when the payload carries one; `hook-json.sh` has `journal_agent` for this. Strip a redundant product prefix from the model if there is one, so it reads `claude/opus-5` rather than `claude/claude-opus-5`.
 4. **Register it where that agent looks.** Usually a plugin manifest at the repository root, next to `.claude-plugin/` and `.codex-plugin/`. An agent with a marketplace may also need an index file. Codex reads `.agents/plugins/marketplace.json`, which makes this repository its own marketplace.
 5. **Teach the installer about it.** Add the agent to `journal_harnesses` in `lib/install.sh`: how to detect it without running it, the commands that register the plugin, and anything the person still has to do by hand. Detection should be a `command -v` and a directory test. Launching an agent to ask it about itself costs that time at every `agent-journal install`.
 6. **Add tests** under `test/`, covering at least that the output is well formed for that agent, that the instruction survives its encoding unchanged, and that broken or empty input still exits 0. `test/plugin.spec.ts` runs its checks over a list of agents, so a new one is usually a new entry in that list rather than new cases.
 
-## What is here
+## The files
 
 | file | |
 |---|---|
-| `common.sh` | payload parsing, the `agent` value, and JSON encoding. Sourced, never run |
-| `<agent>/session-start.sh` | reads the payload, runs the core, prints what that agent reads |
-| `<agent>/hooks.json` | registers the script with that agent |
+| `codex/session-start.sh` | reads the payload, runs the core, prints what Codex reads |
+| `codex/hook-json.sh` | payload parsing, the `agent` value, and JSON encoding. Sourced, never run |
+| `codex/hooks.json` | registers the script with Codex |
+| `claude-code/` | the Claude Code hooks module, its tests and its types |
 
 Right now an adapter is only the hook. Agents also accept commands, each in their own format, such as a slash command declared in `commands` or a skill directory declared in `skills`. Neither plugin ships one, because changing a setting is a single `agent-journal config set` and every agent can run a shell command. It is worth adding one when there is a task that needs judgement rather than a command.

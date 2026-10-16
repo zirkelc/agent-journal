@@ -1,6 +1,6 @@
 {
   "name": "agent-journal",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "A journal written by your agent, autonomously. One small markdown file per milestone, written as the work happens, in a format built to be scanned with grep and ls.",
   "author": {
     "name": "Chris Cook",
@@ -10,6 +10,6 @@
   "repository": "https://github.com/zirkelc/agent-journal",
   "license": "MIT",
   "keywords": ["journal", "diary", "memory", "context", "recall", "sessions"],
-  "hooks": "./adapters/claude-code/hooks.json",
-  "types": "./adapters/claude-code/types/index.d.ts"
+  "hooks": "./claude-code/hooks.json",
+  "types": "./claude-code/types/index.d.ts"
 }

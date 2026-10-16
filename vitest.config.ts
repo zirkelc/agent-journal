@@ -1,7 +1,7 @@
 import { defineConfig } from 'vitest/config';
 
 /**
- * The CLI's tests. The Claude Code plugin's tests under adapters/claude-code/ run in Claude Code's own test kit.
+ * The CLI's tests. The Claude Code plugin's tests under claude-code/ run in Claude Code's own test kit.
  *
  * `unit` runs the CLI in temp folders and is fast and free. `integration` runs real Claude Code
  * sessions, which cost model usage and take seconds each, so it runs only when asked for by name.
