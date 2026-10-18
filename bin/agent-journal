@@ -68,7 +68,7 @@ usage: agent-journal list   [filters]
        agent-journal search TEXT [filters]
        agent-journal read   latest | 2026-01-11T143000Z | 2026-01-11
        agent-journal write  [--summary S] [--body B] [--project P] [--cwd DIR] [--agent A]
-       agent-journal config [set|unset journal_dir <path> | sync git]
+       agent-journal config [set|unset <key> [value]]
        agent-journal sync   [init [URL]]
        agent-journal install [claude|codex] [--all] [--dry-run]
        agent-journal help
@@ -96,6 +96,10 @@ filters: --date D      one local year, month or day: 2026, 2026-01, 2026-01-11
 settings: journal_dir    where journal entries are written
           sync           git: commit the journal folder after each write, and
                          push it when the branch has a remote
+          host           the machine name entries record, by default the
+                         system's; set it to '' to record none
+          user           the account name entries record, by default the
+                         login name; set it to '' to record none
 
 sync commits every file in the journal folder and pushes the branch. It runs
 on its own after write and after the journal pane sees a new entry. sync init
@@ -142,12 +146,23 @@ cr=$(printf '\r')
 # to hold too, because both will exist on the same machine during any upgrade.
 cfg_journal_dir=
 cfg_sync=
+# The machine and the account an entry records. An absent key takes the name
+# from the system. An empty key keeps the field out of every entry. So each key
+# needs a flag that says it was set.
+cfg_host=
+cfg_host_set=0
+cfg_user=
+cfg_user_set=0
 
 # Each read starts from nothing, so a key removed since the last read is no
 # longer set.
 read_config() {
   cfg_journal_dir=
   cfg_sync=
+  cfg_host=
+  cfg_host_set=0
+  cfg_user=
+  cfg_user_set=0
   [ -f "$1" ] || return 0
   while IFS= read -r line || [ -n "$line" ]; do
     case $line in
@@ -155,6 +170,8 @@ read_config() {
       *=*) ;;
       *) continue ;;
     esac
+    # A file saved with CRLF line endings must give the same values.
+    line=${line%"$cr"}
     key=${line%%=*}
     value=${line#*=}
     key=${key% }
@@ -165,6 +182,8 @@ read_config() {
     case $key in
       journal_dir) cfg_journal_dir=$value ;;
       sync) cfg_sync=$value ;;
+      host) cfg_host=$value; cfg_host_set=1 ;;
+      user) cfg_user=$value; cfg_user_set=1 ;;
     esac
   done < "$1"
 }
@@ -193,12 +212,14 @@ abbrev_home() {
 #
 # Rewrites in place, keeping every line it is not changing: comments, blank
 # lines, ordering, and keys it does not recognise all survive. A value is
-# written as it was given, even when it is the default; only an empty one,
-# from `config unset`, removes the line.
+# written as it was given, even when it is the default. An empty one removes
+# the line, unless the fourth argument is 1: then the key stays, with nothing
+# after it, for the settings where empty means off.
 write_config() {
   target=$1
   set_key=$2
   set_value=$3
+  keep_empty=${4:-0}
 
   mkdir -p "$(dirname "$target")" || return 1
   tmp=$target.$$
@@ -217,6 +238,8 @@ write_config() {
 #
 #   journal_dir    where journal entries are written
 #   sync           git, to commit and push the journal folder after each write
+#   host           the machine name each entry records. `host=` records none
+#   user           the account name each entry records. `user=` records none
 #
 # A key that is absent follows the default. A key that is set stays as it is,
 # even when it names the default.
@@ -237,7 +260,9 @@ EOF
       if [ "$key" = "$set_key" ]; then
         # Replaced in place rather than appended, so a key keeps its position
         # and the file does not grow a second copy of itself over time.
-        [ -z "$set_value" ] || printf '%s=%s\n' "$set_key" "$set_value" >> "$tmp"
+        if [ -n "$set_value" ] || [ "$keep_empty" = 1 ]; then
+          printf '%s=%s\n' "$set_key" "$set_value" >> "$tmp"
+        fi
         written=1
       else
         printf '%s\n' "$line" >> "$tmp"
@@ -245,7 +270,7 @@ EOF
     done < "$target"
   fi
 
-  if [ "$written" = 0 ] && [ -n "$set_value" ]; then
+  if [ "$written" = 0 ] && { [ -n "$set_value" ] || [ "$keep_empty" = 1 ]; }; then
     printf '%s=%s\n' "$set_key" "$set_value" >> "$tmp"
   fi
 
@@ -289,6 +314,48 @@ resolve_project() {
 no_project_here() {
   printf '%s is not in a repository, so --project . has no project to name\n' "$(abbrev_home "$1")" >&2
   exit 1
+}
+
+# A name an entry can record in double quotes. A quote, a backslash or a control
+# character would end the value or change it, so a name with one is refused.
+is_quotable_name() {
+  case $1 in
+    '' | *'"'* | *'\'* | *[[:cntrl:]]*) return 1 ;;
+  esac
+}
+
+# The machine and the account the session is on, in `host` and `user`. With git
+# sync, one journal holds entries from several machines. A session can be
+# resumed only on the machine that has its transcript.
+#
+# A key that is set gives the value, also when it is empty. Otherwise the value
+# comes from the system. On macOS, the host is the local host name, because
+# `uname -n` there comes from the network and changes with it. Elsewhere, it is
+# `uname -n` without its domain. The user is the login name from the
+# environment, and `id -un` only when the environment has none.
+#
+# A name that cannot be quoted is left out, also from a config edited by hand.
+resolve_machine() {
+  if [ "$cfg_host_set" = 1 ]; then
+    host=$cfg_host
+  else
+    host=
+    if command -v scutil >/dev/null 2>&1; then
+      host=$(scutil --get LocalHostName 2>/dev/null) || host=
+    fi
+    if [ -z "$host" ]; then
+      host=$(uname -n 2>/dev/null) || host=
+      host=${host%%.*}
+    fi
+  fi
+  is_quotable_name "$host" || host=
+  if [ "$cfg_user_set" = 1 ]; then
+    user=$cfg_user
+  else
+    user=${LOGNAME:-${USER:-}}
+    [ -n "$user" ] || user=$(id -un 2>/dev/null) || user=
+  fi
+  is_quotable_name "$user" || user=
 }
 
 # ---------------------------------------------------------------- time
@@ -790,6 +857,7 @@ body_set=0
 all_set=0
 dry_run=0
 recall=0
+keep_empty=0
 
 arg1=
 arg2=
@@ -879,6 +947,10 @@ if [ "$cmd" = config ]; then
     printf 'journal_dir_from=%s\n' "$([ -n "$cfg_journal_dir" ] && echo config || echo default)"
     printf 'config_file=%s\n' "$config_file"
     printf 'sync=%s\n' "${cfg_sync:-off}"
+    # Empty when an entry records none, so the line says what entries get.
+    resolve_machine
+    printf 'host=%s\n' "$host"
+    printf 'user=%s\n' "$user"
     exit 0
   fi
 
@@ -897,10 +969,21 @@ if [ "$cmd" = config ]; then
         *) printf '%s: sync takes git, or config unset sync to turn it off\n' "$set_value" >&2; exit 2 ;;
       esac
       ;;
+    host | user)
+      # `set` to nothing keeps the key, which turns the field off; `unset`
+      # removes it, which gives the name from the system back.
+      if [ "$action" = set ]; then
+        keep_empty=1
+        [ -z "$set_value" ] || is_quotable_name "$set_value" || {
+          printf 'a %s cannot contain a quote, a backslash or a control character\n' "$set_key" >&2
+          exit 2
+        }
+      fi
+      ;;
     *) printf '%s: not a setting\n' "$set_key" >&2; exit 2 ;;
   esac
 
-  write_config "$config_file" "$set_key" "$set_value" || exit 1
+  write_config "$config_file" "$set_key" "$set_value" "$keep_empty" || exit 1
 
   # Created here rather than at session start, so the directory exists before
   # anything tries to write an entry into it and no hook has a side effect.
@@ -1830,6 +1913,7 @@ if [ "$cmd" = write ]; then
   refuse_if_unquotable agent "$agent" bare
 
   resolve_project "$cwd"
+  resolve_machine
   [ "$dot" = 0 ] || [ -n "$project" ] || no_project_here "$cwd"
   # Derived from where the session is, unless it was named. The same flag filters
   # the other commands, and here it says which project the entry belongs to.
@@ -1866,6 +1950,10 @@ if [ "$cmd" = write ]; then
     [ -z "$project" ] || printf 'project: %s\n' "$project"
     printf 'summary: "%s"\n' "$summary"
     printf 'cwd: %s\n' "$(abbrev_home "$cwd")"
+    # Quoted, so a name such as `null`, `yes` or `12345` stays a name for a
+    # YAML reader.
+    [ -z "$host" ] || printf 'host: "%s"\n' "$host"
+    [ -z "$user" ] || printf 'user: "%s"\n' "$user"
     [ -z "$agent" ] || printf 'agent: %s\n' "$agent"
     [ -z "$session_id" ] || printf 'session_id: %s\n' "$session_id"
     printf -- '---\n\n'
@@ -1964,6 +2052,9 @@ if [ "$cmd" = resolve ]; then
   resolve_project "$cwd"
   printf 'project=%s\n' "$project"
   printf 'cwd=%s\n' "$(abbrev_home "$cwd")"
+  resolve_machine
+  printf 'host=%s\n' "$host"
+  printf 'user=%s\n' "$user"
   printf 'journal_dir=%s\n' "$(abbrev_home "$journal_dir")"
   exit 0
 fi
@@ -1992,6 +2083,7 @@ if [ "$recall" = 1 ]; then
 fi
 
 resolve_project "$cwd"
+resolve_machine
 
 # Each template is the whole of its text, placeholders and all, so that every
 # word a model is given lives in one file a person can read. This is the only
@@ -2001,14 +2093,18 @@ AGENT_JOURNAL_TIME=$time awk \
   -v journal_dir="$journal_dir" \
   -v project="$project" \
   -v cwd="$(abbrev_home "$cwd")" \
+  -v host="$host" \
+  -v user="$user" \
   -v session_id="$session_id" \
   -v agent="$agent" '
   BEGIN {
-    keys = "journal_dir project cwd session_id agent time"
+    keys = "journal_dir project cwd host user session_id agent time"
     n = split(keys, key, " ")
     value["journal_dir"] = journal_dir
     value["project"] = project
     value["cwd"] = cwd
+    value["host"] = host
+    value["user"] = user
     value["session_id"] = session_id
     value["agent"] = agent
     value["time"] = ENVIRON["AGENT_JOURNAL_TIME"]

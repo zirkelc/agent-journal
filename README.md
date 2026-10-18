@@ -26,15 +26,16 @@ Nothing leaves your machine unless you turn on git sync.
 
 - **No server, no account, no API requests.** The plugin runs locally and makes no network requests of its own.
 - **No hidden tool calls.** Entries are written by the model's own file-writing tool, in your session, in front of you. Nothing runs between sessions.
-- **A read-only hook.** At session start, a hook (a shell script in [`codex/`](codex/) for Codex, a hooks module for Claude Code) reads `~/.config/agent-journal/config` and runs `git rev-parse` to name the project. It writes no files.
+- **A read-only hook.** At session start, a hook reads the config and resolves the dynamic values (project, agent, session, etc.). It writes no files.
 - **Your own files.** Entries are plain markdown in a directory you choose. Delete one and it is gone.
+- **Machine and account names.** Each entry records the host name and the user name, so with git sync they go to your remote too. Set `host` or `user` to an empty value to leave them out, or set a name of your choice, see [Configuration](#configuration).
 - **Sync only when you turn it on.** [Git sync](#git-sync) is off by default. When you turn it on, the entries go to the git remote that you choose, and nowhere else.
 
 Everything stays between you and your model.
 
 ## How
 
-At the start of a session, the plugin injects [`INSTRUCTIONS.md`](templates/INSTRUCTIONS.md) into the context. It contains the journalling rules and the resolved values for your current project, working directory and session.
+At the start of a session, the plugin injects [`INSTRUCTIONS.md`](templates/INSTRUCTIONS.md) into the context. It contains the journalling rules and the resolved values for your current project, working directory, agent and session.
 
 The model then records each important event in a new markdown file in `~/agent-journal/`. It does this without being asked and without interrupting you.
 
@@ -54,6 +55,8 @@ date: 2026-01-11T14:30:00Z
 project: my-awesome-lib
 summary: "Shipped the v1.2 sync path on prepared statements, with rollback when a batch fails."
 cwd: ~/Developer/my-awesome-lib
+host: "macbook"
+user: "chris"
 agent: claude/opus-5
 session_id: 4eb89b17-6f7f-4264-95d4-ea5313ef277e
 ---
@@ -226,6 +229,10 @@ If you have the [CLI](#cli) installed, you can change the config with `agent-jou
 | --- | --- | --- |
 | `journal_dir` | `~/agent-journal` | default directory for journal entries |
 | `sync` | off | `git` to commit and push the journal folder after each write, see [Git sync](#git-sync) |
+| `host` | the local host name on macOS, else the host name without its domain | the machine name each entry records. Set it to `''` to record none |
+| `user` | the login name | the account name each entry records. Set it to `''` to record none |
+
+With git sync, one journal can hold entries from several machines. `host` and `user` tell you where an entry was written, and so where you can resume its session. Set a stable name if the system's name changes or tells more than you want to share, for example `aj config set host macbook`. `aj config unset host` gives the system's name back.
 
 ## Git sync
 

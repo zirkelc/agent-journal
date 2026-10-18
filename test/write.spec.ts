@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { chmodSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
-import { type Fixture, fails, fixture, frontmatter, rows, run, tilde, worktree } from './helpers.js';
+import { configure, type Fixture, fails, fixture, frontmatter, rows, run, tilde, worktree } from './helpers.js';
 
 /**
  * A stand-in for `$EDITOR`: it fills the summary in and appends a body, the way
@@ -388,5 +388,54 @@ describe('the agent it records', () => {
     // Assert
     expect(result.status).toBe(2);
     expect(result.stderr).toContain('colon');
+  });
+});
+
+describe('the machine and the account it records', () => {
+  test(`should record the host and the user after the directory`, () => {
+    // Arrange
+    const store = fixture();
+    configure(store, ['set', 'host', 'macbook']);
+    configure(store, ['set', 'user', 'chris']);
+
+    // Act
+    run(store, ['write', '--summary', 'On the laptop.', '--agent', 'claude/opus'], { at: store.repo });
+
+    // Assert
+    const keys = Object.keys(frontmatter(written(store).text));
+    expect(keys).toEqual(['date', 'project', 'summary', 'cwd', 'host', 'user', 'agent']);
+    expect(frontmatter(written(store).text).host).toBe('macbook');
+    expect(frontmatter(written(store).text).user).toBe('chris');
+  });
+
+  // A YAML reader takes a bare `null` or `12345` as another type, not as a name.
+  test(`should quote the host and the user`, () => {
+    // Arrange
+    const store = fixture();
+    configure(store, ['set', 'host', '12345']);
+    configure(store, ['set', 'user', 'null']);
+
+    // Act
+    run(store, ['write', '--summary', 'Quoted.'], { at: store.repo });
+
+    // Assert
+    const text = written(store).text;
+    expect(text).toContain('\nhost: "12345"\n');
+    expect(text).toContain('\nuser: "null"\n');
+  });
+
+  test(`should leave the host and the user out when they are set to none`, () => {
+    // Arrange
+    const store = fixture();
+    configure(store, ['set', 'host', '']);
+    configure(store, ['set', 'user', '']);
+
+    // Act
+    run(store, ['write', '--summary', 'Anonymous.'], { at: store.repo });
+
+    // Assert
+    const result = frontmatter(written(store).text);
+    expect(result.host).toBeUndefined();
+    expect(result.user).toBeUndefined();
   });
 });

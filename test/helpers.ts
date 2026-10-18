@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -35,7 +35,40 @@ export type Fixture = {
   home: string;
   journalDir: string;
   repo: string;
+  /** A directory first on `PATH`, with the commands that name the machine and the account. */
+  fakes: string;
 };
+
+/** The names the fake commands give, unless a case sets its own. */
+export const FAKE_LOCAL_HOST_NAME = 'test-mac';
+export const FAKE_NODE_NAME = 'test-node.example.com';
+export const FAKE_ID_USER = 'test-id';
+export const FAKE_LOGIN = 'test-login';
+
+/** The real `uname`, for the calls that do not ask for the node name. */
+const REAL_UNAME = execFileSync('sh', ['-c', 'command -v uname'], { encoding: 'utf8' }).trim();
+
+/**
+ * Commands that stand in for the system's, so the host and the user an entry
+ * records do not depend on the machine that runs the tests. Each one gives its
+ * name from the environment, and fails when that name is empty.
+ */
+function fakeCommands(dir: string): void {
+  mkdirSync(dir, { recursive: true });
+  const write = (name: string, body: string) => {
+    writeFileSync(join(dir, name), `#!/bin/sh\n${body}\n`);
+    chmodSync(join(dir, name), 0o755);
+  };
+  write(
+    'scutil',
+    `[ "$1 $2" = '--get LocalHostName' ] && [ -n "$AJ_TEST_LOCAL_HOST_NAME" ] || exit 1\nprintf '%s\\n' "$AJ_TEST_LOCAL_HOST_NAME"`,
+  );
+  write(
+    'uname',
+    `[ "$1" = -n ] || exec ${REAL_UNAME} "$@"\n[ -n "$AJ_TEST_NODE_NAME" ] || exit 1\nprintf '%s\\n' "$AJ_TEST_NODE_NAME"`,
+  );
+  write('id', `[ "$1" = -un ] && [ -n "$AJ_TEST_ID_USER" ] || exit 1\nprintf '%s\\n' "$AJ_TEST_ID_USER"`);
+}
 
 export function fixture(instructions?: string): Fixture {
   /**
@@ -70,8 +103,11 @@ export function fixture(instructions?: string): Fixture {
   mkdirSync(repo, { recursive: true });
   execFileSync('git', ['init', '-q', repo]);
 
+  const fakes = join(home, 'fakes');
+  fakeCommands(fakes);
+
   /** Where the default lands once `HOME` points at the fixture. */
-  return { root, bin, home, journalDir: join(home, 'agent-journal'), repo };
+  return { root, bin, home, journalDir: join(home, 'agent-journal'), repo, fakes };
 }
 
 /** A name for commits, which a CI runner has no git config to give. */
@@ -124,6 +160,12 @@ function baseEnv(store: Fixture, extra: Record<string, string | undefined> = {})
     GIT_CEILING_DIRECTORIES: store.home,
     /** Point config resolution at the fixture, so the developer's own config never leaks in. */
     XDG_CONFIG_HOME: join(store.home, 'config'),
+    PATH: `${store.fakes}:${process.env.PATH}`,
+    AJ_TEST_LOCAL_HOST_NAME: FAKE_LOCAL_HOST_NAME,
+    AJ_TEST_NODE_NAME: FAKE_NODE_NAME,
+    AJ_TEST_ID_USER: FAKE_ID_USER,
+    LOGNAME: FAKE_LOGIN,
+    USER: FAKE_LOGIN,
     ...extra,
   };
   /** A key given as `undefined` is removed, so a case can run without it. */
