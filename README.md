@@ -112,6 +112,17 @@ Then open a new session and ask Claude to write a journal entry. By default, it 
 
 The rules for writing the journal reach the main conversation as a hidden message when the session starts, and again after `/clear` or a compaction. On a Team or Enterprise plan, or on a machine with managed settings, Claude Code loads a [built-in guard](https://code.claude.com/docs/en/plugins/mods/admin#know-what-happens-by-default) that keeps plugins out of the session's start-up context. There, the rules come with your first prompt instead, and with the first prompt after `/clear` or a compaction. A prompt that you send while a compaction runs can miss them. The prompt after it brings them again.
 
+#### Update
+
+Get the latest marketplace catalog, then update the plugin:
+
+```sh
+claude plugin marketplace update zirkelc
+claude plugin update agent-journal@zirkelc
+```
+
+Then restart Claude Code or run `/reload-plugins` to load the new version.
+
 #### What the plugin runs and reads
 
 The Claude Code plugin is a hooks module in [`claude-code/`](claude-code/). It does this:
