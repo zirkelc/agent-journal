@@ -209,3 +209,35 @@ describe('the agent', () => {
     expect(rendered).not.toContain('- `agent`: `');
   });
 });
+
+describe('the machine and the account', () => {
+  test(`should give the host and the user that are set`, () => {
+    // Arrange
+    const store = fixture();
+    configure(store, ['set', 'host', 'cookiebox']);
+    configure(store, ['set', 'user', 'agent']);
+
+    // Act
+    const result = fields(context(store));
+
+    // Assert
+    expect(result.host).toBe('cookiebox');
+    expect(result.user).toBe('agent');
+  });
+
+  test(`should take the whole line out when a name is set to none`, () => {
+    // Arrange
+    const store = fixture();
+    configure(store, ['set', 'host', '']);
+    configure(store, ['set', 'user', '']);
+
+    // Act
+    const rendered = context(store);
+
+    // Assert
+    expect(fields(rendered).host).toBe(undefined);
+    expect(fields(rendered).user).toBe(undefined);
+    expect(rendered).not.toContain('- `host`: `');
+    expect(rendered).not.toContain('- `user`: `');
+  });
+});

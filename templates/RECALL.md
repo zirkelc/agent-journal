@@ -22,6 +22,8 @@ Each entry starts with frontmatter:
 - `project`: the repository the work belongs to, named after its main checkout, so every worktree of it files under one name. Absent when the session was not in a repository
 - `summary`: one line on what happened and what it means
 - `cwd`: the directory the session worked in. This is where a worktree shows
+- `host`: the machine the session ran on. Absent when it was not recorded
+- `user`: the account the session ran as on that machine. Absent when it was not recorded
 - `agent`: the agent that wrote the entry, and the model it ran as
 - `session_id`: the session the entry came from
 
@@ -33,6 +35,8 @@ date: 2026-01-11T14:30:00Z
 project: my-lib
 summary: "Shipped the v1.2 sync path on prepared statements, with rollback when a batch fails. Not deployed, waiting on Monday's validation."
 cwd: ~/Developer/oss/my-lib
+host: "my-laptop"
+user: "me"
 agent: my-agent/my-model
 session_id: 4eb89b17-6f7f-4264-95d4-ea5313ef277e
 ---
@@ -64,6 +68,8 @@ The session the user is working in, the one the question comes from. Not the run
 
 - `project`: `__PROJECT__`
 - `cwd`: `__CWD__`
+- `host`: `__HOST__`
+- `user`: `__USER__`
 - `agent`: `__AGENT__`
 - `session_id`: `__SESSION_ID__`
 

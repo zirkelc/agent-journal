@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
-import { configure, fixture, settings } from './helpers.ts';
+import { configure, FAKE_ID_USER, FAKE_LOCAL_HOST_NAME, FAKE_LOGIN, fails, fixture, settings } from './helpers.ts';
 
 describe('defaults', () => {
   test(`should resolve the journal directory under home when nothing is configured`, () => {
@@ -157,5 +157,136 @@ describe('forward compatibility', () => {
     const written = readFileSync(configFile, 'utf8');
     expect(written).toContain(`store=project`);
     expect(written).toContain(`# mine`);
+  });
+});
+
+describe('the machine and the account', () => {
+  test(`should take the local host name and the login name when neither is set`, () => {
+    // Arrange
+    const store = fixture();
+
+    // Act
+    const result = settings(store);
+
+    // Assert
+    expect(result.host).toBe(FAKE_LOCAL_HOST_NAME);
+    expect(result.user).toBe(FAKE_LOGIN);
+  });
+
+  test(`should take the node name without its domain where there is no local host name`, () => {
+    // Arrange
+    const store = fixture();
+
+    // Act
+    const result = settings(store, { env: { AJ_TEST_LOCAL_HOST_NAME: '' } });
+
+    // Assert
+    expect(result.host).toBe('test-node');
+  });
+
+  test(`should ask the system for the user when the environment names none`, () => {
+    // Arrange
+    const store = fixture();
+
+    // Act
+    const result = settings(store, { env: { LOGNAME: undefined, USER: undefined } });
+
+    // Assert
+    expect(result.user).toBe(FAKE_ID_USER);
+  });
+
+  test(`should take a name that was set over the system's`, () => {
+    // Arrange
+    const store = fixture();
+
+    // Act
+    configure(store, ['set', 'host', 'macbook']);
+    configure(store, ['set', 'user', 'john.doe@corp.example.com']);
+    const result = settings(store);
+
+    // Assert
+    expect(result.host).toBe('macbook');
+    expect(result.user).toBe('john.doe@corp.example.com');
+  });
+
+  // Empty is off, so the key stays in the file. Without it, the system's name would come back.
+  test(`should keep an empty host in the file and resolve it to none`, () => {
+    // Arrange
+    const store = fixture();
+
+    // Act
+    configure(store, ['set', 'host', '']);
+    const result = settings(store);
+
+    // Assert
+    expect(result.host).toBe('');
+    expect(readFileSync(result.config_file, 'utf8')).toContain('\nhost=\n');
+  });
+
+  test(`should give the system's name back once the key is unset`, () => {
+    // Arrange
+    const store = fixture();
+    configure(store, ['set', 'user', '']);
+
+    // Act
+    configure(store, ['unset', 'user']);
+    const result = settings(store);
+
+    // Assert
+    expect(result.user).toBe(FAKE_LOGIN);
+    expect(readFileSync(result.config_file, 'utf8')).not.toMatch(/^user=/m);
+  });
+
+  test(`should remove the key on unset, whatever the environment holds`, () => {
+    // Arrange
+    const store = fixture();
+    configure(store, ['set', 'host', 'macbook']);
+
+    // Act
+    configure(store, ['unset', 'host'], { env: { keep_empty: '1' } });
+    const result = settings(store);
+
+    // Assert
+    expect(result.host).toBe(FAKE_LOCAL_HOST_NAME);
+    expect(readFileSync(result.config_file, 'utf8')).not.toMatch(/^host=/m);
+  });
+
+  test(`should refuse a name that would break the quotes around it`, () => {
+    // Arrange
+    const store = fixture();
+
+    // Act
+    const result = fails(store, ['config', 'set', 'host', 'a"b']);
+
+    // Assert
+    expect(result.status).toBe(2);
+    expect(settings(store).host).toBe(FAKE_LOCAL_HOST_NAME);
+  });
+
+  test(`should resolve a name edited into the file by hand to none when it cannot be quoted`, () => {
+    // Arrange
+    const store = fixture();
+    mkdirSync(join(store.home, 'config', 'agent-journal'), { recursive: true });
+    writeFileSync(join(store.home, 'config', 'agent-journal', 'config'), 'user=a\\b\n');
+
+    // Act
+    const result = settings(store);
+
+    // Assert
+    expect(result.user).toBe('');
+  });
+
+  test(`should read a config saved with CRLF line endings`, () => {
+    // Arrange
+    const store = fixture();
+    mkdirSync(join(store.home, 'config', 'agent-journal'), { recursive: true });
+    writeFileSync(join(store.home, 'config', 'agent-journal', 'config'), 'host=macbook\r\nsync=git\r\n');
+
+    // Act
+    const result = settings(store);
+
+    // Assert
+    expect(result.host).toBe('macbook');
+    expect(result.sync).toBe('git');
   });
 });

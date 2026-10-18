@@ -103,6 +103,8 @@ const FIELDS: ReadonlyArray<[string, string]> = [
   ['date', 'Date'],
   ['project', 'Project'],
   ['cwd', 'Directory'],
+  ['host', 'Host'],
+  ['user', 'User'],
   ['agent', 'Agent'],
   ['session_id', 'Session'],
 ];

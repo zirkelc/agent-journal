@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
-import { fixture, output, run, type Fixture } from './helpers.js';
+import { configure, fixture, output, run, type Fixture } from './helpers.js';
 
 /**
  * A fixed clock, zone and locale. The locale names use the language `zz`, which
@@ -36,6 +36,8 @@ describe('resolve', () => {
   test(`should print every value for one instant`, () => {
     // Arrange
     const store = fixture();
+    configure(store, ['set', 'host', 'macbook']);
+    configure(store, ['set', 'user', 'chris']);
 
     // Act
     const out = run(store, ['resolve'], {
@@ -82,6 +84,8 @@ describe('resolve', () => {
         'utc_last_month_until=2026-09-30T21:59:59Z',
         'project=repo',
         'cwd=~/repo',
+        'host=macbook',
+        'user=chris',
         'journal_dir=~/agent-journal',
         '',
       ].join('\n'),
