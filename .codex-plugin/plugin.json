@@ -17,5 +17,5 @@
     "recall",
     "sessions"
   ],
-  "hooks": "./codex/hooks.json"
+  "hooks": "./codex/session-hooks.json"
 }
