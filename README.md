@@ -22,14 +22,12 @@ Agent Journal makes the model record its work along the way: one small markdown 
 
 ## Privacy-first
 
-Nothing leaves your machine unless you turn on git sync.
+Nothing leaves your machine.
 
 - **No server, no account, no API requests.** The plugin runs locally and makes no network requests of its own.
-- **No hidden tool calls.** Entries are written by the model's own file-writing tool, in your session, in front of you. Nothing runs between sessions.
-- **A read-only hook.** At session start, a hook reads the config and resolves the dynamic values (project, agent, session, etc.). It writes no files.
+- **No hidden tool calls.** Entries are written by the model's own file-writing tool, in your session, in front of you.
+- **A read-only hook.** At session start, a hook reads the config and resolves the dynamic values (project, agent, session, etc.).
 - **Your own files.** Entries are plain markdown in a directory you choose. Delete one and it is gone.
-- **Machine and account names.** Each entry records the host name and the user name, so with git sync they go to your remote too. Set `host` or `user` to an empty value to leave them out, or set a name of your choice, see [Configuration](#configuration).
-- **Sync only when you turn it on.** [Git sync](#git-sync) is off by default. When you turn it on, the entries go to the git remote that you choose, and nowhere else.
 
 Everything stays between you and your model.
 
@@ -113,8 +111,6 @@ The plugin needs Claude Code 2.1.287 or later, because it is a [mod](https://cod
 
 Then open a new session and ask Claude to write a journal entry. By default, it writes to the directory `~/agent-journal/`.
 
-The rules for writing the journal reach the main conversation as a hidden message when the session starts, and again after `/clear` or a compaction. On a Team or Enterprise plan, or on a machine with managed settings, Claude Code loads a [built-in guard](https://code.claude.com/docs/en/plugins/mods/admin#know-what-happens-by-default) that keeps plugins out of the session's start-up context. There, the rules come with your first prompt instead, and with the first prompt after `/clear` or a compaction. A prompt that you send while a compaction runs can miss them. The prompt after it brings them again.
-
 #### Update
 
 Get the latest marketplace catalog, then update the plugin:
@@ -126,25 +122,9 @@ claude plugin update agent-journal@zirkelc
 
 Then restart Claude Code or run `/reload-plugins` to load the new version.
 
-#### What the plugin runs and reads
-
-The Claude Code plugin is a hooks module in [`claude-code/`](claude-code/). It does this:
-
-- **Programs.** It runs one program, the plugin's own [`bin/agent-journal`](bin/agent-journal), which is a readable POSIX shell script and not a compiled program. It never runs an `agent-journal` from your `PATH`. The script makes the journal rules for the session, lists and reads entries for the pane, and runs git sync. It uses standard shell tools (such as `awk`, `grep` and `ls`) and `git`. It runs `git rev-parse` to name the project of a directory. When git sync is on, it also commits the journal folder and pushes it (`git add`, `git commit`, `git pull --rebase`, `git push`). A push to an SSH remote makes git start `ssh` in batch mode, so it never asks for a password.
-- **What it reads.** It reads the conversation only to find out whether the journal rules are already in it. It looks for the rules' mark and reads nothing else from the messages. Through the script, it reads `~/.config/agent-journal/config` and the journal folder. It checks where the plugin's own folder is, to find the script.
-- **What it sends.** It sends no text from the conversation anywhere. The rules go into your own session, as a hidden message or as context of your prompt. Entries leave your machine only through git sync, to the remote that you set.
-- **Hooks.** It adds the rules to a prompt's context when the conversation does not hold them. It watches calls of the Write tool that write into the journal folder, to refresh the pane and to sync, and it does not change those calls.
-- **Agents.** It starts no agent. The code for a search agent is in the plugin, but it is turned off in this version. If it were on, the agent would get only your question and three tools that list, search and read the journal entries.
-
-#### The journal pane
-
-`/agent-journal` opens a pane beside the conversation. It lists the entries of the current project, or of all projects, grouped by day, and narrows them to a year, a month or a day. Press an entry to read it, or send it to the prompt.
-
-The pane keeps your project choice for the next session.
-
 #### Permissions
 
-Depending on your permission mode, Claude will ask for permission to write a journal entry. To allow journal entries in general, add this to `~/.claude/settings.json`:
+Depending on your permission mode, Claude asks for permission to write a journal entry. To allow all journal entries, add this to `~/.claude/settings.json`:
 
 ```json
 {
@@ -153,6 +133,10 @@ Depending on your permission mode, Claude will ask for permission to write a jou
   }
 }
 ```
+
+If you changed `journal_dir`, use that directory in the rule.
+
+For the journal pane and how the hooks give the rules to the session, see the [Claude Code plugin README](claude-code/README.md).
 
 ### Codex
 
@@ -267,7 +251,7 @@ Use your own journal folder in `--source` if you changed `journal_dir`.
 
 When sync is on, `aj sync` runs:
 
-- in Claude Code, after the model writes an entry, and once more when the session ends if the exit leaves time for it. It runs in the background, so the turn does not wait for a push. In the pane, the status line under the list shows the journal folder and, for a synced journal, `⇅` with the result of the last sync: green after a push, red with the reason after a failure.
+- in Claude Code, after each entry and when the session ends ([more](claude-code/README.md#git-sync)).
 - after `aj write`.
 - when you run `aj sync` yourself, for example for entries that Codex wrote.
 
