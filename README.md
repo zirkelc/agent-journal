@@ -136,7 +136,7 @@ Depending on your permission mode, Claude asks for permission to write a journal
 
 If you changed `journal_dir`, use that directory in the rule.
 
-For the journal pane and how the hooks give the rules to the session, see the [Claude Code plugin README](claude-code/README.md).
+For the journal pane, how the hooks give the rules to the session, and what the plugin runs, reads and sends, see the [Claude Code plugin README](claude-code/README.md).
 
 ### Codex
 

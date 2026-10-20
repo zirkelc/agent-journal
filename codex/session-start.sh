@@ -16,10 +16,10 @@
 # runs `/hooks` and trusts it. A first install therefore looks as though this
 # script does nothing, which is why the installer mentions the extra step.
 #
-# The `resume` event is deliberately not matched in hooks.json: a resumed session
-# still carries the instruction it was given, so a second copy would only spend
-# context. If Codex turns out to drop developer context when it restores a
-# session, that matcher is the one place to change.
+# The `resume` event is deliberately not matched in session-hooks.json: a
+# resumed session still carries the instruction it was given, so a second copy
+# would only spend context. If Codex turns out to drop developer context when it
+# restores a session, that matcher is the one place to change.
 #
 # Nothing here is worth failing a session over, so every path exits 0.
 
