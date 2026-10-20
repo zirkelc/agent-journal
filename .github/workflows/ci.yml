@@ -174,7 +174,7 @@ jobs:
       - name: Check that shipped changes have a new version
         run: |
           # What an installed copy runs. Tests, the README and CI are not in it,
-          # and the Claude Code plugin's tests sit under claude-code/ but are never loaded.
+          # and the Claude Code plugin's tests and README sit under claude-code/ but are never loaded.
           shipped='bin claude-code codex lib templates .claude-plugin .codex-plugin'
           version_at() { git show "$1:.claude-plugin/plugin.json" | jq -r .version; }
 
@@ -190,7 +190,7 @@ jobs:
           fi
 
           # shellcheck disable=SC2086
-          changed=$(git diff --name-only "$since" HEAD -- $shipped ':(exclude)claude-code/tests')
+          changed=$(git diff --name-only "$since" HEAD -- $shipped ':(exclude)claude-code/tests' ':(exclude)claude-code/*.md')
           [ -n "$changed" ] || exit 0
           if [ "$GITHUB_REF" != refs/heads/main ] && [ "$head" != "$base" ] &&
             [ "$(printf '%s\n%s\n' "$base" "$head" | sort -V | tail -1)" = "$head" ]; then
