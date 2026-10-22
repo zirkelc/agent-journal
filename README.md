@@ -173,9 +173,9 @@ The CLI is optional. You need it only to work with the journal from your shell. 
 
 | command          | same as                                                   | description                                                      |
 | ---------------- | --------------------------------------------------------- | ---------------------------------------------------------------- |
-| `aj list`        | `ls ~/agent-journal | tail -20`                           | the most recent entries, one line each                           |
+| `aj list`        | `ls ~/agent-journal \| tail -20`                           | the most recent entries, one line each                           |
 | `aj search TEXT` | `grep -rli 'rate limit' ~/agent-journal`                  | summaries and bodies, ignoring case                              |
-| `aj read ID`     | `cat "$(ls ~/agent-journal/*.md | tail -1)"`              | one entry in full                                                |
+| `aj read ID`     | `cat "$(ls ~/agent-journal/*.md \| tail -1)"`              | one entry in full                                                |
 | `aj write`       | `$EDITOR ~/agent-journal/$(date -u +%Y-%m-%dT%H%M%SZ).md` | add an entry yourself                                            |
 | `aj config`      | `cat ~/.config/agent-journal/config`                      | read and change the settings                                     |
 | `aj sync`        | `git add -A && git commit && git push`                    | commit the journal folder and push it, see [Git sync](#git-sync) |
