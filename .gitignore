@@ -8,4 +8,4 @@ node_modules/
 /tweets.md
 
 # Claude Code writes the journal pane's TypeScript types here each time it loads the plugin.
-/.claude-plugin/types/
+/claude-code/.claude-plugin/types/

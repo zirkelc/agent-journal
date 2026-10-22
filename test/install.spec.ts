@@ -89,11 +89,12 @@ describe('install.sh', () => {
     const installed = install();
 
     // Assert
-    const manifest = JSON.parse(readFileSync(join(installed.dataDir, '.claude-plugin', 'plugin.json'), 'utf8'));
-    const hooksFile = join(installed.dataDir, manifest.hooks);
+    const plugin = join(installed.dataDir, 'claude-code');
+    const manifest = JSON.parse(readFileSync(join(plugin, '.claude-plugin', 'plugin.json'), 'utf8'));
+    const hooksFile = join(plugin, manifest.hooks);
     const hooks = JSON.parse(readFileSync(hooksFile, 'utf8'));
     const named = [manifest.types, ...hooks.modules.map((module: string) => join(dirname(manifest.hooks), module))];
-    for (const path of named) expect(existsSync(join(installed.dataDir, path))).toBe(true);
+    for (const path of named) expect(existsSync(join(plugin, path))).toBe(true);
   });
 
   test(`should render the instruction when run through the symlink`, () => {

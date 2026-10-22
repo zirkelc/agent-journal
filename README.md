@@ -262,6 +262,12 @@ A sync never waits for input: git does not prompt for a password, ssh runs in ba
 > [!WARNING]
 > A push sends your entries to the remote. Entries describe your work, so use a private repository.
 
+## Development
+
+Each plugin is a folder of its own: [`claude-code/`](claude-code) for Claude Code and [`codex/`](codex) for Codex. An install copies only the plugin folder, not the rest of this repository. So each plugin folder holds a copy of the shared core: `bin/`, `templates/` and `LICENSE`. `lib/` holds the `install` command, which runs only from the CLI install, so the plugins do not need it.
+
+Edit the shared core at the repository root, never the copies. The pre-commit hook copies the staged root files into each plugin folder and stages the copies. `pnpm install` turns the hook on. To copy without a commit, stage the root files and run `pnpm sync`. The tests fail when a copy is not equal to its root file.
+
 ## Credits
 
 The idea for an agent journal comes from [Malaiac's Claude Diary](https://github.com/Malaiac/claude/tree/main/templates/diary).

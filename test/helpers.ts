@@ -89,8 +89,7 @@ export function fixture(instructions?: string): Fixture {
    * nothing. They are copied rather than symlinked so a case is free to replace
    * one.
    */
-  mkdirSync(join(root, 'codex'), { recursive: true });
-  copyFileSync(join(ROOT, 'codex', 'hook-json.sh'), join(root, 'codex', 'hook-json.sh'));
+  copyFileSync(join(ROOT, 'codex', 'hook-json.sh'), join(root, 'hook-json.sh'));
   mkdirSync(join(root, 'lib'), { recursive: true });
   copyFileSync(join(ROOT, 'lib', 'install.sh'), join(root, 'lib', 'install.sh'));
   mkdirSync(join(root, 'templates'), { recursive: true });

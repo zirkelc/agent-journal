@@ -16,7 +16,7 @@
 # runs `/hooks` and trusts it. A first install therefore looks as though this
 # script does nothing, which is why the installer mentions the extra step.
 #
-# The `resume` event is deliberately not matched in session-hooks.json: a
+# The `resume` event is deliberately not matched in hooks.json: a
 # resumed session still carries the instruction it was given, so a second copy
 # would only spend context. If Codex turns out to drop developer context when it
 # restores a session, that matcher is the one place to change.
@@ -34,9 +34,9 @@ payload=$(cat)
 # none is worked out from where this script sits.
 [ -n "${PLUGIN_ROOT:-}" ] || exit 0
 [ -x "$PLUGIN_ROOT/bin/agent-journal" ] || exit 0
-[ -r "$PLUGIN_ROOT/codex/hook-json.sh" ] || exit 0
+[ -r "$PLUGIN_ROOT/hook-json.sh" ] || exit 0
 
-. "$PLUGIN_ROOT/codex/hook-json.sh"
+. "$PLUGIN_ROOT/hook-json.sh"
 
 journal_read_payload <<EOF
 $payload
