@@ -8,12 +8,12 @@
     "$C" $F --force-device-scale-factor=2 --window-size=1252,790 \
       --screenshot=assets/codex-light.png "file://$(realpath assets/codex.html)?light"
 
-  Same rules as session.html: the window is sized to the longest line so the png
-  carries no dead space, and the ground stays transparent.
+  The window is sized to the longest line so the png carries no dead space, and
+  the ground stays transparent.
 
-  Codex draws a transcript rather than a stream of tool calls, so the parts that
-  differ from the Claude Code shot are its own: the boxed banner, the full-width
-  band behind each user turn, and the rules between turns.
+  Codex draws a transcript rather than a stream of tool calls, so the page has
+  the boxed banner, the full-width band behind each user turn, and the rules
+  between turns.
 -->
 <title>agent-journal — codex</title>
 

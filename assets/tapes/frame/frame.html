@@ -1,0 +1,76 @@
+<!doctype html>
+<!--
+  The window frame that frame.sh puts over a take: the page background, a
+  window with rounded corners, and a macOS title bar with a title. The part
+  where the terminal shows is transparent. vhs draws no title, so the frame
+  comes from this page instead.
+
+  Query: w and h (the terminal in pixels), mode (the page: light or dark),
+  window (the title bar: light or dark), title, and
+  optional m (margin), bar (title bar height) and r (corner radius).
+-->
+<meta charset="utf-8" />
+<title>frame</title>
+<style>
+  html, body { margin: 0; background: transparent; }
+  canvas { display: block; }
+</style>
+<canvas id="c"></canvas>
+<script>
+  const p = new URLSearchParams(location.search);
+  const w = +p.get('w'), h = +p.get('h');
+  const m = +(p.get('m') ?? 24), bar = +(p.get('bar') ?? 40), r = +(p.get('r') ?? 10);
+  const dark = p.get('mode') !== 'light';
+  const title = p.get('title') ?? '';
+  const lightWindow = p.get('window') === 'light';
+
+  // GitHub's page backgrounds, so the image has no visible edge in the README.
+  const page = dark ? '#0d1117' : '#ffffff';
+  const barFill = lightWindow ? '#dcdcdc' : '#333333';
+  const titleFill = lightWindow ? '#4d4d4d' : '#b0b0b0';
+  const border = dark ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.18)';
+
+  const W = w + 2 * m, H = h + bar + 2 * m;
+  const c = document.getElementById('c');
+  c.width = W;
+  c.height = H;
+  const x = c.getContext('2d');
+
+  const windowPath = () => {
+    x.beginPath();
+    x.roundRect(m, m, w, h + bar, r);
+  };
+
+  x.fillStyle = page;
+  x.fillRect(0, 0, W, H);
+
+  // The window: the title bar color everywhere inside the rounded shape, then a
+  // hole where the terminal shows. The hole is cut inside the shape only, so
+  // the bottom corners keep the page color.
+  x.save();
+  windowPath();
+  x.clip();
+  x.fillStyle = barFill;
+  x.fillRect(m, m, w, h + bar);
+  x.globalCompositeOperation = 'destination-out';
+  x.fillRect(m, m + bar, w, h);
+  x.restore();
+
+  windowPath();
+  x.strokeStyle = border;
+  x.lineWidth = 1;
+  x.stroke();
+
+  ['#ff5f57', '#febc2e', '#28c840'].forEach((color, i) => {
+    x.beginPath();
+    x.arc(m + 20 + i * 20, m + bar / 2, 6, 0, 2 * Math.PI);
+    x.fillStyle = color;
+    x.fill();
+  });
+
+  x.fillStyle = titleFill;
+  x.font = '600 15px -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif';
+  x.textAlign = 'center';
+  x.textBaseline = 'middle';
+  x.fillText(title, m + w / 2, m + bar / 2 + 1);
+</script>
