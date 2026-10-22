@@ -1,16 +1,11 @@
+<div align='center'>
   <h1>Agent Journal</h1>
   <p align="center">A journal written by your agent. Autonomously.</p>
 
   <picture>
-
-    <source media="(prefers-color-scheme: dark)" srcset="assets/session-dark.png" />
-
-    <source media="(prefers-color-scheme: light)" srcset="assets/session-light.png" />
-
-    <img src="assets/session-light.png" alt="A session where the agent writes a journal entry on its own" />
-
+    <source media="(prefers-color-scheme: dark)" srcset="assets/session-dark.gif" />
+    <img src="assets/session-light.gif" alt="Claude Code changes a function and writes a journal entry on its own, then ls and cat show the entry as a plain markdown file in the journal folder" />
   </picture>
-
 </div>
 
 ## Why
