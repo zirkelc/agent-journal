@@ -262,7 +262,7 @@ function headerView(ui: Ui, actions: PaneActions, model: PaneModel): RenderEleme
   const back = model.opened !== null ? () => actions.back() : () => actions.showList();
   return (
     <Box flexDirection="row" justifyContent="space-between" marginBottom={1}>
-      {/* The star and the color are the logo's, and the theme key follows the person's theme. */}
+      {/* The star and the color are the logo's, and the theme color follows the person's theme. */}
       <Text bold color="claude">
         ✦ AGENT JOURNAL
       </Text>
