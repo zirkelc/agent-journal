@@ -1,5 +1,10 @@
 # Agent Journal for Claude Code
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../assets/claude-code-session-dark.gif" />
+  <img src="../assets/claude-code-session-light.gif" alt="Claude Code writes a journal entry while the journal pane is open, the entry appears at the top of the pane, then ls and cat show it as a plain markdown file in the journal folder" />
+</picture>
+
 This folder is the Claude Code plugin of [Agent Journal](../README.md). It is a [hooks module](https://code.claude.com/docs/en/plugins/mods/overview) that Claude Code loads itself. The plugin gives each session the rules for writing the journal, opens the journal pane with `/agent-journal`, and syncs the journal with git when you turn sync on.
 
 ## Install
@@ -50,11 +55,21 @@ The rules name the journal directory from the config at the start of the session
 
 `/agent-journal` opens a pane beside the conversation. In a narrow terminal, the pane opens when you make the terminal wider.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../assets/claude-code-pane-dark.png" />
+  <img src="../assets/claude-code-pane-light.png" alt="The journal pane beside the conversation, with the entries of all projects grouped by day" />
+</picture>
+
 - **Project:** `All` lists the entries of all projects. `Current` lists only the entries of the current repository. The pane keeps this choice for the next session.
 - **Date:** `All` shows all dates. `Year`, `Month` and `Day` narrow the list to one period, and `‹` and `›` step to the period before or after it.
 - **List:** It groups the entries by day, newest first. Older entries load when you scroll near the end.
 - **Entry:** Press an entry to read it. The pane shows its fields (date, project, directory, host, user, agent and session) and its body. `↳ Send to prompt` puts the whole entry into the prompt.
 - **Back:** `← Back` or Esc goes from an entry back to the list. Esc in the list closes the pane.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../assets/claude-code-pane-entry-dark.png" />
+  <img src="../assets/claude-code-pane-entry-light.png" alt="An opened entry in the journal pane, with its summary, fields and body" />
+</picture>
 
 The last row of the list shows the journal directory. When git sync is on, it also shows `⇅` with the result of the last sync: green after a push, red with the reason after a failure.
 
