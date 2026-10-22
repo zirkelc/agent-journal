@@ -1,12 +1,16 @@
-<div align='center'>
   <h1>Agent Journal</h1>
   <p align="center">A journal written by your agent. Autonomously.</p>
 
   <picture>
+
     <source media="(prefers-color-scheme: dark)" srcset="assets/session-dark.png" />
+
     <source media="(prefers-color-scheme: light)" srcset="assets/session-light.png" />
+
     <img src="assets/session-light.png" alt="A session where the agent writes a journal entry on its own" />
+
   </picture>
+
 </div>
 
 ## Why
@@ -35,7 +39,7 @@ Everything stays between you and your model.
 
 At the start of a session, the plugin injects [`INSTRUCTIONS.md`](templates/INSTRUCTIONS.md) into the context. It contains the journalling rules and the resolved values for your current project, working directory, agent and session.
 
-The model then records each important event in a new markdown file in `~/agent-journal/`. It does this without being asked and without interrupting you.
+The model then records each important event in a new markdown file. It does this without being asked and without interrupting you.
 
 ## Format
 
@@ -171,16 +175,18 @@ Use the full path rather than `~`. `writable_roots` only applies in `workspace-w
 
 The CLI is optional. You need it only to work with the journal from your shell. It is a thin layer over `ls` and `grep` for common commands:
 
-| command | same as | description |
-| --- | --- | --- |
-| `aj list` | `ls ~/agent-journal \| tail -20` | the most recent entries, one line each |
-| `aj search TEXT` | `grep -rli 'rate limit' ~/agent-journal` | summaries and bodies, ignoring case |
-| `aj read ID` | `cat "$(ls ~/agent-journal/*.md \| tail -1)"` | one entry in full |
-| `aj write` | `$EDITOR ~/agent-journal/$(date -u +%Y-%m-%dT%H%M%SZ).md` | add an entry yourself |
-| `aj config` | `cat ~/.config/agent-journal/config` | read and change the settings |
-| `aj sync` | `git add -A && git commit && git push` | commit the journal folder and push it, see [Git sync](#git-sync) |
-| `aj install` | | which agents are on this machine, and how to wire each one up |
-| `aj help` | | every command and option |
+
+| command          | same as                                                   | description                                                      |
+| ---------------- | --------------------------------------------------------- | ---------------------------------------------------------------- |
+| `aj list`        | `ls ~/agent-journal | tail -20`                           | the most recent entries, one line each                           |
+| `aj search TEXT` | `grep -rli 'rate limit' ~/agent-journal`                  | summaries and bodies, ignoring case                              |
+| `aj read ID`     | `cat "$(ls ~/agent-journal/*.md | tail -1)"`              | one entry in full                                                |
+| `aj write`       | `$EDITOR ~/agent-journal/$(date -u +%Y-%m-%dT%H%M%SZ).md` | add an entry yourself                                            |
+| `aj config`      | `cat ~/.config/agent-journal/config`                      | read and change the settings                                     |
+| `aj sync`        | `git add -A && git commit && git push`                    | commit the journal folder and push it, see [Git sync](#git-sync) |
+| `aj install`     |                                                           | which agents are on this machine, and how to wire each one up    |
+| `aj help`        |                                                           | every command and option                                         |
+
 
 `list` is the default command, so `aj` and `aj list` are the same.
 
@@ -188,16 +194,18 @@ Entries are listed oldest first, so the newest is nearest the prompt. Each line 
 
 `list` and `search` take the same filters:
 
-| filter | value | description |
-| --- | --- | --- |
-| `--date` | `2026`, `2026-01`, `2026-01-11` | one year, month or day |
-| `--since` | `2026-01-11`, `today`, `7d`, `2026-01-11T14:30:00+01:00` | from this day or time on |
-| `--until` | same forms | up to and including this day or time |
-| `--project` | a project name, or `.` for here | entries filed under one project, across all its worktrees. `.` names the repository of the current directory the same way the session-start hook does, and fails outside a repository |
-| `--cwd` | a directory, or `.` for here | one directory and everything under it |
-| `--limit` | a number, default `20` | how many of the most recent to print |
-| `--offset` | a number, default `0` | skip this many of the most recent first, to page back through older entries |
-| `--all` | | no limit |
+
+| filter      | value                                                    | description                                                                                                                                                                           |
+| ----------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--date`    | `2026`, `2026-01`, `2026-01-11`                          | one year, month or day                                                                                                                                                                |
+| `--since`   | `2026-01-11`, `today`, `7d`, `2026-01-11T14:30:00+01:00` | from this day or time on                                                                                                                                                              |
+| `--until`   | same forms                                               | up to and including this day or time                                                                                                                                                  |
+| `--project` | a project name, or `.` for here                          | entries filed under one project, across all its worktrees. `.` names the repository of the current directory the same way the session-start hook does, and fails outside a repository |
+| `--cwd`     | a directory, or `.` for here                             | one directory and everything under it                                                                                                                                                 |
+| `--limit`   | a number, default `20`                                   | how many of the most recent to print                                                                                                                                                  |
+| `--offset`  | a number, default `0`                                    | skip this many of the most recent first, to page back through older entries                                                                                                           |
+| `--all`     |                                                          | no limit                                                                                                                                                                              |
+
 
 Days are local days, in the time zone of the machine. The IDs stay UTC, so an entry written just after local midnight can carry the date before: in Berlin in winter, `--date 2026-01-11` includes `2026-01-10T231500Z`. A time takes an offset (`+01:00`) or `Z`, and without one it is local time. `--until` with a time includes an entry written in that second. For one exact entry, use `aj read` with its ID.
 
@@ -216,18 +224,26 @@ The config lives in `~/.config/agent-journal/config` and you can edit the file d
 
 # journal_dir=<directory>
 journal_dir=~/agent-journal
+
+# sync=git
+sync=git
+
+# host=<machine name>, or empty to record none
+host=macbook
+
+# user=<account name>, or empty to record none
+user=chris
 ```
 
 If you have the [CLI](#cli) installed, you can change the config with `agent-journal config set <key> <value>`:
 
-| key | default | description |
-| --- | --- | --- |
-| `journal_dir` | `~/agent-journal` | default directory for journal entries |
-| `sync` | off | `git` to commit and push the journal folder after each write, see [Git sync](#git-sync) |
-| `host` | the local host name on macOS, else the host name without its domain | the machine name each entry records. Set it to `''` to record none |
-| `user` | the login name | the account name each entry records. Set it to `''` to record none |
+- `journal_dir`: the directory for journal entries. Default: `~/agent-journal`.
+- `sync`: set it to `git` to commit and push the journal folder after each write, see [Git sync](#git-sync). Default: off.
+- `host`: the machine name each entry records. If not set, the local host name on macOS, else the host name without its domain. If set to empty (`host=`), entries record no host.
+- `user`: the account name each entry records. If not set, the login name. If set to empty (`user=`), entries record no user.
 
-With git sync, one journal can hold entries from several machines. `host` and `user` tell you where an entry was written, and so where you can resume its session. Set a stable name if the system's name changes or tells more than you want to share, for example `aj config set host macbook`. `aj config unset host` gives the system's name back.
+> [!TIP]
+> With git sync, one journal can hold entries from several machines. `host` and `user` tell you where an entry was written, and so where you can resume its session. Set a stable name if the system's name changes or tells more than you want to share, for example `aj config set host macbook`. `aj config unset host` gives the system's name back.
 
 ## Git sync
 
@@ -261,12 +277,6 @@ A sync never waits for input: git does not prompt for a password, ssh runs in ba
 
 > [!WARNING]
 > A push sends your entries to the remote. Entries describe your work, so use a private repository.
-
-## Development
-
-Each plugin is a folder of its own: [`claude-code/`](claude-code) for Claude Code and [`codex/`](codex) for Codex. An install copies only the plugin folder, not the rest of this repository. So each plugin folder holds a copy of the shared core: `templates/`, `LICENSE`, and `bin/agent-journal` as `scripts/agent-journal`. A plugin has no `bin/` folder, because Claude Code puts that folder on the Bash tool's `PATH`, and claude.ai and Cowork do not install a plugin that has one. `lib/` holds the `install` command, which runs only from the CLI install, so the plugins do not need it.
-
-Edit the shared core at the repository root, never the copies. The pre-commit hook copies the staged root files into each plugin folder and stages the copies. `pnpm install` turns the hook on. To copy without a commit, stage the root files and run `pnpm sync`. The tests fail when a copy is not equal to its root file.
 
 ## Credits
 
