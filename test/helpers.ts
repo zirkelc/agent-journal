@@ -77,10 +77,11 @@ export function fixture(instructions?: string): Fixture {
    */
   const home = realpathSync(mkdtempSync(join(tmpdir(), 'agent-journal-')));
   const root = join(home, 'plugin');
-  const bin = join(root, 'bin', 'agent-journal');
+  /** Where a plugin folder holds the CLI, so the Codex hook finds it from the plugin root. */
+  const bin = join(root, 'scripts', 'agent-journal');
   const repo = join(home, 'repo');
 
-  mkdirSync(join(root, 'bin'), { recursive: true });
+  mkdirSync(join(root, 'scripts'), { recursive: true });
   copyFileSync(join(ROOT, 'bin', 'agent-journal'), bin);
 
   /**

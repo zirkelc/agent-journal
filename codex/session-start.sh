@@ -33,7 +33,7 @@ payload=$(cat)
 # Codex names the plugin root. Every path is written out from it in full, and
 # none is worked out from where this script sits.
 [ -n "${PLUGIN_ROOT:-}" ] || exit 0
-[ -x "$PLUGIN_ROOT/bin/agent-journal" ] || exit 0
+[ -x "$PLUGIN_ROOT/scripts/agent-journal" ] || exit 0
 [ -r "$PLUGIN_ROOT/hook-json.sh" ] || exit 0
 
 . "$PLUGIN_ROOT/hook-json.sh"
@@ -43,7 +43,7 @@ $payload
 EOF
 
 # Without a cwd in the payload, the core falls back to the directory it runs in.
-out=$("$PLUGIN_ROOT/bin/agent-journal" context \
+out=$("$PLUGIN_ROOT/scripts/agent-journal" context \
   --cwd "$cwd" \
   --session-id "$session_id" \
   --agent "$(journal_agent codex)" 2>/dev/null) || exit 0

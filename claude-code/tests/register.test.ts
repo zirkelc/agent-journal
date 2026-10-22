@@ -631,7 +631,7 @@ describe('register', () => {
     // Arrange
     const kept = world(on, {
       list: line('2026-10-05T143000Z', 'repo', 'Did a thing'),
-      lands: (path) => (path.includes('/bin/') ? undefined : '/repo'),
+      lands: (path) => (path.includes('/scripts/') ? undefined : '/repo'),
     });
     await $.session.start(SESSION);
 
@@ -641,14 +641,15 @@ describe('register', () => {
 
     // Assert
     const listed = kept.queries().find((run) => run.argv[1] === 'list');
-    expect(listed?.argv[0]).toBe('/repo/bin/agent-journal');
+    expect(listed?.argv[0]).toBe('/repo/scripts/agent-journal');
   });
 
   test('the CLI of the checkout is found through a linked plugin root', async ($, on) => {
     // Arrange
     const kept = world(on, {
       list: line('2026-10-05T143000Z', 'repo', 'Did a thing'),
-      lands: (path) => (path === '/repo/bin/agent-journal' ? path : path.includes('/bin/') ? undefined : '/repo'),
+      lands: (path) =>
+        path === '/repo/scripts/agent-journal' ? path : path.includes('/scripts/') ? undefined : '/repo',
     });
     await $.session.start(SESSION);
 
@@ -658,6 +659,6 @@ describe('register', () => {
 
     // Assert
     const listed = kept.queries().find((run) => run.argv[1] === 'list');
-    expect(listed?.argv[0]).toBe('/repo/bin/agent-journal');
+    expect(listed?.argv[0]).toBe('/repo/scripts/agent-journal');
   });
 });

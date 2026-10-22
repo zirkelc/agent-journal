@@ -22,20 +22,43 @@ cd "$(git rev-parse --show-toplevel)"
 plugins='claude-code codex'
 shared='bin templates LICENSE'
 
+# Where a shared file goes in a plugin folder. The CLI goes to `scripts/`,
+# because Claude Code puts a plugin's `bin/` on the Bash tool's PATH, and
+# claude.ai and Cowork refuse to install a plugin that has one.
+copy_of() {
+  case $1 in
+    bin | bin/*) printf 'scripts%s' "${1#bin}" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+# The other way: the root file that a path in a plugin folder is a copy of.
+source_of() {
+  case $1 in
+    scripts | scripts/*) printf 'bin%s' "${1#scripts}" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
 # shellcheck disable=SC2086
 git ls-files --stage -- $shared | while read -r mode blob _ path; do
   for plugin in $plugins; do
-    git update-index --add --cacheinfo "$mode,$blob,$plugin/$path"
-    git checkout-index --force -- "$plugin/$path"
+    copy=$plugin/$(copy_of "$path")
+    git update-index --add --cacheinfo "$mode,$blob,$copy"
+    git checkout-index --force -- "$copy"
   done
 done
 
 # A shared file that was deleted or renamed leaves a copy behind, which would
-# still ship. Every staged copy must have a source at the root.
+# still ship. Every staged copy must have a source at the root, and nothing may
+# be left in a plugin's `bin/`.
 for plugin in $plugins; do
   # shellcheck disable=SC2086
-  git ls-files -- $(for item in $shared; do printf '%s/%s ' "$plugin" "$item"; done) | while read -r copy; do
-    source=${copy#"$plugin"/}
-    [ -n "$(git ls-files -- "$source")" ] || git rm --force --quiet -- "$copy"
+  git ls-files -- $(for item in $shared; do printf '%s/%s ' "$plugin" "$(copy_of "$item")"; done) "$plugin/bin" | while read -r copy; do
+    source=$(source_of "${copy#"$plugin"/}")
+    case $copy in
+      "$plugin"/bin/*) source= ;;
+    esac
+    [ -n "$source" ] && [ -n "$(git ls-files -- "$source")" ] || git rm --force --quiet -- "$copy"
   done
 done

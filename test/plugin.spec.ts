@@ -152,19 +152,36 @@ describe.each(COMMAND_AGENTS)('the $name hook command', (agent) => {
   });
 });
 
-/** The files at the root that each plugin folder carries a copy of. */
-const SHARED = ['bin', 'templates', 'LICENSE'];
+/**
+ * The files at the root that each plugin folder carries a copy of, and where the
+ * copy goes. The CLI goes to `scripts/`, because Claude Code puts a plugin's
+ * `bin/` on the Bash tool's `PATH`, and claude.ai and Cowork refuse to install a
+ * plugin that has one.
+ */
+const SHARED: Array<{ source: string; copy: string }> = [
+  { source: 'bin', copy: 'scripts' },
+  { source: 'templates', copy: 'templates' },
+  { source: 'LICENSE', copy: 'LICENSE' },
+];
 
-/** Every file under the shared paths, relative to `dir`. */
-function sharedFiles(dir: string): Array<string> {
-  return SHARED.flatMap((item) => {
-    const path = join(ROOT, dir, item);
-    if (!statSync(path, { throwIfNoEntry: false })) return [];
-    if (statSync(path).isFile()) return [item];
-    return readdirSync(path, { recursive: true, encoding: 'utf8' })
-      .map((entry) => join(item, entry))
-      .filter((entry) => statSync(join(ROOT, dir, entry)).isFile());
-  }).sort();
+/** Every file under `item` in `dir`, relative to `item`, or `''` when `item` is a file. */
+function filesUnder(dir: string, item: string): Array<string> {
+  const path = join(ROOT, dir, item);
+  if (!statSync(path, { throwIfNoEntry: false })) return [];
+  if (statSync(path).isFile()) return [''];
+  return readdirSync(path, { recursive: true, encoding: 'utf8' }).filter((entry) =>
+    statSync(join(path, entry)).isFile(),
+  );
+}
+
+/** Each shared file at the root, with the path of its copy in `dir`. */
+function sharedPairs(dir: string): Array<{ source: string; copy: string }> {
+  return SHARED.flatMap((item) =>
+    filesUnder('.', item.source).map((rest) => ({
+      source: join(item.source, rest),
+      copy: join(dir, item.copy, rest),
+    })),
+  );
 }
 
 /**
@@ -173,12 +190,16 @@ function sharedFiles(dir: string): Array<string> {
  * without it.
  */
 describe.each(AGENTS)('the shared core in the $name plugin', (agent) => {
-  test(`should hold the same files as the root`, () => {
+  test(`should hold a copy of each shared file and nothing else`, () => {
     // Arrange
-    const expected = sharedFiles('.');
+    const expected = sharedPairs(agent.dir)
+      .map((pair) => pair.copy)
+      .sort();
 
     // Act
-    const copied = sharedFiles(agent.dir);
+    const copied = SHARED.flatMap((item) =>
+      filesUnder(agent.dir, item.copy).map((rest) => join(agent.dir, item.copy, rest)),
+    ).sort();
 
     // Assert
     expect(copied).toEqual(expected);
@@ -186,17 +207,25 @@ describe.each(AGENTS)('the shared core in the $name plugin', (agent) => {
 
   test(`should hold the same content and modes as the root`, () => {
     // Arrange
-    const files = sharedFiles('.');
+    const pairs = sharedPairs(agent.dir);
 
     // Act
-    const differ = files.filter((file) => {
-      const source = join(ROOT, file);
-      const copy = join(ROOT, agent.dir, file);
+    const differ = pairs.filter((pair) => {
+      const source = join(ROOT, pair.source);
+      const copy = join(ROOT, pair.copy);
       return !readFileSync(copy).equals(readFileSync(source)) || isExecutable(copy) !== isExecutable(source);
     });
 
     // Assert
     expect(differ).toEqual([]);
+  });
+
+  test(`should have no bin folder`, () => {
+    // Act
+    const bin = statSync(join(ROOT, agent.dir, 'bin'), { throwIfNoEntry: false });
+
+    // Assert
+    expect(bin).toBeUndefined();
   });
 });
 

@@ -64,7 +64,7 @@ When sync is on (see [Git sync](../README.md#git-sync) for the setup), the plugi
 
 ## What the plugin runs, reads and sends
 
-- **Programs:** The plugin runs one program, its own [`bin/agent-journal`](bin/agent-journal). This is a readable POSIX shell script, not a compiled program. The plugin finds it in its own folder and never runs an `agent-journal` from your `PATH`. The plugin runs the script with one of these subcommands:
+- **Programs:** The plugin runs one program, its own [`scripts/agent-journal`](scripts/agent-journal). This is a readable POSIX shell script, not a compiled program. The plugin finds it in its own folder and never runs an `agent-journal` from your `PATH`. The plugin runs the script with one of these subcommands:
   - `context` makes the journal rules for the session.
   - `config` reads the settings.
   - `list` and `read` get the entries for the pane.
