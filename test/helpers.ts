@@ -77,10 +77,11 @@ export function fixture(instructions?: string): Fixture {
    */
   const home = realpathSync(mkdtempSync(join(tmpdir(), 'agent-journal-')));
   const root = join(home, 'plugin');
-  const bin = join(root, 'bin', 'agent-journal');
+  /** Where a plugin folder holds the CLI, so the Codex hook finds it from the plugin root. */
+  const bin = join(root, 'scripts', 'agent-journal');
   const repo = join(home, 'repo');
 
-  mkdirSync(join(root, 'bin'), { recursive: true });
+  mkdirSync(join(root, 'scripts'), { recursive: true });
   copyFileSync(join(ROOT, 'bin', 'agent-journal'), bin);
 
   /**
@@ -89,8 +90,7 @@ export function fixture(instructions?: string): Fixture {
    * nothing. They are copied rather than symlinked so a case is free to replace
    * one.
    */
-  mkdirSync(join(root, 'codex'), { recursive: true });
-  copyFileSync(join(ROOT, 'codex', 'hook-json.sh'), join(root, 'codex', 'hook-json.sh'));
+  copyFileSync(join(ROOT, 'codex', 'hook-json.sh'), join(root, 'hook-json.sh'));
   mkdirSync(join(root, 'lib'), { recursive: true });
   copyFileSync(join(ROOT, 'lib', 'install.sh'), join(root, 'lib', 'install.sh'));
   mkdirSync(join(root, 'templates'), { recursive: true });

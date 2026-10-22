@@ -16,7 +16,7 @@
 # runs `/hooks` and trusts it. A first install therefore looks as though this
 # script does nothing, which is why the installer mentions the extra step.
 #
-# The `resume` event is deliberately not matched in session-hooks.json: a
+# The `resume` event is deliberately not matched in hooks.json: a
 # resumed session still carries the instruction it was given, so a second copy
 # would only spend context. If Codex turns out to drop developer context when it
 # restores a session, that matcher is the one place to change.
@@ -33,17 +33,17 @@ payload=$(cat)
 # Codex names the plugin root. Every path is written out from it in full, and
 # none is worked out from where this script sits.
 [ -n "${PLUGIN_ROOT:-}" ] || exit 0
-[ -x "$PLUGIN_ROOT/bin/agent-journal" ] || exit 0
-[ -r "$PLUGIN_ROOT/codex/hook-json.sh" ] || exit 0
+[ -x "$PLUGIN_ROOT/scripts/agent-journal" ] || exit 0
+[ -r "$PLUGIN_ROOT/hook-json.sh" ] || exit 0
 
-. "$PLUGIN_ROOT/codex/hook-json.sh"
+. "$PLUGIN_ROOT/hook-json.sh"
 
 journal_read_payload <<EOF
 $payload
 EOF
 
 # Without a cwd in the payload, the core falls back to the directory it runs in.
-out=$("$PLUGIN_ROOT/bin/agent-journal" context \
+out=$("$PLUGIN_ROOT/scripts/agent-journal" context \
   --cwd "$cwd" \
   --session-id "$session_id" \
   --agent "$(journal_agent codex)" 2>/dev/null) || exit 0

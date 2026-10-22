@@ -1,11 +1,13 @@
 {
   "name": "agent-journal",
-  "version": "0.3.4",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "description": "A journal that survives the session that wrote it",
-  "packageManager": "pnpm@10.34.5",
+  "packageManager": "pnpm@12.5.1",
   "scripts": {
+    "prepare": "husky",
+    "sync": "sh scripts/sync-plugins.sh",
     "test": "vitest run --project unit",
     "test:integration": "vitest run --project integration",
     "lint": "oxlint",
@@ -13,10 +15,11 @@
     "format:check": "oxfmt --check"
   },
   "devDependencies": {
-    "@types/node": "^22",
+    "@types/node": "^24",
+    "husky": "^9",
     "oxfmt": "^0.71.0",
     "oxlint": "^1.86.0",
-    "typescript": "^5",
-    "vitest": "^3"
+    "typescript": "^7",
+    "vitest": "^5"
   }
 }

@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { accessSync, constants, readFileSync, statSync } from 'node:fs';
+import { accessSync, constants, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 import { ROOT } from './helpers.js';
@@ -12,6 +12,8 @@ import { ROOT } from './helpers.js';
  */
 type Agent = {
   name: string;
+  /** The plugin folder. An install copies this folder alone, so every path in the manifest is relative to it. */
+  dir: string;
   manifest: string;
 } & (
   | {
@@ -34,12 +36,14 @@ type Agent = {
 const AGENTS: Array<Agent> = [
   {
     name: 'Claude Code',
-    manifest: join('.claude-plugin', 'plugin.json'),
+    dir: 'claude-code',
+    manifest: join('claude-code', '.claude-plugin', 'plugin.json'),
     kind: 'module',
   },
   {
     name: 'Codex',
-    manifest: join('.codex-plugin', 'plugin.json'),
+    dir: 'codex',
+    manifest: join('codex', '.codex-plugin', 'plugin.json'),
     kind: 'command',
     rootVar: 'PLUGIN_ROOT',
     quoted: false,
@@ -92,7 +96,7 @@ describe.each(AGENTS)('the $name plugin', (agent) => {
     const plugin = read(agent.manifest);
 
     // Assert
-    expect(statSync(join(ROOT, plugin.hooks)).isFile()).toBe(true);
+    expect(statSync(join(ROOT, agent.dir, plugin.hooks)).isFile()).toBe(true);
     /**
      * The settings are one `config set` away and every agent has a shell, so
      * neither plugin carries a command for it. A skill comes back when there is
@@ -108,7 +112,7 @@ const COMMAND_AGENTS = AGENTS.flatMap((agent) => (agent.kind === 'command' ? [ag
 describe.each(COMMAND_AGENTS)('the $name hook command', (agent) => {
   test(`should name a hook script that exists and can be run`, () => {
     // Arrange
-    const hooks = read(read(agent.manifest).hooks);
+    const hooks = read(join(agent.dir, read(agent.manifest).hooks));
 
     // Act
     const commands = Object.values<Array<any>>(hooks.hooks)
@@ -124,7 +128,7 @@ describe.each(COMMAND_AGENTS)('the $name hook command', (agent) => {
       expect(command.startsWith(prefix)).toBe(true);
       expect(command.endsWith(quote)).toBe(true);
 
-      const script = join(ROOT, command.slice(prefix.length, command.length - quote.length));
+      const script = join(ROOT, agent.dir, command.slice(prefix.length, command.length - quote.length));
       expect(statSync(script).isFile()).toBe(true);
       expect(isExecutable(script)).toBe(true);
     }
@@ -132,7 +136,7 @@ describe.each(COMMAND_AGENTS)('the $name hook command', (agent) => {
 
   test(`should fire on the events that begin a context`, () => {
     // Arrange
-    const hooks = read(read(agent.manifest).hooks);
+    const hooks = read(join(agent.dir, read(agent.manifest).hooks));
 
     // Act
     const sessionStart = hooks.hooks.SessionStart;
@@ -148,6 +152,83 @@ describe.each(COMMAND_AGENTS)('the $name hook command', (agent) => {
   });
 });
 
+/**
+ * The files at the root that each plugin folder carries a copy of, and where the
+ * copy goes. The CLI goes to `scripts/`, because Claude Code puts a plugin's
+ * `bin/` on the Bash tool's `PATH`, and claude.ai and Cowork refuse to install a
+ * plugin that has one.
+ */
+const SHARED: Array<{ source: string; copy: string }> = [
+  { source: 'bin', copy: 'scripts' },
+  { source: 'templates', copy: 'templates' },
+  { source: 'LICENSE', copy: 'LICENSE' },
+];
+
+/** Every file under `item` in `dir`, relative to `item`, or `''` when `item` is a file. */
+function filesUnder(dir: string, item: string): Array<string> {
+  const path = join(ROOT, dir, item);
+  if (!statSync(path, { throwIfNoEntry: false })) return [];
+  if (statSync(path).isFile()) return [''];
+  return readdirSync(path, { recursive: true, encoding: 'utf8' }).filter((entry) =>
+    statSync(join(path, entry)).isFile(),
+  );
+}
+
+/** Each shared file at the root, with the path of its copy in `dir`. */
+function sharedPairs(dir: string): Array<{ source: string; copy: string }> {
+  return SHARED.flatMap((item) =>
+    filesUnder('.', item.source).map((rest) => ({
+      source: join(item.source, rest),
+      copy: join(dir, item.copy, rest),
+    })),
+  );
+}
+
+/**
+ * An install copies only the plugin folder, so each one carries the shared core.
+ * The pre-commit hook makes the copies, and these cases catch a commit made
+ * without it.
+ */
+describe.each(AGENTS)('the shared core in the $name plugin', (agent) => {
+  test(`should hold a copy of each shared file and nothing else`, () => {
+    // Arrange
+    const expected = sharedPairs(agent.dir)
+      .map((pair) => pair.copy)
+      .sort();
+
+    // Act
+    const copied = SHARED.flatMap((item) =>
+      filesUnder(agent.dir, item.copy).map((rest) => join(agent.dir, item.copy, rest)),
+    ).sort();
+
+    // Assert
+    expect(copied).toEqual(expected);
+  });
+
+  test(`should hold the same content and modes as the root`, () => {
+    // Arrange
+    const pairs = sharedPairs(agent.dir);
+
+    // Act
+    const differ = pairs.filter((pair) => {
+      const source = join(ROOT, pair.source);
+      const copy = join(ROOT, pair.copy);
+      return !readFileSync(copy).equals(readFileSync(source)) || isExecutable(copy) !== isExecutable(source);
+    });
+
+    // Assert
+    expect(differ).toEqual([]);
+  });
+
+  test(`should have no bin folder`, () => {
+    // Act
+    const bin = statSync(join(ROOT, agent.dir, 'bin'), { throwIfNoEntry: false });
+
+    // Assert
+    expect(bin).toBeUndefined();
+  });
+});
+
 describe('the Claude Code hooks module', () => {
   /**
    * Claude Code runs the plugin as one hooks module: it puts the rules into each
@@ -156,8 +237,8 @@ describe('the Claude Code hooks module', () => {
    */
   test(`should load one module and no command hook`, () => {
     // Arrange
-    const plugin = read(join('.claude-plugin', 'plugin.json'));
-    const hooks = read(plugin.hooks);
+    const plugin = read(join('claude-code', '.claude-plugin', 'plugin.json'));
+    const hooks = read(join('claude-code', plugin.hooks));
 
     // Act
     const modules: Array<string> = hooks.modules;
@@ -165,13 +246,13 @@ describe('the Claude Code hooks module', () => {
     // Assert
     expect(hooks.hooks).toBeUndefined();
     expect(modules.length).toBe(1);
-    expect(statSync(join(ROOT, dirname(plugin.hooks), modules[0]!)).isFile()).toBe(true);
-    expect(statSync(join(ROOT, plugin.types)).isFile()).toBe(true);
+    expect(statSync(join(ROOT, 'claude-code', dirname(plugin.hooks), modules[0]!)).isFile()).toBe(true);
+    expect(statSync(join(ROOT, 'claude-code', plugin.types)).isFile()).toBe(true);
   });
 });
 
 describe('the Codex marketplace', () => {
-  test(`should offer this repository as the plugin it holds`, () => {
+  test(`should offer the Codex plugin folder as the plugin it holds`, () => {
     // Arrange, Act
     const market = read(join('.agents', 'plugins', 'marketplace.json'));
 
@@ -180,8 +261,8 @@ describe('the Codex marketplace', () => {
     expect(market.plugins.length).toBe(1);
     const [entry] = market.plugins;
     expect(entry.name).toBe('agent-journal');
-    /** The repository root, which is where `.codex-plugin/plugin.json` is. */
-    expect(entry.source).toEqual({ source: 'local', path: './' });
+    /** The folder that holds `.codex-plugin/plugin.json`. */
+    expect(entry.source).toEqual({ source: 'local', path: './codex' });
   });
 });
 
@@ -191,7 +272,7 @@ describe('the Codex adapter', () => {
     const out = execFileSync(join(ROOT, 'codex', 'session-start.sh'), {
       encoding: 'utf8',
       input: JSON.stringify({ session_id: 'shared-1', cwd: ROOT, source: 'startup' }),
-      env: { ...process.env, PLUGIN_ROOT: ROOT },
+      env: { ...process.env, PLUGIN_ROOT: join(ROOT, 'codex') },
     });
     const rendered = JSON.parse(out).hookSpecificOutput;
 
@@ -213,7 +294,7 @@ describe('the core the plugin ships', () => {
     // Arrange, Act
     let output: string;
     try {
-      output = execFileSync('claude', ['plugin', 'validate', ROOT], { encoding: 'utf8' });
+      output = execFileSync('claude', ['plugin', 'validate', join(ROOT, 'claude-code')], { encoding: 'utf8' });
     } catch (error: any) {
       /** Not installed, which is the normal state in CI. The cases above are what run there. */
       if (error.code === 'ENOENT') return context.skip();

@@ -1,0 +1,4 @@
+# Dependencies whose install scripts may run. esbuild does not need its script,
+# because it takes its binary from an optional dependency.
+allowBuilds:
+  esbuild: false
