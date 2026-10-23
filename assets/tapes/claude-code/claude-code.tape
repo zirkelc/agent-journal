@@ -1,13 +1,18 @@
-# The Claude Code README image: as main.tape, with the journal pane open. The
-# new entry shows at the top of the pane, and is opened there before Claude exits.
+# The Claude Code README image: Claude changes retry() with the journal pane
+# open. The new entry shows at the top of the pane and is opened there. Then
+# Claude exits, a new session opens the pane again, and answers a question
+# about an older decision from the journal. A new session and not /clear,
+# because after /clear the pane lists no entries until it is opened again.
 Output out/claude-code-raw.mp4
 Source .theme.tape
 # The terminal only. The window frame is added afterwards.
 Set Width 1600
 Set Height 1000
 
+# `claude` in the shell starts Claude Code the same way as the first time:
+# with the demo home and the plugin from this checkout.
 Hide
-Type "clear && ./reset.sh && export HOME=$(cd /tmp/agent-journal-demo && pwd -P) && ./launch.sh"
+Type `clear && ./reset.sh && export HOME=$(cd /tmp/agent-journal-demo && pwd -P) && L=$PWD/launch.sh && claude() { "$L" "$@"; } && claude`
 Enter
 Wait+Screen@60s /auto mode on/
 Sleep 2s
@@ -40,12 +45,32 @@ Wait+Screen@10s /Send to prompt/
 Sleep 3s
 Screenshot out/claude-code-pane-entry.png
 
-# Esc goes back to the list, and a second Esc closes the pane.
+# Esc goes back to the list, and a second Esc closes the pane. /exit then
+# ends the session.
 Escape
 Sleep 800ms
 Escape
 Sleep 1s
 
-Source shell.tape
-Screenshot out/claude-code-end.png
+Type "/exit"
+Sleep 500ms
+Enter
+Wait+Screen@20s /--resume/
+Sleep 1500ms
+Type "claude"
+Sleep 500ms
+Enter
+Wait+Screen@60s /auto mode on/
 Sleep 1s
+Type "/agent-journal"
+Sleep 500ms
+Enter
+Wait+Screen@20s /Date/
+Sleep 1500ms
+Type "Why did we leave backoff out before?"
+Sleep 500ms
+Enter
+Wait+Screen@300s /Why did we leave backoff out before\?[\s\S]*· done /
+Sleep 3s
+Screenshot out/claude-code-recall.png
+Sleep 6s

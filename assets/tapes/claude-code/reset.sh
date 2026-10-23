@@ -15,6 +15,7 @@ mkdir -p "$DEMO_HOME"
 # The physical path, so Claude Code and the shell agree on it (on macOS, /tmp is /private/tmp).
 DEMO_HOME=$(cd "$DEMO_HOME" && pwd -P)
 LIB="$DEMO_HOME/Developer/my-awesome-lib"
+GATEWAY="$DEMO_HOME/Developer/api-gateway"
 
 # The login: on macOS, Claude Code reads it from the login keychain, which it
 # finds under ~/Library. Elsewhere it is in ~/.claude/.credentials.json.
@@ -60,7 +61,7 @@ cat > "$DEMO_HOME/.claude.json" <<EOF
   "numStartups": 100,
   "lastClawdEntranceVersion": "$version",
   "announcementImpressions": { "opus-5-5-launch": 10, "opus-5-5-update": 3, "fable-5-1-launch": 5 },
-  "projects": { "$LIB": { "hasTrustDialogAccepted": true } },
+  "projects": { "$LIB": { "hasTrustDialogAccepted": true }, "$GATEWAY": { "hasTrustDialogAccepted": true } },
   "pluginPanes": { "dockColumns": 70 }
 }
 EOF
@@ -73,6 +74,12 @@ cat > "$DEMO_HOME/.claude/settings.json" <<'EOF'
   "promptSuggestionEnabled": false
 }
 EOF
+
+# A user preference, as anyone can set in their own CLAUDE.md: summaries short
+# enough that each grep line in the takes fits on one line of the terminal.
+cat > "$DEMO_HOME/.claude/CLAUDE.md" <<'EOF2'
+Keep the summary of each journal entry under 80 characters.
+EOF2
 
 # The journal: the sample entries, and demo values for the machine and the account.
 mkdir -p "$DEMO_HOME/agent-journal"
@@ -87,3 +94,13 @@ git -C "$LIB" init -q -b main
 git -C "$LIB" add -A
 GIT_AUTHOR_DATE=2026-09-22T09:00:00Z GIT_COMMITTER_DATE=2026-09-22T09:00:00Z \
   git -C "$LIB" -c user.name=Demo -c user.email=demo@example.com commit -q -m 'feat: retry helper'
+
+# The session of one sample entry, so `claude --resume <session_id>` in its
+# folder opens that conversation. Claude Code keeps the sessions of a folder
+# under ~/.claude/projects, in a folder named after the path.
+mkdir -p "$GATEWAY"
+sessions="$DEMO_HOME/.claude/projects/$(printf '%s' "$GATEWAY" | sed 's/[^A-Za-z0-9]/-/g')"
+mkdir -p "$sessions"
+for jsonl in "$TAPES"/fixture/sessions/*.jsonl; do
+  sed "s|__CWD__|$GATEWAY|g" "$jsonl" > "$sessions/$(basename "$jsonl")"
+done

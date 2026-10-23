@@ -1,19 +1,20 @@
 #!/bin/sh
-# Records the README images: both live takes, sped up where the model works,
-# with screenshots, in a macOS window on GitHub's page background. A dark theme
-# goes on the dark page, and a theme whose name ends in -light on the light
-# page. Each take is one model turn on the account that Claude Code is logged
-# in with.
+# Records the README images: the three live takes, with screenshots, in a
+# macOS window on GitHub's page background. The main and Claude Code takes are
+# sped up where the model works, and the short recall take is not. A dark
+# theme goes on the dark page, and a theme whose name ends in -light on the
+# light page. The model turns run on the account that Claude Code is logged
+# in with: two in the main take, one in each other take.
 #
-#   ./record.sh             both README sets: atom (dark) and atom-light (light)
+#   ./record.sh             both README sets: graphite-dark (dark) and graphite-light (light)
 #   ./record.sh <theme>     one theme: a file in settings/
 #
 # TITLE sets the window title (default: Terminal). Writes to out/<theme>/.
 set -eu
 cd "$(dirname "$0")"
 if [ $# -eq 0 ]; then
-  ./record.sh atom
-  exec ./record.sh atom-light
+  ./record.sh graphite-dark
+  exec ./record.sh graphite-light
 fi
 theme=$1
 title=${TITLE:-Terminal}
@@ -24,27 +25,28 @@ printf '%s\n' "$theme" > .theme-name
 case $theme in *-light) modes=light window=light ;; *) modes=dark window=dark ;; esac
 mkdir -p out "out/$theme"
 
-# Plays the part from <start> seconds to <tail> seconds before the end 5 times
-# faster: there, the model works. What comes after the turn has fixed waits,
-# so its length is known. Then puts the take in its window, as MP4 and GIF.
-finish() {
-  name=$1 start=$2 tail=$3
-  duration=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "out/$name-raw.mp4")
-  end=$(awk -v d="$duration" -v t="$tail" 'BEGIN { printf "%.1f", d - t }')
-  ffmpeg -v error -y -i "out/$name-raw.mp4" -filter_complex \
-    "[0:v]trim=0:$start,setpts=PTS-STARTPTS[a];[0:v]trim=$start:$end,setpts=(PTS-STARTPTS)/5[b];[0:v]trim=$end,setpts=PTS-STARTPTS[c];[a][b][c]concat=n=3:v=1:a=0,format=yuv420p[v]" \
-    -map "[v]" -c:v libx264 -crf 18 -preset slow -movflags +faststart "out/$theme/$name-plain.mp4"
-  for mode in $modes; do
-    "$frame" "out/$theme/$name-plain.mp4" "out/$theme/$name-$mode.mp4" "$mode" "$title" "$window"
-    "$frame" "out/$theme/$name-plain.mp4" "out/$theme/$name-$mode.gif" "$mode" "$title" "$window"
-  done
-  mv "out/$name-raw.mp4" "out/$theme/$name-raw.mp4"
-}
-
 vhs main.tape
-finish main 6 24
+# The main and Claude Code takes have two model turns each, so their times come from the take itself.
+python3 speed.py out/main-raw.mp4 "out/$theme/main-plain.mp4" 6 6 4.5
+for mode in $modes; do
+  "$frame" "out/$theme/main-plain.mp4" "out/$theme/main-$mode.mp4" "$mode" "$title" "$window"
+  "$frame" "out/$theme/main-plain.mp4" "out/$theme/main-$mode.gif" "$mode" "$title" "$window"
+done
+mv out/main-raw.mp4 "out/$theme/main-raw.mp4"
 vhs claude-code.tape
-finish claude-code 8 31
+python3 speed.py out/claude-code-raw.mp4 "out/$theme/claude-code-plain.mp4" 8 12 6
+for mode in $modes; do
+  "$frame" "out/$theme/claude-code-plain.mp4" "out/$theme/claude-code-$mode.mp4" "$mode" "$title" "$window"
+  "$frame" "out/$theme/claude-code-plain.mp4" "out/$theme/claude-code-$mode.gif" "$mode" "$title" "$window"
+done
+mv out/claude-code-raw.mp4 "out/$theme/claude-code-raw.mp4"
+# The recall turn is short, so it plays at normal speed.
+vhs recall.tape
+for mode in $modes; do
+  "$frame" out/recall-raw.mp4 "out/$theme/recall-$mode.mp4" "$mode" "$title" "$window"
+  "$frame" out/recall-raw.mp4 "out/$theme/recall-$mode.gif" "$mode" "$title" "$window"
+done
+mv out/recall-raw.mp4 "out/$theme/recall-raw.mp4"
 for png in out/*.png; do
   base=$(basename "$png" .png)
   for mode in $modes; do

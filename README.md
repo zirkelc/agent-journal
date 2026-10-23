@@ -4,7 +4,7 @@
 
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/session-dark.gif" />
-    <img src="assets/session-light.gif" alt="Claude Code changes a function and writes a journal entry on its own, then ls and cat show the entry as a plain markdown file in the journal folder" />
+    <img src="assets/session-light.gif" alt="Claude Code changes a function and writes a journal entry on its own. In the shell, ls, grep and cat show the entry as a plain markdown file. A new Claude session then answers why an older decision was made, from the journal" />
   </picture>
 </div>
 
@@ -41,24 +41,26 @@ The model then records each important event in a new markdown file. It does this
 Each journal entry is a new markdown file. The filename is the current UTC timestamp in `YYYY-MM-DDTHHMMSSZ` format:
 
 ```
-~/agent-journal/2026-01-11T143000Z.md
+~/agent-journal/2026-10-07T142000Z.md
 ```
 
 The file starts with frontmatter, so a search across many files can match single fields. The body describes what happened:
 
 ```markdown
 ---
-date: 2026-01-11T14:30:00Z
-project: my-awesome-lib
-summary: "Shipped the v1.2 sync path on prepared statements, with rollback when a batch fails."
-cwd: ~/Developer/my-awesome-lib
+date: 2026-10-07T14:20:00Z
+project: acme-dashboard
+summary: "Export timed out because the CSV was built on the main thread. Moved it to a worker."
+cwd: ~/Developer/acme-dashboard
 host: "macbook"
 user: "chris"
-agent: claude/opus-5
-session_id: 4eb89b17-6f7f-4264-95d4-ea5313ef277e
+agent: claude/opus-5-5
+session_id: 743d02a3-22f3-4016-b13e-dd448ad58daf
 ---
 
-Replaced the string-interpolated SQL in the sync path with prepare(). Added a rollback so a failed batch leaves nothing half-written, which is what caused Thursday's partial state.
+Exports of 50,000 rows now finish in 1.2 s instead of timing out after 10 s.
+
+Considered building the CSV on the server instead. Rejected for now: the filters run in the browser, so the server would need a second copy of the filter code.
 ```
 
 ## Recall
@@ -73,19 +75,24 @@ ls ~/agent-journal | tail -5
 ls ~/agent-journal/2026-*.md | wc -l
 
 # one dated line per entry, for a day or a month
-grep -h '^summary:' ~/agent-journal/2026-01-11*.md
+grep -h '^summary:' ~/agent-journal/2026-10-*.md
 
 # every entry for one project
-grep -rl '^project: foo$' ~/agent-journal
+grep -rl '^project: acme-dashboard$' ~/agent-journal
 
 # anywhere in an entry, body included
-grep -rl 'rate limit' ~/agent-journal | tail -3
+grep -rli 'filter code' ~/agent-journal | tail -3
 
 # one entry in full
-cat ~/agent-journal/2026-01-11T143000Z.md
+cat ~/agent-journal/2026-10-07T142000Z.md
 ```
 
-The agent can also recall entries on its own. To try it, ask "What did we work on last week?".
+The agent can also recall entries on its own. To try it, ask "What was that CSV export bug again?".
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/recall-dark.gif" />
+  <img src="assets/recall-light.gif" alt="Claude Code is asked about a CSV export bug in another project, searches the journal, and answers from the entry with the bug, the fix, the option that was turned down, and the session to resume" />
+</picture>
 
 ## Install
 

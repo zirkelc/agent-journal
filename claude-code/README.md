@@ -2,7 +2,7 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../assets/claude-code-session-dark.gif" />
-  <img src="../assets/claude-code-session-light.gif" alt="Claude Code writes a journal entry while the journal pane is open, the entry appears at the top of the pane, then ls and cat show it as a plain markdown file in the journal folder" />
+  <img src="../assets/claude-code-session-light.gif" alt="Claude Code writes a journal entry while the journal pane is open, and the entry appears at the top of the pane and is opened there. Then a new session opens the pane again and answers why an older decision was made, from the journal" />
 </picture>
 
 This folder is the Claude Code plugin of [Agent Journal](../README.md). It is a [hooks module](https://code.claude.com/docs/en/plugins/mods/overview) that Claude Code loads itself. The plugin gives each session the rules for writing the journal, opens the journal pane with `/agent-journal`, and syncs the journal with git when you turn sync on.
@@ -57,7 +57,7 @@ The rules name the journal directory from the config at the start of the session
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../assets/claude-code-pane-dark.png" />
-  <img src="../assets/claude-code-pane-light.png" alt="The journal pane beside the conversation, with the entries of all projects grouped by day" />
+  <img src="../assets/claude-code-pane-light.png" alt="The journal pane beside the conversation, with the entries of the current project grouped by day" />
 </picture>
 
 - **Project:** `All` lists the entries of all projects. `Current` lists only the entries of the current repository. The pane keeps this choice for the next session.
