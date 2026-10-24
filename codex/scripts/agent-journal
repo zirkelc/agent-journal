@@ -2,10 +2,9 @@
 #
 # The whole of agent-journal that is not prose.
 #
-#   agent-journal list    [filters]
-#   agent-journal search  TEXT [filters]
-#   agent-journal read    ID
-#   agent-journal write   [-m SUMMARY]
+#   agent-journal list    [TERM...] [--fixed] [filters]
+#   agent-journal read    ID... | PERIOD [filters]
+#   agent-journal write   [--summary S] [--body B]
 #   agent-journal config  [set|unset <key> [value]]
 #   agent-journal sync    [init [URL]]
 #   agent-journal context [--cwd DIR] [--session-id ID] [--agent A] [--recall]
@@ -22,7 +21,7 @@
 # config file's syntax, so a shell, an installer and a model all go through it
 # rather than each carrying a copy of the format.
 #
-# `list`, `search`, `read` and `write` are the human half. They are what a person
+# `list`, `read` and `write` are the human half. They are what a person
 # has instead of remembering grep recipes, and they are the seam an index can sit
 # behind later without any adapter noticing.
 #
@@ -64,9 +63,8 @@ default_journal_dir=$HOME/agent-journal
 
 help_text() {
   cat <<'EOF'
-usage: agent-journal list   [filters]
-       agent-journal search TEXT [filters]
-       agent-journal read   latest | 2026-01-11T143000Z | 2026-01-11
+usage: agent-journal list   [TERM...] [--fixed] [filters]
+       agent-journal read   latest | ID... | PERIOD [filters]
        agent-journal write  [--summary S] [--body B] [--project P] [--cwd DIR] [--agent A]
        agent-journal config [set|unset <key> [value]]
        agent-journal sync   [init [URL]]
@@ -83,15 +81,42 @@ already has. The project and the directory come from where you are unless the
 flags say otherwise. --project . names the repository of --cwd, and fails
 outside one.
 
-filters: --date D      one local year, month or day: 2026, 2026-01, 2026-01-11
+list with terms searches the summaries and the bodies. Each term is an
+extended regex, as grep -E reads it, matched within one line and ignoring
+case, and an entry must match every term: 'gif|vhs' is either word, and
+codex trust is both. --fixed reads the terms as text, which may then run
+across a line break. Each line then ends with the part of the body line that
+matched, as a fourth column down a pipe and on a line of its own in a
+terminal. It is empty when the summary matched, since the summary is shown
+anyway.
+
+read takes one id or several, each whole or a prefix that matches one entry,
+and prints them in full in that order. A prefix that matches several lists
+them. With a period instead, it prints every entry of the period, oldest
+first, with the filters, and all of them unless --limit is given.
+
+When a limit leaves older matches out, a last line on stderr says so, and
+which --offset shows the next ones.
+
+filters: --date D      one local year, month or day: 2026, 2026-01, 2026-01-11,
+                       today or yesterday
          --since D     from this local day or time on: YYYY-MM-DD, today, 7d,
                        or a time such as 2026-01-11T14:30:00+01:00
          --until D     up to and including this local day or time, same forms
          --project P   entries filed under one project, or . for the current project
-         --cwd DIR     entries from a directory and everything under it
+         --cwd DIR     entries from a directory and everything under it, where
+                       * and ? stay within one name of the path
+         --host H      entries written on one machine
+         --user U      entries written by one account
+         --agent A     entries of one agent, such as claude, or of one model,
+                       such as opus-5-5, or of both, such as claude/opus-5-5
          --limit N     how many of the most recent to print, default 20
          --offset N    skip this many of the most recent first, for the next page
          --all         no limit
+
+The values of --project, --cwd, --host, --user and --agent can have * for any
+text and ? for one character, as a shell glob reads them: --agent 'opus-*'.
+Put them in quotes, so the shell does not expand them first.
 
 settings: journal_dir    where journal entries are written
           sync           git: commit the journal folder after each write, and
@@ -108,7 +133,8 @@ and turns sync on.
 
 Entries are listed oldest first, so the newest is nearest the prompt. Each
 line starts with the id that read takes. Down a pipe the columns are id,
-project and summary, separated by one tab each.
+project and summary, and the matching body line for a search, separated by
+one tab each.
 
 The filters take days in your time zone, and the ids are UTC, so an entry
 written just after midnight can carry the date before. A time takes an
@@ -134,6 +160,8 @@ newline='
 '
 tab=$(printf '\t')
 cr=$(printf '\r')
+# The shell's own field separators, to go back to after splitting on new lines.
+default_ifs=" $tab$newline"
 
 # ---------------------------------------------------------------- config
 
@@ -848,8 +876,12 @@ date_filter=
 since=
 until=
 project_filter=
+host_filter=
+user_filter=
 limit=20
+limit_set=0
 offset=0
+fixed=0
 opt_summary=
 summary_set=0
 opt_body=
@@ -863,6 +895,10 @@ arg1=
 arg2=
 arg3=
 argc=0
+# Every argument that is not a flag, one per line, for `list`, which takes any
+# number of terms, and `read`, which takes any number of ids, where the other
+# commands take at most three.
+terms=
 
 while [ $# -gt 0 ]; do
   case $1 in
@@ -886,13 +922,19 @@ while [ $# -gt 0 ]; do
     --until=*) until=${1#--until=}; shift ;;
     --project) [ $# -ge 2 ] || usage; project_filter=$2; shift 2 ;;
     --project=*) project_filter=${1#--project=}; shift ;;
-    --limit) [ $# -ge 2 ] || usage; limit=$2; shift 2 ;;
-    --limit=*) limit=${1#--limit=}; shift ;;
+    --host) [ $# -ge 2 ] || usage; host_filter=$2; shift 2 ;;
+    --host=*) host_filter=${1#--host=}; shift ;;
+    --user) [ $# -ge 2 ] || usage; user_filter=$2; shift 2 ;;
+    --user=*) user_filter=${1#--user=}; shift ;;
+    --limit) [ $# -ge 2 ] || usage; limit=$2; limit_set=1; shift 2 ;;
+    --limit=*) limit=${1#--limit=}; limit_set=1; shift ;;
     --offset) [ $# -ge 2 ] || usage; offset=$2; shift 2 ;;
     --offset=*) offset=${1#--offset=}; shift ;;
     # Two readings again: for the query commands it lifts the limit, and for
     # `install` it means every agent found rather than one named.
     --all) limit=0; all_set=1; shift ;;
+    # How `list` reads its terms: as text rather than as an extended regex.
+    --fixed) fixed=1; shift ;;
     --dry-run) dry_run=1; shift ;;
     # For `context`: the text for a reader of the journal instead of the rules
     # for writing it.
@@ -908,11 +950,12 @@ while [ $# -gt 0 ]; do
     -*) usage ;;
     *)
       argc=$((argc + 1))
+      terms=$terms$1$newline
       case $argc in
         1) arg1=$1 ;;
         2) arg2=$1 ;;
         3) arg3=$1 ;;
-        *) usage ;;
+        *) [ "$cmd" = list ] || [ "$cmd" = read ] || usage ;;
       esac
       shift
       ;;
@@ -1130,21 +1173,36 @@ layout_for() {
   esac
 }
 
-# One line per entry, out of the files it is given. `list` and `search` differ
-# only in whether `query` is set, and `read` borrows it to show what an ambiguous
-# id matched, so the format is defined once.
+# One line per entry, out of the files it is given, with the matching line as
+# a fourth column when there are terms. `read` borrows it to show what an
+# ambiguous id matched, so the format is defined once. With `full` set it prints
+# the paths of the entries it keeps instead, for `read` with a period to print
+# in full.
 #
 # The files come oldest first, as the glob sorts them, and are read newest first,
-# so a limit stops the reading as soon as it has enough matches rather than
-# after the whole journal. A range is checked on the name, before the file is
-# opened. Without a query only the frontmatter is read, because that is all a
-# line shows. awk opens the files itself, from `ARGV` in `BEGIN`, because its
-# own input loop only runs forward and cannot stop one file early in POSIX.
+# so the most recent matches are the ones a limit keeps. The reading stops at
+# the first match past the limit, which is enough to say on stderr that the list
+# is cut, where it does not get in the way of a script that splits the lines. A
+# range is checked on the name, before the file is opened, and the reading stops
+# at the first file older than it. Without terms only the frontmatter is read,
+# because that is all a line shows. awk opens the files itself, from `ARGV` in
+# `BEGIN`, because its own input loop only runs forward and cannot stop one
+# file early in POSIX.
+#
+# The terms and every value that was typed go through the environment rather
+# than -v, which would treat a backslash in them as an escape. A regex needs
+# its backslashes, and a name can have one.
 render() {
+  AGENT_JOURNAL_TERMS=${terms:-} \
+  AGENT_JOURNAL_PROJECT=$project_filter \
+  AGENT_JOURNAL_CWD=$cwd_filter \
+  AGENT_JOURNAL_HOST=$host_filter \
+  AGENT_JOURNAL_USER=$user_filter \
+  AGENT_JOURNAL_AGENT=$agent \
+  AGENT_JOURNAL_LABEL=${label:-} \
   awk \
-    -v query="${query:-}" \
-    -v project="$project_filter" \
-    -v cwdf="$cwd_filter" \
+    -v fixed="$fixed" \
+    -v full="${full:-0}" \
     -v since="$since" \
     -v until="$until" \
     -v limit="$limit" \
@@ -1152,17 +1210,100 @@ render() {
     -v tty="$tty" \
     -v color="$color" \
     -v cols="$cols" '
-    # Whether an entry passes the filters that its frontmatter decides.
-    function wanted(proj, dir) {
-      if (project != "" && proj != project) return 0
-      if (cwdf != "" && index(dir, cwdf) != 1) return 0
+    # Whether an entry passes the filters that its frontmatter decides. An
+    # agent is recorded as `name/model`, and a filter without a slash is the
+    # name or the model, so `claude` and `opus-*` both work.
+    function wanted(proj, dir, h, u, ag,   name, model) {
+      if (project != "" && !match(proj, projectre)) return 0
+      if (cwdf != "" && !match(dir, cwdre)) return 0
+      if (hostf != "" && !match(h, hostre)) return 0
+      if (userf != "" && !match(u, userre)) return 0
+      if (agentf != "") {
+        if (index(agentf, "/")) return match(ag, agentre)
+        name = ag
+        sub(/\/.*/, "", name)
+        model = ""
+        if (index(ag, "/")) model = substr(ag, index(ag, "/") + 1)
+        if (!match(name, agentre) && !match(model, agentre)) return 0
+      }
       return 1
+    }
+
+    # A filter as a regex, the way a shell glob reads: a star is any text, a
+    # question mark one character, and every other character stands for
+    # itself. In a directory, both stay within one name, and the pattern also
+    # matches every directory under the one it names, but not a longer name
+    # that only starts the same. Any other value must match as a whole.
+    function pattern(glob, dir,   re, i, c, any) {
+      any = dir ? "[^/]" : "."
+      if (dir) sub(/\/+$/, "", glob)
+      re = "^"
+      for (i = 1; i <= length(glob); i++) {
+        c = substr(glob, i, 1)
+        if (c == "*") re = re any "*"
+        else if (c == "?") re = re any
+        else if (index("\\.[](){}+^$|", c)) re = re "\\" c
+        else re = re c
+      }
+      return re (dir ? "(/|$)" : "$")
+    }
+
+    # The value of a frontmatter line from column `n` on, without the space in
+    # front and without the quotes around it.
+    function unquote(line, n) {
+      line = substr(line, n)
+      sub(/^[ \t]*/, "", line)
+      if (substr(line, 1, 1) == "\"") line = substr(line, 2)
+      if (substr(line, length(line), 1) == "\"") line = substr(line, 1, length(line) - 1)
+      return line
+    }
+
+    # Looks for the terms not found yet in `text`, which is lower case, and is
+    # `line` from position `at` on. Keeps the part of a body line around the
+    # first match there, for the fourth column; a match in the summary keeps
+    # nothing, since the summary is shown anyway. Returns whether every term
+    # has matched now.
+    function look(text, line, at, body,   t, p) {
+      for (t = 1; t <= nt; t++) {
+        if (hit[t]) continue
+        if (regex) {
+          if (!match(text, term[t])) continue
+          p = RSTART
+        } else if (!(p = index(text, term[t]))) continue
+        hit[t] = 1
+        nhit++
+        if (body && shown == "") shown = excerpt(line, p - at + 1)
+      }
+      return nhit == nt
+    }
+
+    # At most `span` characters of a line, from a little before position `p`,
+    # since one body line is often a whole paragraph. A cut is moved off the
+    # middle of a UTF-8 character, which an awk that counts bytes would make.
+    function excerpt(line, p,   span, s, e, text) {
+      gsub(/\t/, " ", line)
+      span = 160
+      if (p < 1) p = 1
+      s = 1
+      e = length(line)
+      if (e > span) {
+        s = p - 60
+        if (s < 1) s = 1
+        if (s + span - 1 > e) s = e - span + 1
+        while (s > 1 && index(cont, substr(line, s, 1))) s--
+        e = s + span - 1
+        while (e < length(line) && index(cont, substr(line, e + 1, 1))) e++
+      }
+      text = substr(line, s, e - s + 1)
+      sub(/^[ ]+/, "", text)
+      sub(/[ ]+$/, "", text)
+      return (s > 1 ? "…" : "") text (e < length(line) ? "…" : "")
     }
 
     # Reads one file and keeps it when it passes the filters. Matches are kept
     # newest first, the order they are found in. Returns 1 once the file is
     # older than `since`, because every file after it is older still.
-    function scan(file,   stem, line, got, first, fm, proj, dir, summary, found, tail, text) {
+    function scan(file,   stem, line, got, first, fm, proj, dir, h, u, ag, summary, found, tail, text, t) {
       if (file in skip) return 0
       stem = file
       sub(/.*\//, "", stem)
@@ -1170,7 +1311,10 @@ render() {
       if (since != "" && stem < since) return 1
       if (until != "" && stem > until) return 0
 
-      first = 1; fm = 0; proj = ""; dir = ""; summary = ""; found = 0
+      first = 1; fm = 0; proj = ""; dir = ""; h = ""; u = ""; ag = ""; summary = ""; found = 0; tail = ""
+      for (t = 1; t <= nt; t++) hit[t] = 0
+      nhit = 0
+      shown = ""
       while ((got = (getline line < file)) > 0) {
         # An entry saved with CRLF endings is still an entry. Without this its
         # first line is not `---`, and every value would carry the return.
@@ -1187,15 +1331,16 @@ render() {
           if (line == "---") {
             fm = 2
             # Everything a line shows is known now, so the body is read only
-            # for a query, and only for an entry the other filters keep.
-            if (q == "" || !wanted(proj, dir)) break
+            # for terms, and only for an entry the other filters keep.
+            if (nt == 0 || !wanted(proj, dir, h, u, ag)) break
             # The text searched is the summary, a space, then each body line
-            # after a space of its own. A match ending in a new line starts at
-            # most one query length before it, so that much of the text read so
-            # far is kept, and the read stops at the first match.
+            # after a space of its own. A regex is matched within one line. A
+            # fixed text that ends in a new line starts at most one term length
+            # before it, so that much of the text read so far is kept. The read
+            # stops once the entry matches.
             text = tolower(summary " ")
-            if (index(text, q)) { found = 1; break }
-            tail = substr(text, length(text) - length(q) + 2)
+            if (look(regex ? tolower(summary) : text, summary, 1, 0)) { found = 1; break }
+            if (!regex) tail = substr(text, length(text) - longest + 2)
             continue
           }
           if (substr(line, 1, 8) == "project:") {
@@ -1204,19 +1349,25 @@ render() {
           } else if (substr(line, 1, 4) == "cwd:") {
             dir = substr(line, 5)
             sub(/^[ \t]*/, "", dir)
+          } else if (substr(line, 1, 5) == "host:") {
+            h = unquote(line, 6)
+          } else if (substr(line, 1, 5) == "user:") {
+            u = unquote(line, 6)
+          } else if (substr(line, 1, 6) == "agent:") {
+            ag = unquote(line, 7)
           } else if (substr(line, 1, 8) == "summary:") {
-            line = substr(line, 9)
-            sub(/^[ \t]*/, "", line)
             # The one quoted field, and the quotes are punctuation rather than value.
-            if (substr(line, 1, 1) == "\"") line = substr(line, 2)
-            if (substr(line, length(line), 1) == "\"") line = substr(line, 1, length(line) - 1)
-            summary = line
+            summary = unquote(line, 9)
           }
           continue
         }
+        if (regex) {
+          if (look(tolower(line), line, 1, 1)) { found = 1; break }
+          continue
+        }
         text = tail " " tolower(line)
-        if (index(text, q)) { found = 1; break }
-        tail = substr(text, length(text) - length(q) + 2)
+        if (look(text, line, length(tail) + 2, 1)) { found = 1; break }
+        tail = substr(text, length(text) - longest + 2)
       }
       # A file that cannot be opened is not an empty one. Said rather than
       # skipped in silence, so a missing entry has a reason next to it.
@@ -1224,12 +1375,19 @@ render() {
       close(file)
 
       if (fm == 0) return 0
-      if (!wanted(proj, dir)) return 0
+      if (!wanted(proj, dir, h, u, ag)) return 0
       # Frontmatter that never closes has no body, only its summary to search.
-      if (q != "" && fm == 1) found = index(tolower(summary " "), q) > 0
-      if (q != "" && !found) return 0
-      # The newest matches an earlier page already showed are counted and passed.
-      if (skipped_n < offset) { skipped_n++; return 0 }
+      if (nt && fm == 1) found = look(regex ? tolower(summary) : tolower(summary " "), summary, 1, 0)
+      if (nt && !found) return 0
+      # The newest matches an earlier page already showed are passed. The
+      # first one past the limit is not kept, but says that the list is cut,
+      # and nothing older needs to be read.
+      matched++
+      if (matched <= offset) return 0
+      if (limit > 0 && n >= limit) {
+        more = 1
+        return 1
+      }
 
       n++
       # The file name itself rather than a friendlier date and time, because it is
@@ -1238,18 +1396,80 @@ render() {
       id[n] = stem
       who[n] = proj
       what[n] = summary
+      where[n] = shown
+      path[n] = file
       return 0
     }
 
+    # Said after every list that leaves older matches out, so in a terminal it
+    # is the line next to the prompt. The range is of the matches counted from
+    # the newest, the way `--offset` counts them.
+    function note() {
+      if (!more) return
+      # The rows first, also when both streams go into one pipe.
+      fflush()
+      printf "matches %d to %d, counted from the newest; --offset %d for older ones\n",
+          offset + 1, offset + n, offset + n > "/dev/stderr"
+    }
+
+    # A term in lower case, so that case is ignored, but with the character
+    # after a backslash kept, since `\S` is not `\s` in an awk that knows both.
+    function lowered(s,   out, i, c) {
+      if (!regex) return tolower(s)
+      out = ""
+      for (i = 1; i <= length(s); i++) {
+        c = substr(s, i, 1)
+        if (c == "\\" && i < length(s)) {
+          out = out c substr(s, i + 1, 1)
+          i++
+        } else out = out tolower(c)
+      }
+      return out
+    }
+
     BEGIN {
-      q = tolower(query)
+      # Lower case, so case is ignored. The longest fixed term says how much of
+      # one line to keep for a match that runs on into the next.
+      regex = !fixed
+      split(ENVIRON["AGENT_JOURNAL_TERMS"], given, "\n")
+      for (k = 1; (k in given); k++) {
+        if (given[k] == "") continue
+        term[++nt] = lowered(given[k])
+        if (length(term[nt]) > longest) longest = length(term[nt])
+      }
+      # The bytes that continue a UTF-8 character, which a cut must not split.
+      # Only an awk that counts bytes can split one. One that counts characters
+      # would read these numbers as characters of their own.
+      if (length("\303\251") == 2)
+        for (c = 128; c < 192; c++) cont = cont sprintf("%c", c)
+      project = ENVIRON["AGENT_JOURNAL_PROJECT"]
+      cwdf = ENVIRON["AGENT_JOURNAL_CWD"]
+      hostf = ENVIRON["AGENT_JOURNAL_HOST"]
+      userf = ENVIRON["AGENT_JOURNAL_USER"]
+      agentf = ENVIRON["AGENT_JOURNAL_AGENT"]
+      label = ENVIRON["AGENT_JOURNAL_LABEL"]
+      projectre = pattern(project, 0)
+      cwdre = pattern(cwdf, 1)
+      hostre = pattern(hostf, 0)
+      userre = pattern(userf, 0)
+      agentre = pattern(agentf, 0)
       # Through the environment rather than -v, which would treat a backslash
       # in a path as an escape.
       split(ENVIRON["AGENT_JOURNAL_SKIP"], skipped, "\n")
       for (k in skipped) skip[skipped[k]] = 1
-      for (a = ARGC - 1; a >= 1; a--) {
-        if (limit > 0 && n >= limit) break
+      for (a = ARGC - 1; a >= 1; a--)
         if (scan(ARGV[a])) break
+
+      # The paths, oldest first. Nothing kept is an answer of its own, told
+      # apart by its status, and so is a list that is cut, since the caller
+      # prints the note after the entries.
+      if (full) {
+        if (n == 0) {
+          printf "no entry matches %s\n", label > "/dev/stderr"
+          exit 3
+        }
+        for (i = n; i >= 1; i--) print path[i]
+        exit more ? 4 : 0
       }
 
       if (!tty) {
@@ -1260,8 +1480,12 @@ render() {
           gsub(/\t/, " ", proj)
           text = what[i]
           gsub(/\t/, " ", text)
-          printf "%s\t%s\t%s\n", id[i], proj, text
+          if (nt)
+            printf "%s\t%s\t%s\t%s\n", id[i], proj, text, where[i]
+          else
+            printf "%s\t%s\t%s\n", id[i], proj, text
         }
+        note()
         exit
       }
 
@@ -1282,10 +1506,38 @@ render() {
           printf "\033[2m%s\033[0m  \033[36m%s\033[0m  %s\n", id[i], pad, text
         else
           printf "%s  %s  %s\n", id[i], pad, text
+        if (nt && color && where[i] != "")
+          printf "    \033[2m%s\033[0m\n", where[i]
+        else if (nt && where[i] != "")
+          printf "    %s\n", where[i]
       }
+      note()
       exit
     }
   ' "$@"
+}
+
+# The selection of `render`, with a directory named like an entry left out.
+# awk stops outright on a directory, which a glob for names cannot tell from a
+# file without a test per name on every run. So the test runs only once awk has
+# failed: a directory named like an entry is named and left out, and the list
+# is read again. Anything else that failed keeps its status, so it cannot pass
+# for a journal with nothing to show. For `read` with a period, status 3 says
+# that nothing was kept and status 4 that the list is cut, and both are answers
+# rather than failures.
+render_all() {
+  render "$@" && return 0
+  status=$?
+  case $status in 3 | 4) return "$status" ;; esac
+  skip=
+  for candidate in "$journal_dir"/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*.md/; do
+    [ -d "$candidate" ] || continue
+    candidate=${candidate%/}
+    printf '%s is a directory, not an entry\n' "$candidate" >&2
+    skip=$skip$candidate$newline
+  done
+  [ -n "$skip" ] || return "$status"
+  AGENT_JOURNAL_SKIP=$skip render "$@"
 }
 
 # The refusal for a `--since` or `--until` that is neither a day nor an
@@ -1299,7 +1551,55 @@ not_a_bound() {
   exit 2
 }
 
-if [ "$cmd" = list ] || [ "$cmd" = search ] || [ "$cmd" = read ]; then
+# Whether a word names a period that `--date` and `read` take: a year, a month,
+# a day, today or yesterday.
+is_period() {
+  case $1 in
+    today | yesterday) return 0 ;;
+    [0-9][0-9][0-9][0-9] | [0-9][0-9][0-9][0-9]-[0-9][0-9] | [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) return 0 ;;
+  esac
+  return 1
+}
+
+if [ "$cmd" = list ] || [ "$cmd" = read ]; then
+  # `read` with a period prints every entry in it, so the period is the same
+  # filter `--date` is. An id is anything else: a full one, or a prefix of one
+  # that is not a period, such as `2026-01-11T14`. Without an id, a period or a
+  # range given as a filter means the same. Nothing at all is refused rather
+  # than read as `latest`, so a pipe that found no ids prints nothing.
+  # Several ids are read one after the other, and a period among them would
+  # be a second answer to one call, so it is refused.
+  read_period=0
+  if [ "$cmd" = read ]; then
+    if [ "$argc" -eq 1 ] && is_period "$arg1"; then
+      [ -z "$date_filter" ] || {
+        printf 'give the period once: read %s, or read --date %s\n' "$arg1" "$date_filter" >&2
+        exit 2
+      }
+      date_filter=$arg1
+      read_period=1
+    elif [ "$argc" -eq 0 ]; then
+      [ -n "$date_filter$since$until" ] || usage
+      read_period=1
+    else
+      while IFS= read -r t_word; do
+        ! is_period "$t_word" || {
+          printf 'a period is read on its own, not with other ids: %s\n' "$t_word" >&2
+          exit 2
+        }
+      done <<EOF
+$terms
+EOF
+      # An id names its entry, so a filter could only hide it, or narrow the
+      # matches of a prefix without saying so.
+      if [ -n "$date_filter$since$until$project_filter$host_filter$user_filter$agent" ] ||
+        [ "$cwd_set" = 1 ] || [ "$limit_set" = 1 ] || [ "$all_set" = 1 ] || [ "$offset" != 0 ]; then
+        printf 'read with ids takes no filters; they work with read PERIOD and with list\n' >&2
+        exit 2
+      fi
+    fi
+  fi
+
   # A period and a range are two ways to say the same thing, and honouring both
   # at once would quietly return the intersection nobody asked for.
   if [ -n "$date_filter" ] && { [ -n "$since" ] || [ -n "$until" ]; }; then
@@ -1331,13 +1631,17 @@ if [ "$cmd" = list ] || [ "$cmd" = search ] || [ "$cmd" = read ]; then
           until_day=$((month_next - 1))
         fi
         ;;
-      [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9])
+      [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] | today)
         resolve_day "$date_filter" && since_day=$day && until_day=$day
+        ;;
+      yesterday)
+        resolve_day 1d && since_day=$day && until_day=$day
         ;;
     esac
     [ -n "$since_day" ] || {
-      printf 'not a period: %s. Use a year, a month or a day: 2026, 2026-01, 2026-01-11\n' "$date_filter" >&2
-      printf 'for one entry by its id, use: agent-journal read %s\n' "$date_filter" >&2
+      printf 'not a period: %s. Use a year, a month or a day (2026, 2026-01, 2026-01-11), or today or yesterday\n' "$date_filter" >&2
+      [ "$cmd" = read ] ||
+        printf 'for one entry by its id, use: agent-journal read %s\n' "$date_filter" >&2
       exit 2
     }
   fi
@@ -1408,9 +1712,57 @@ if [ "$cmd" = list ] || [ "$cmd" = search ] || [ "$cmd" = read ]; then
   fi
 
   # Entries record `cwd` abbreviated, and a filter is compared against what is
-  # written rather than what is on disk. `--cwd .` therefore means here.
+  # written rather than what is on disk. `--cwd .` therefore means here. A
+  # pattern names no directory, so it was not made absolute above, and one that
+  # is relative is taken from here as well.
   cwd_filter=
-  [ "$cwd_set" = 0 ] || cwd_filter=$(abbrev_home "$cwd")
+  if [ "$cwd_set" = 1 ]; then
+    case $cwd in
+      /* | '~' | '~/'*) ;;
+      *) cwd=$(pwd)/$cwd ;;
+    esac
+    cwd_filter=$(abbrev_home "$cwd")
+  fi
+
+  # `.` is the project of the directory this runs in, resolved exactly as the
+  # session-start hook resolves it, so a caller never repeats the git logic and
+  # risks a different answer. Not the project of `--cwd`, as for `write`: here
+  # that is a filter on what entries recorded, and it often names a worktree
+  # that has been removed since, which has no project to resolve. `read` with
+  # an id takes no filters, so it is left alone.
+  if [ "$project_filter" = . ] && { [ "$cmd" != read ] || [ "$read_period" = 1 ]; }; then
+    here=$(pwd)
+    resolve_project "$here"
+    [ -n "$project" ] || no_project_here "$here"
+    project_filter=$project
+  fi
+
+  # The options that say how to read the terms mean nothing without them, and
+  # a caller that passed one expects it to narrow the answer.
+  if [ "$cmd" = read ] && [ "$fixed" = 1 ]; then
+    printf '%s\n' '--fixed works with list' >&2
+    exit 2
+  fi
+  if [ "$cmd" = list ] && [ -z "$terms" ] && [ "$fixed" = 1 ]; then
+    printf '%s\n' '--fixed needs a term to look for' >&2
+    exit 2
+  fi
+
+
+  # A term that is not a regex would stop awk halfway through the journal with
+  # its own message, so each is tried on its own first, and the refusal says
+  # what to do instead.
+  if [ "$cmd" = list ] && [ "$fixed" = 0 ]; then
+    while IFS= read -r t_term; do
+      [ -n "$t_term" ] || continue
+      AGENT_JOURNAL_TERM=$t_term awk 'BEGIN { match("", ENVIRON["AGENT_JOURNAL_TERM"]) }' 2>/dev/null || {
+        printf 'not an extended regex: %s. Add --fixed to look for the text as it is\n' "$t_term" >&2
+        exit 2
+      }
+    done <<EOF
+$terms
+EOF
+  fi
 
   layout_for 1
 
@@ -1420,27 +1772,7 @@ if [ "$cmd" = list ] || [ "$cmd" = search ] || [ "$cmd" = read ]; then
   fi
 fi
 
-if [ "$cmd" = list ] || [ "$cmd" = search ]; then
-  query=
-  if [ "$cmd" = search ]; then
-    [ "$argc" -ge 1 ] || usage
-    query=$arg1
-  else
-    [ "$argc" -eq 0 ] || usage
-  fi
-
-  # `.` is the project of the directory this runs in, resolved exactly as the
-  # session-start hook resolves it, so a caller never repeats the git logic and
-  # risks a different answer. Not the project of `--cwd`: here that is a filter,
-  # and resolving from it would tie the project to one worktree when it is meant
-  # to cover all of them.
-  if [ "$project_filter" = . ]; then
-    here=$(pwd)
-    resolve_project "$here"
-    [ -n "$project" ] || no_project_here "$here"
-    project_filter=$project
-  fi
-
+if [ "$cmd" = list ]; then
   # The filenames are the instant each entry records, so the shell's own ordering
   # is chronological. A period is checked on the names, before any file is
   # opened, rather than by the glob: a local day spans two UTC dates and is no
@@ -1452,36 +1784,22 @@ if [ "$cmd" = list ] || [ "$cmd" = search ]; then
   set -- "$journal_dir"/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*.md
 
   # A glob only ever expands to names that exist, so the one case to rule out is
-  # that it matched nothing and was left as its own pattern. Testing the first
-  # argument settles it. Filtering the whole list instead would be quadratic:
+  # that it matched nothing and was left as its own pattern. Testing that the
+  # first argument exists settles it, whatever it is: a directory named like an
+  # entry is left out further on. Filtering the whole list instead would be quadratic:
   # each `set -- "$@" ...` copies every argument, which on a year of entries is
   # seconds of work to learn what the shell already guaranteed.
   #
   # An empty journal and a filter that excluded everything both print nothing,
   # and the difference between them is the difference between advice and noise:
   # silence on the first run of a new install reads as something being broken.
-  if [ ! -f "$1" ]; then
+  if [ ! -e "$1" ]; then
     printf 'no entries yet in %s\n' "$journal_dir" >&2
     printf 'your agent writes them on its own, or write one with: agent-journal write\n' >&2
     exit 0
   fi
 
-  # awk stops outright on a directory, which a glob for names cannot tell from
-  # a file without a test per name on every run. So the test runs only once awk
-  # has failed: a directory named like an entry is named and left out, and the
-  # list is read again. Anything else that failed keeps its status, so it cannot
-  # pass for a journal with nothing to show.
-  render "$@" && exit 0
-  status=$?
-  skip=
-  for candidate in "$journal_dir"/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*.md/; do
-    [ -d "$candidate" ] || continue
-    candidate=${candidate%/}
-    printf '%s is a directory, not an entry\n' "$candidate" >&2
-    skip=$skip$candidate$newline
-  done
-  [ -n "$skip" ] || exit "$status"
-  AGENT_JOURNAL_SKIP=$skip render "$@"
+  render_all "$@"
   exit
 fi
 
@@ -1503,55 +1821,127 @@ is_entry() {
 }
 
 
-if [ "$cmd" = read ]; then
-  [ "$argc" -le 1 ] || usage
-  id=$arg1
-  [ -n "$id" ] || id=latest
+# Entries in full, one per path on stdin, with the blank lines at the end of
+# each left out and one blank line between two, so several read as one text. A
+# file that cannot be read, which a sync can remove after it was found, is
+# named and makes the status 1, so a caller never takes a part for the whole.
+show_files() {
+  awk '
+    $0 == "" { next }
+    {
+      if (shown++) print ""
+      blanks = 0
+      while ((got = (getline line < $0)) > 0) {
+        if (line == "" || line == "\r") { blanks++; continue }
+        for (; blanks > 0; blanks--) print ""
+        print line
+      }
+      if (got < 0) {
+        printf "cannot read %s\n", $0 > "/dev/stderr"
+        failed = 1
+      }
+      close($0)
+    }
+    END { exit failed }
+  '
+}
 
-  if [ "$id" = latest ]; then
-    entry=
+# The file of one id in `entry`: `latest`, a whole id, or a prefix that matches
+# one entry. Otherwise it says why on stderr and fails. A prefix that matches
+# several lists them, because printing a guess would be the wrong answer more
+# often than it would be right, and the next attempt can then be exact.
+resolve_id() {
+  t_id=$1
+  entry=
+  if [ "$t_id" = latest ]; then
     for candidate in "$journal_dir"/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*.md; do
       is_entry "$candidate" || continue
       entry=$candidate
     done
     [ -n "$entry" ] || {
       printf 'no entries in %s\n' "$journal_dir" >&2
-      exit 1
+      return 1
     }
-    cat "$entry"
-    exit 0
+    return 0
   fi
 
   # Collected rather than counted, so the list an ambiguous id prints is the
   # same set of files the count came from.
   set --
-  for candidate in "$journal_dir"/"$id"*.md; do
+  for candidate in "$journal_dir"/"$t_id"*.md; do
     is_entry "$candidate" || continue
     set -- "$@" "$candidate"
   done
-  matches=$#
 
-  if [ "$matches" = 0 ]; then
-    printf 'no entry matches %s\n' "$id" >&2
-    exit 1
+  if [ "$#" = 0 ]; then
+    printf 'no entry matches %s\n' "$t_id" >&2
+    return 1
   fi
-
-  # Printing a guess would be the wrong answer more often than it would be right,
-  # so an ambiguous id shows what it matched and lets the next attempt be exact.
-  if [ "$matches" -gt 1 ]; then
-    printf '%s matches %d entries:\n' "$id" "$matches" >&2
-    query=
+  if [ "$#" -gt 1 ]; then
+    printf '%s matches %d entries:\n' "$t_id" "$#" >&2
+    terms=
     limit=0
     offset=0
     # The matches go to stderr with the message, so stdout stays empty for a
     # caller that expected an entry, and the layout follows stderr instead.
     layout_for 2
     render "$@" >&2
-    exit 1
+    return 1
+  fi
+  entry=$1
+}
+
+if [ "$cmd" = read ]; then
+  # A period is printed whole unless a limit was given, since it was asked for
+  # by its bounds. `--limit N` keeps the N most recent, as it does for `list`.
+  if [ "$read_period" = 1 ]; then
+    [ "$limit_set" = 1 ] || limit=0
+    terms=
+    full=1
+    label=${arg1:-those filters}
+    set -- "$journal_dir"/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*.md
+    [ -e "$1" ] || {
+      printf 'no entry matches %s\n' "$label" >&2
+      exit 1
+    }
+    paths=$(render_all "$@")
+    status=$?
+    [ "$status" != 3 ] || exit 1
+    cut=0
+    if [ "$status" = 4 ]; then
+      cut=1
+    elif [ "$status" != 0 ]; then
+      exit "$status"
+    fi
+    printf '%s\n' "$paths" | show_files || exit 1
+    # Said after the entries, as `list` says it after its lines, so in a
+    # terminal it is next to the prompt.
+    if [ "$cut" = 1 ]; then
+      shown=$(printf '%s\n' "$paths" | wc -l)
+      shown=$((shown + 0))
+      printf 'matches %d to %d, counted from the newest; --offset %d for older ones\n' \
+        $((offset + 1)) $((offset + shown)) $((offset + shown)) >&2
+    fi
+    exit 0
   fi
 
-  cat "$1"
-  exit 0
+  # Every id is looked up before anything is printed, so a failed one leaves
+  # stdout empty and names itself, and every other failure with it.
+  paths=
+  failed=0
+  while IFS= read -r t_word; do
+    [ -n "$t_word" ] || continue
+    if resolve_id "$t_word"; then
+      paths=$paths$entry$newline
+    else
+      failed=1
+    fi
+  done <<EOF
+$terms
+EOF
+  [ "$failed" = 0 ] || exit 1
+  printf '%s' "$paths" | show_files
+  exit
 fi
 
 # ---------------------------------------------------------------- sync
