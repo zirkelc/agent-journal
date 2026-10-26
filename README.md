@@ -50,10 +50,10 @@ The file starts with frontmatter, so a search across many files can match single
 ---
 date: 2026-10-07T14:20:00Z
 project: acme-dashboard
-summary: "Export timed out because the CSV was built on the main thread. Moved it to a worker."
+summary: 'Export timed out because the CSV was built on the main thread. Moved it to a worker.'
 cwd: ~/Developer/acme-dashboard
-host: "macbook"
-user: "chris"
+host: 'macbook'
+user: 'chris'
 agent: claude/opus-5-5
 session_id: 743d02a3-22f3-4016-b13e-dd448ad58daf
 ---
@@ -175,17 +175,17 @@ Use the full path rather than `~`. `writable_roots` only applies in `workspace-w
 > [!NOTE]
 > You need to run the [shell installation](#shell) to make the CLI available.
 
-The CLI is optional. You need it only to work with the journal from your shell. It is installed as `agent-journal` and as the short name `aj`, and it is a thin layer over `ls`, `grep` and `cat`. 
+The CLI is optional. You need it only to work with the journal from your shell. It is installed as `agent-journal` and as the short name `aj`, and it is a thin layer over `ls`, `grep` and `cat`.
 
-| command                                 | description                                                      |
-| --------------------------------------- | ---------------------------------------------------------------- |
-| [`aj list`](docs/cli.md#aj-list)       | list entries, or search them                                     |
+| command                                | description                                                      |
+| -------------------------------------- | ---------------------------------------------------------------- |
+| [`aj list`](docs/cli.md#aj-list)       | list entries, search or count them                               |
 | [`aj read`](docs/cli.md#aj-read)       | print entries in full, by ID or by period                        |
 | [`aj write`](docs/cli.md#aj-write)     | add an entry yourself                                            |
 | [`aj config`](docs/cli.md#aj-config)   | read and change the settings                                     |
 | [`aj sync`](docs/cli.md#aj-sync)       | commit the journal folder and push it, see [Git sync](#git-sync) |
 | [`aj install`](docs/cli.md#aj-install) | find the agents on this machine and wire each one up             |
-| `aj help`                               | the usage help                                                   |
+| `aj help`                              | the usage help                                                   |
 
 The [CLI reference](docs/cli.md) has every option, with examples and the same command without the CLI.
 

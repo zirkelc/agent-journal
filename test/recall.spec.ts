@@ -1319,7 +1319,9 @@ const TAGGED: Array<Entry> = [
 
 /** Whether the awk here reads an escape in a regex, which POSIX leaves open. */
 function awkKnows(escape: string): boolean {
-  const probe = spawnSync('awk', ['BEGIN { exit !match("a", ENVIRON["RE"]) }'], { env: { ...process.env, RE: escape } });
+  const probe = spawnSync('awk', ['BEGIN { exit !match("a", ENVIRON["RE"]) }'], {
+    env: { ...process.env, RE: escape },
+  });
   return probe.status === 0;
 }
 
@@ -2036,6 +2038,141 @@ describe('read with several ids', () => {
 
     // Act
     const result = fails(store, ['read', '2026-08-04T100000Z', 'today']);
+
+    // Assert
+    expect(result.status).toBe(2);
+  });
+});
+
+describe('list --by', () => {
+  test(`should count the entries per project, the largest count first`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ENTRIES);
+
+    // Act
+    const counted = run(store, ['list', '--by', 'project']);
+
+    // Assert
+    expect(counted).toBe('2\tcheckout-api\n1\t(none)\n1\tnebula\ntotal\t4\n');
+  });
+
+  test(`should count every match, also past the default limit, with no note`, () => {
+    // Arrange
+    const store = fixture();
+    const many: Array<Entry> = Array.from({ length: 25 }, (_, i) => ({
+      stem: `2026-08-${String(i + 1).padStart(2, '0')}T120000Z`,
+      project: 'nebula',
+      summary: `Entry ${i + 1}.`,
+      cwd: '~/Developer/nebula',
+      body: 'Body.',
+    }));
+    seed(store, many);
+
+    // Act
+    const result = output(store, ['list', '--by', 'project']);
+
+    // Assert
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('25\tnebula\ntotal\t25\n');
+    expect(result.stderr).toBe('');
+  });
+
+  test(`should count only the entries that the filters and the terms keep`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ENTRIES);
+
+    // Act
+    const since = run(store, ['list', '--by', 'project', '--since', '2026-08-05']);
+    const term = run(store, ['list', 'jitter', '--by', 'project']);
+
+    // Assert
+    expect(since).toBe('2\tcheckout-api\n1\t(none)\ntotal\t3\n');
+    expect(term).toBe('1\tcheckout-api\ntotal\t1\n');
+  });
+
+  test(`should count per local day, the oldest day first`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, [
+      { stem: '2026-08-03T091500Z', project: 'nebula', summary: 'Morning.', cwd: '~/Developer/nebula', body: 'B.' },
+      /** A quarter past midnight in Berlin, so the next local day. */
+      { stem: '2026-08-03T221500Z', project: 'nebula', summary: 'Late.', cwd: '~/Developer/nebula', body: 'B.' },
+      { stem: '2026-08-04T100000Z', project: 'nebula', summary: 'Next.', cwd: '~/Developer/nebula', body: 'B.' },
+      { stem: '2026-08-04T110000Z', project: 'nebula', summary: 'Again.', cwd: '~/Developer/nebula', body: 'B.' },
+      { stem: '2026-08-09T110000Z', project: 'nebula', summary: 'Later.', cwd: '~/Developer/nebula', body: 'B.' },
+    ]);
+
+    // Act
+    const berlin = run(store, ['list', '--by', 'date'], { env: { TZ: 'Europe/Berlin' } });
+    const utc = run(store, ['list', '--by', 'date']);
+
+    // Assert
+    expect(berlin).toBe('1\t2026-08-03\n3\t2026-08-04\n1\t2026-08-09\ntotal\t5\n');
+    expect(utc).toBe('2\t2026-08-03\n2\t2026-08-04\n1\t2026-08-09\ntotal\t5\n');
+  });
+
+  test(`should keep the whole of a local day on which the clocks change`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, [
+      /** Twenty past midnight in Berlin, still in summer time. */
+      { stem: '2026-10-24T222000Z', project: 'nebula', summary: 'First.', cwd: '~/Developer/nebula', body: 'B.' },
+      /** A minute before midnight in Berlin, in winter time. */
+      { stem: '2026-10-25T225900Z', project: 'nebula', summary: 'Last.', cwd: '~/Developer/nebula', body: 'B.' },
+      { stem: '2026-10-25T230000Z', project: 'nebula', summary: 'Next.', cwd: '~/Developer/nebula', body: 'B.' },
+    ]);
+
+    // Act
+    const counted = run(store, ['list', '--by', 'date'], { env: { TZ: 'Europe/Berlin' } });
+
+    // Assert
+    expect(counted).toBe('2\t2026-10-25\n1\t2026-10-26\ntotal\t3\n');
+  });
+
+  test(`should count per host, per user and per agent`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, TAGGED);
+
+    // Act
+    const host = run(store, ['list', '--by', 'host']);
+    const user = run(store, ['list', '--by', 'user']);
+    const agent = run(store, ['list', '--by', 'agent']);
+
+    // Assert
+    expect(host).toBe('2\tchris-macbook\n1\t(none)\n1\tcookiebox\ntotal\t4\n');
+    expect(user).toBe('2\tchris\n1\t(none)\n1\tagent\ntotal\t4\n');
+    expect(agent).toBe('1\t(none)\n1\tclaude/opus-5-5\n1\tclaude/sonnet-5-5\n1\tcodex/gpt-5\ntotal\t4\n');
+  });
+
+  test(`should give a total of 0 when nothing matches`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ENTRIES);
+
+    // Act
+    const result = output(store, ['list', '--by', 'project', '--date', '2019']);
+
+    // Assert
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('total\t0\n');
+  });
+
+  test.each([
+    [['list', '--by', 'project', '--limit', '5']],
+    [['list', '--by', 'project', '--offset', '5']],
+    [['list', '--by', 'summary']],
+    [['list', '--by']],
+    [['read', '2026-08', '--by', 'project']],
+  ])(`should refuse %j`, (args) => {
+    // Arrange
+    const store = fixture();
+    seed(store, ENTRIES);
+
+    // Act
+    const result = fails(store, args);
 
     // Assert
     expect(result.status).toBe(2);
