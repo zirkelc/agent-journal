@@ -54,7 +54,7 @@ summary: 'Export timed out because the CSV was built on the main thread. Moved i
 cwd: ~/Developer/acme-dashboard
 host: 'macbook'
 user: 'chris'
-agent: claude/opus-5-5
+agent: 'claude/opus-5-5'
 session_id: 743d02a3-22f3-4016-b13e-dd448ad58daf
 ---
 

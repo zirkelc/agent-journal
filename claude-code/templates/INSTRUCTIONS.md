@@ -35,6 +35,7 @@ Some sessions hold nothing worth remembering. Then write no entry and do not ann
 - Greetings, small talk, and a few steps that changed nothing.
 - A general question answered from general knowledge, such as what a term means or how a common tool or service works. The answer belongs to the world, not to this work. Write only if it changed something here or led to a decision.
 - A look into the journal. When the session only read past entries and answered from them, the journal already holds what was found. "Reconstructed the login history from the journal" adds a copy, not a memory. Write only if the session also did or decided something new.
+
 Never write an entry about the entry: "Created the required journal entry for this session" and "Session opened, no task has been requested yet" tell a future reader only that a session happened. If a summary would mean nothing to someone reading it in a year, there is nothing to write yet.
 
 ### Writing an entry
@@ -65,7 +66,7 @@ summary: "Shipped the v1.2 sync path on prepared statements, with rollback when 
 cwd: ~/Developer/oss/my-lib
 host: "my-laptop"
 user: "me"
-agent: my-agent/my-model
+agent: "my-agent/my-model"
 session_id: 4eb89b17-6f7f-4264-95d4-ea5313ef277e
 ---
 
@@ -82,7 +83,7 @@ Exactly these fields, in this order, on every entry:
 - `cwd`: the directory the session is working in, written with `~` for home. This is the only place a worktree is recorded, since `project` deliberately collapses them.
 - `host`: the machine the session runs on, always double-quoted. A journal can collect entries from several machines, and a session can be resumed only on the machine that has its transcript. Omit the field if none is given below.
 - `user`: the account the session runs as on that machine, always double-quoted. Omit the field if none is given below.
-- `agent`: which agent wrote the entry, and which model it was running as. Together with `session_id` this is what says where the work can be picked back up, since a session id is only meaningful to the tool that issued it. Omit the field if none is given below.
+- `agent`: which agent wrote the entry, and which model it was running as, always double-quoted, since a model id can contain a colon. Together with `session_id` this is what says where the work can be picked back up, since a session id is only meaningful to the tool that issued it. Omit the field if none is given below.
 - `session_id`: the session this entry came from, which is what joins it back to the full transcript. Omit the field if no id is given below.
 
 ### Current session

@@ -416,16 +416,55 @@ describe('the agent it records', () => {
     expect(frontmatter(written(store).text).agent).toBeUndefined();
   });
 
+  test(`should record a model id with a colon in quotes, as the provider writes it`, () => {
+    // Arrange
+    const store = fixture();
+
+    // Act
+    run(store, ['write', '--summary', 'From a local model.', '--agent', 'pi/llama3:8b'], { at: store.repo });
+
+    // Assert
+    const { text } = written(store);
+    expect(text).toContain('\nagent: "pi/llama3:8b"\n');
+    expect(frontmatter(text).agent).toBe('pi/llama3:8b');
+  });
+
+  test(`should count and filter an agent with a colon by its whole value`, () => {
+    // Arrange
+    const store = fixture();
+    run(store, ['write', '--summary', 'From a local model.', '--agent', 'pi/llama3:8b'], { at: store.repo });
+
+    // Act
+    const counted = run(store, ['list', '--by', 'agent']);
+    const filtered = run(store, ['list', '--agent', 'pi/llama3:8b']);
+
+    // Assert
+    expect(counted).toBe('1\tpi/llama3:8b\ntotal\t1\n');
+    expect(rows(filtered).map((row) => row.summary)).toEqual(['From a local model.']);
+  });
+
   test(`should refuse an agent that would break the frontmatter`, () => {
     // Arrange
     const store = fixture();
 
     // Act
-    const result = fails(store, ['write', '--summary', 'Fine.', '--agent', 'a: b'], { at: store.repo });
+    const result = fails(store, ['write', '--summary', 'Fine.', '--agent', 'a"b'], { at: store.repo });
 
     // Assert
     expect(result.status).toBe(2);
-    expect(result.stderr).toContain('colon');
+    expect(result.stderr).toContain('quote');
+  });
+
+  test(`should refuse an agent with a tab, which would add a column to a count`, () => {
+    // Arrange
+    const store = fixture();
+
+    // Act
+    const result = fails(store, ['write', '--summary', 'Fine.', '--agent', 'pi/a:\tb'], { at: store.repo });
+
+    // Assert
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('tab');
   });
 });
 

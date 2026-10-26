@@ -2416,8 +2416,10 @@ if [ "$cmd" = write ]; then
   done
 
   # A value that would end its field early or split the line is refused rather
-  # than escaped. The summary is quoted, so only a quote or a newline can break
-  # it; the others are bare, where a colon ends the key as well.
+  # than escaped. The summary and the agent are quoted, so only a quote or a
+  # newline can break them; the others are bare, where a colon ends the key as
+  # well. The agent is quoted because a model id can have a colon, as in
+  # `llama3:8b`, and it is kept as the provider writes it.
   refuse_if_unquotable() {
     case $2 in
       *'"'* | *"$newline"*)
@@ -2425,16 +2427,19 @@ if [ "$cmd" = write ]; then
         exit 2
         ;;
     esac
-    [ "$3" = bare ] || return 0
+    [ "$3" = quoted ] && return 0
     case $2 in
-      *:*)
-        printf 'the %s cannot contain a colon\n' "$1" >&2
-        exit 2
-        ;;
       *"$tab"*)
         # Not a problem for the entry, but `list` separates its columns with
         # tabs down a pipe, and one inside a value would add a column.
         printf 'the %s cannot contain a tab\n' "$1" >&2
+        exit 2
+        ;;
+    esac
+    [ "$3" = bare ] || return 0
+    case $2 in
+      *:*)
+        printf 'the %s cannot contain a colon\n' "$1" >&2
         exit 2
         ;;
     esac
@@ -2453,7 +2458,7 @@ if [ "$cmd" = write ]; then
   refuse_if_unquotable summary "$opt_summary" quoted
   refuse_if_unquotable project "$project_filter" bare
   refuse_if_unquotable 'session id' "$session_id" bare
-  refuse_if_unquotable agent "$agent" bare
+  refuse_if_unquotable agent "$agent" tabless
 
   resolve_project "$cwd"
   resolve_machine
@@ -2497,7 +2502,7 @@ if [ "$cmd" = write ]; then
     # YAML reader.
     [ -z "$host" ] || printf 'host: "%s"\n' "$host"
     [ -z "$user" ] || printf 'user: "%s"\n' "$user"
-    [ -z "$agent" ] || printf 'agent: %s\n' "$agent"
+    [ -z "$agent" ] || printf 'agent: "%s"\n' "$agent"
     [ -z "$session_id" ] || printf 'session_id: %s\n' "$session_id"
     printf -- '---\n\n'
   } > "$draft" || exit 1
