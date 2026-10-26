@@ -191,7 +191,7 @@ The CLI is optional. You need it only to work with the journal from your shell. 
 
 | command                                | description                                                      |
 | -------------------------------------- | ---------------------------------------------------------------- |
-| [`aj list`](docs/cli.md#aj-list)       | list entries, or search them                                     |
+| [`aj list`](docs/cli.md#aj-list)       | list entries, search or count them                               |
 | [`aj read`](docs/cli.md#aj-read)       | print entries in full, by ID or by period                        |
 | [`aj write`](docs/cli.md#aj-write)     | add an entry yourself                                            |
 | [`aj config`](docs/cli.md#aj-config)   | read and change the settings                                     |

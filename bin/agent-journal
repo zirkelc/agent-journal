@@ -2,7 +2,7 @@
 #
 # The whole of agent-journal that is not prose.
 #
-#   agent-journal list    [TERM...] [--fixed] [filters]
+#   agent-journal list    [TERM...] [--fixed] [--by FIELD] [filters]
 #   agent-journal read    ID... | PERIOD [filters]
 #   agent-journal write   [--summary S] [--body B]
 #   agent-journal config  [set|unset <key> [value]]
@@ -66,7 +66,7 @@ default_journal_dir=$HOME/agent-journal
 
 help_text() {
   cat <<'EOF'
-usage: agent-journal list   [TERM...] [--fixed] [filters]
+usage: agent-journal list   [TERM...] [--fixed] [--by FIELD] [filters]
        agent-journal read   latest | ID... | PERIOD [filters]
        agent-journal write  [--summary S] [--body B] [--project P] [--cwd DIR] [--agent A]
                             [--session-id ID] [--no-sync]
@@ -95,6 +95,12 @@ across a line break. Each line then ends with the part of the body line that
 matched, as a fourth column down a pipe and on a line of its own in a
 terminal. It is empty when the summary matched, since the summary is shown
 anyway.
+
+list --by FIELD counts the matches instead of listing them, one line per
+value of the field as count, a tab and the value, the largest count first,
+then a last line with the total. FIELD is project, date (the local day, the
+days in order), host, user or agent. An entry without the field counts as
+(none). It counts every match, so it takes no --limit or --offset.
 
 read takes one id or several, each whole or a prefix that matches one entry,
 and prints them in full in that order. A prefix that matches several lists
@@ -888,6 +894,8 @@ limit=20
 limit_set=0
 offset=0
 fixed=0
+by=
+by_set=0
 opt_summary=
 summary_set=0
 opt_body=
@@ -943,6 +951,10 @@ while [ $# -gt 0 ]; do
     --all) limit=0; all_set=1; shift ;;
     # How `list` reads its terms: as text rather than as an extended regex.
     --fixed) fixed=1; shift ;;
+    # For `list`: a count of the matches for each value of one field, instead
+    # of the matches.
+    --by) [ $# -ge 2 ] || usage; by=$2; by_set=1; shift 2 ;;
+    --by=*) by=${1#--by=}; by_set=1; shift ;;
     --dry-run) dry_run=1; shift ;;
     # For `context`: the text for a reader of the journal instead of the rules
     # for writing it.
@@ -1221,6 +1233,7 @@ render() {
   AGENT_JOURNAL_LABEL=${label:-} \
   awk \
     -v fixed="$fixed" \
+    -v by="$by" \
     -v full="${full:-0}" \
     -v since="$since" \
     -v until="$until" \
@@ -1409,6 +1422,16 @@ render() {
       }
 
       n++
+      # For a count, only the value of the field. A day is told from the name,
+      # since the name is the instant in UTC.
+      if (by != "") {
+        if (by == "project") value[n] = proj
+        else if (by == "host") value[n] = h
+        else if (by == "user") value[n] = u
+        else if (by == "agent") value[n] = ag
+        else value[n] = stem
+        return 0
+      }
       # The file name itself rather than a friendlier date and time, because it is
       # what `read` takes: a line can be copied straight into it, and two entries
       # from the same minute still come out different.
@@ -1479,6 +1502,18 @@ render() {
       while ((getline name) > 0) names[++count] = name
       for (a = count; a >= 1; a--)
         if (scan(names[a])) break
+
+      # One value per match, oldest first, for the caller to count. A field
+      # an entry does not have is a value of its own, so the total is still
+      # the number of matches.
+      if (by != "") {
+        for (i = n; i >= 1; i--) {
+          v = value[i]
+          gsub(/\t/, " ", v)
+          print (v == "" ? "(none)" : v)
+        }
+        exit
+      }
 
       # The paths, oldest first. Nothing kept is an answer of its own, told
       # apart by its status, and so is a list that is cut, since the caller
@@ -1579,6 +1614,75 @@ is_period() {
     [0-9][0-9][0-9][0-9] | [0-9][0-9][0-9][0-9]-[0-9][0-9] | [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) return 0 ;;
   esac
   return 1
+}
+
+# The local day of each entry name on stdin, oldest first, one per line. An
+# instant on a UTC date falls on that day here or on the day before or after
+# it, so only the starts of those days are asked of `date`, once each, and not
+# a conversion per entry. Each name then takes the last start at or before it.
+local_days() {
+  t_names=$(cat)
+  t_starts=
+  t_dates=$(printf '%s\n' "$t_names" | awk '{ d = substr($0, 1, 10) } !(d in seen) { seen[d]; print d }')
+  while IFS=- read -r t_y t_m t_d; do
+    to_decimal "$t_y"
+    t_yy=$decimal
+    to_decimal "$t_m"
+    t_mm=$decimal
+    to_decimal "$t_d"
+    civil_to_days "$t_yy" "$t_mm" "$decimal"
+    for t_day in $((days - 1)) "$days" $((days + 1)); do
+      local_midnight "$t_day" || {
+        printf 'cannot convert %s to UTC\n' "$t_y-$t_m-$t_d" >&2
+        exit 1
+      }
+      format_id "$midnight"
+      days_to_civil "$t_day"
+      t_starts=$t_starts$id$tab$civil$newline
+    done
+  done <<EOF
+$t_dates
+EOF
+  printf '%s\n' "$t_names" | AGENT_JOURNAL_STARTS=$t_starts awk -F "$tab" '
+    BEGIN {
+      n = split(ENVIRON["AGENT_JOURNAL_STARTS"], line, "\n")
+      for (i = 1; i <= n; i++) {
+        if (line[i] == "") continue
+        split(line[i], part, "\t")
+        day[part[1]] = part[2]
+      }
+      # The starts in order, by an insertion sort: a few dozen at most for a
+      # month, and POSIX awk has no sort of its own.
+      m = 0
+      for (s in day) {
+        for (j = m; j >= 1 && start[j] > s; j--) start[j + 1] = start[j]
+        start[j + 1] = s
+        m++
+      }
+      k = 1
+    }
+    {
+      while (k < m && start[k + 1] <= $0) k++
+      print day[start[k]]
+    }'
+}
+
+# The values on stdin as `count<TAB>value`, the largest count first, and the
+# days in order, then the total. The same value twice is one group.
+count_values() {
+  if [ "$1" = date ]; then
+    t_sort="LC_ALL=C sort -t '$tab' -k2,2"
+  else
+    t_sort="LC_ALL=C sort -t '$tab' -k1,1nr -k2,2"
+  fi
+  AGENT_JOURNAL_SORT=$t_sort awk '
+    $0 != "" { n[$0]++; total++ }
+    END {
+      sorter = ENVIRON["AGENT_JOURNAL_SORT"]
+      for (v in n) printf "%d\t%s\n", n[v], v | sorter
+      close(sorter)
+      printf "total\t%d\n", total
+    }'
 }
 
 if [ "$cmd" = list ] || [ "$cmd" = read ]; then
@@ -1768,6 +1872,26 @@ EOF
     exit 2
   fi
 
+  # A count is of every match, so a limit or an offset would make it wrong
+  # without saying so.
+  if [ "$by_set" = 1 ]; then
+    if [ "$cmd" = read ]; then
+      printf '%s\n' '--by works with list' >&2
+      exit 2
+    fi
+    case $by in
+      project | date | host | user | agent) ;;
+      *)
+        printf 'not a field to count by: %s. Use project, date, host, user or agent\n' "$by" >&2
+        exit 2
+        ;;
+    esac
+    if [ "$limit_set" = 1 ] || [ "$offset" != 0 ]; then
+      printf '%s\n' '--by counts every match, so it takes no --limit or --offset' >&2
+      exit 2
+    fi
+    limit=0
+  fi
 
   # A term that is not a regex would stop awk halfway through the journal with
   # its own message, so each is tried on its own first, and the refusal says
@@ -1817,6 +1941,15 @@ if [ "$cmd" = list ]; then
     printf 'no entries yet in %s\n' "$journal_dir" >&2
     printf 'your agent writes them on its own, or write one with: agent-journal write\n' >&2
     exit 0
+  fi
+
+  if [ -n "$by" ]; then
+    values=$(render_all "$@") || exit
+    if [ "$by" = date ] && [ -n "$values" ]; then
+      values=$(printf '%s\n' "$values" | local_days) || exit
+    fi
+    printf '%s\n' "$values" | count_values "$by"
+    exit
   fi
 
   render_all "$@"
