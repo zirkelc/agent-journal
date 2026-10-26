@@ -13,12 +13,11 @@
  * folder, so a run that stops can go on where it stopped. `--pilot` writes
  * only the first batch of each project and prints it.
  */
-import { spawn } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync, existsSync, mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
-import { brokenRules, buildSlots, keyEntries, PROJECTS, RULES, type Content, type Slot } from './generate.ts';
+import { buildSlots, keyEntries, PROJECTS, RULES, type Content, type Slot } from './generate.ts';
+import { callPi, CONTENT, jsonArray, pool, problems, spent } from './model.ts';
 
 const { values: options } = parseArgs({
   options: {
@@ -30,7 +29,6 @@ const { values: options } = parseArgs({
   },
 });
 
-const CONTENT = new URL('content/', import.meta.url);
 /** The slots of one lane: the lanes of a project run side by side, and the batches of a lane one after the other. */
 const LANE_SLOTS = 200;
 /** A batch ends at this many slots or this many sentences, whichever comes first. */
@@ -40,8 +38,6 @@ const ATTEMPTS = 8;
 /** The summaries of the entries before a batch that its prompt shows. */
 const CONTEXT = 30;
 
-const PI = new URL('../../node_modules/.bin/pi', import.meta.url).pathname;
-const work = mkdtempSync(join(tmpdir(), 'agent-journal-write-'));
 mkdirSync(options.cache, { recursive: true });
 
 const SYSTEM = `You write synthetic entries for the test dataset of agent-journal, a journal that coding agents write after each piece of work. A model under test will later search these entries to answer questions about past work, so they must read like the real journal of a real developer and their agents over several years.
@@ -57,6 +53,7 @@ Rules:
 - Time only in relative words, such as "yesterday", "last week" or "two months ago", or as a time of day. Never a weekday, a month, a year or a date, and never "day -123": the dates of the entries change with each run.
 - Keep to the people, the tools and the timeline of the project description. Do not invent other team members.
 - The key entries of the project are already written. Do not write them again and do not contradict them; after a key entry, its result is part of the project.
+- Before the day of a key entry, its change has not happened. An entry before it may describe the problem that leads to it, discuss options, or plan it, but it never does, tests in production, releases, deploys, switches or finishes that change, and it never refers to it as done. The key entry is the one place where the change happens.
 - Some words must not appear, so that each question of the test has one right answer. The prompt lists them.
 - Answer with a JSON array only, no text around it.`;
 
@@ -78,8 +75,6 @@ function batches(slots: Array<Slot>): Array<Array<Slot>> {
   if (current.length > 0) result.push(current);
   return result;
 }
-
-const sentenceCount = (text: string): number => (text.match(/[.!?](\s|$)/g) ?? []).length;
 
 function forbidden(slot: Slot): Array<string> {
   return RULES.filter((rule) => !rule.isAllowed?.(slot)).map((rule) => rule.words);
@@ -115,7 +110,12 @@ function prompt(
   return [
     readFileSync(new URL(`${name}.md`, CONTENT), 'utf8').trim(),
     '# The key entries of this project, already written',
-    keys.map((entry) => `- day ${entry.day}, ${entry.time}: ${entry.summary}`).join('\n') || '(none)',
+    keys
+      .map(
+        (entry) =>
+          `- day ${entry.day}, ${entry.time}: ${entry.summary}${entry.day > from ? ' (not yet happened at the start of this batch: before its day, its change is not done)' : ''}`,
+      )
+      .join('\n') || '(none)',
     ...(near.length > 0
       ? [
           'Close to this batch, in full:',
@@ -139,107 +139,6 @@ function prompt(
   ].join('\n\n');
 }
 
-type Usage = { cost: number; input: number; output: number };
-const spent: Usage = { cost: 0, input: 0, output: 0 };
-
-function callPi(system: string, message: string): Promise<{ text: string; usage: Usage }> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(
-      PI,
-      [
-        '-p',
-        '--mode',
-        'json',
-        '--no-tools',
-        '--no-extensions',
-        '--no-skills',
-        '--no-prompt-templates',
-        '--no-context-files',
-        '--no-themes',
-        '--no-mcp',
-        '--no-session',
-        '--thinking',
-        'off',
-        '--model',
-        options.model,
-        '--system-prompt',
-        system,
-      ],
-      { cwd: work, stdio: ['pipe', 'pipe', 'pipe'] },
-    );
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', (chunk: Buffer) => (stdout += chunk.toString()));
-    child.stderr.on('data', (chunk: Buffer) => (stderr += chunk.toString()));
-    child.stdin.end(message);
-    child.on('close', (code) => {
-      const end = stdout
-        .trim()
-        .split('\n')
-        .map((line) => {
-          try {
-            return JSON.parse(line) as { type: string; messages?: Array<any> };
-          } catch {
-            return null;
-          }
-        })
-        .filter((event) => event?.type === 'agent_end')
-        .at(-1);
-      const reply = end?.messages?.filter((item) => item.role === 'assistant').at(-1);
-      if (code !== 0 || !reply) return reject(new Error(`pi exited with ${code}: ${stderr.slice(0, 500)}`));
-      const text = (reply.content as Array<{ type: string; text?: string }>)
-        .filter((part) => part.type === 'text')
-        .map((part) => part.text)
-        .join('');
-      if (reply.stopReason !== 'stop') return reject(new Error(`the reply stopped with ${reply.stopReason}`));
-      resolve({
-        text,
-        usage: {
-          cost: reply.usage.cost.total,
-          input: reply.usage.input + reply.usage.cacheRead,
-          output: reply.usage.output,
-        },
-      });
-    });
-  });
-}
-
-/** What is wrong with the entry of a slot, or nothing. */
-function problems(slot: Slot, name: string, item: Content, at: string): Array<string> {
-  const project = PROJECTS.find((entry) => entry.name === name)!;
-  if (typeof item.summary !== 'string' || typeof item.body !== 'string') return [`${at} has no summary or body.`];
-  const found: Array<string> = [];
-  if (item.summary.includes('\n')) found.push(`${at}: the summary has more than one line.`);
-  if (item.summary.length > 200) found.push(`${at}: the summary has ${item.summary.length} characters, more than 200.`);
-  const sentences = sentenceCount(item.body);
-  if (sentences < slot.sentences * 0.6 || sentences > slot.sentences * 1.6) {
-    found.push(`${at}: the body has ${sentences} sentences, but the slot asks for about ${slot.sentences}.`);
-  }
-  if (/\bday -?\d+/i.test(`${item.summary}\n${item.body}`)) found.push(`${at} names a day number.`);
-  for (const rule of brokenRules(slot, `${item.summary}\n${item.body}`)) {
-    found.push(
-      `${at} has "${rule.pattern.exec(`${item.summary}\n${item.body}`)?.[0]}" (${rule.words}), which is not allowed: ${rule.why}`,
-    );
-  }
-  if (item.branch && !project.branches?.includes(item.branch))
-    found.push(`${at} has the unknown branch "${item.branch}".`);
-  return found;
-}
-
-function parse(text: string): Array<Content & { slot: number }> {
-  const start = text.indexOf('[');
-  const end = text.lastIndexOf(']');
-  if (start < 0 || end < start) throw new Error('no JSON array');
-  return (JSON.parse(text.slice(start, end + 1)) as Array<Content & { slot: number }>).map(
-    ({ slot, summary, body, branch }) => ({
-      slot: Number(slot),
-      summary: summary?.trim(),
-      body: body?.trim(),
-      ...(branch ? { branch } : {}),
-    }),
-  );
-}
-
 /** Writes one batch, and asks again for the slots that are missing or wrong, until all are right. */
 async function writeBatch(
   name: string,
@@ -255,11 +154,7 @@ async function writeBatch(
   for (let attempt = 1; attempt <= ATTEMPTS && done.size < batch.length; attempt++) {
     let text: string;
     try {
-      const reply = await callPi(SYSTEM, prompt(name, batch, before, isLaneStart, done, feedback));
-      spent.cost += reply.usage.cost;
-      spent.input += reply.usage.input;
-      spent.output += reply.usage.output;
-      text = reply.text;
+      text = await callPi(options.model, SYSTEM, prompt(name, batch, before, isLaneStart, done, feedback));
     } catch (error) {
       console.log(`  ${name} #${first} attempt ${attempt} failed: ${(error as Error).message}`);
       continue;
@@ -267,7 +162,12 @@ async function writeBatch(
     feedback = [];
     let items: Array<Content & { slot: number }>;
     try {
-      items = parse(text);
+      items = jsonArray<Content & { slot: number }>(text).map(({ slot, summary, body, branch }) => ({
+        slot: Number(slot),
+        summary: summary?.trim(),
+        body: body?.trim(),
+        ...(branch ? { branch } : {}),
+      }));
     } catch (error) {
       feedback = [`The answer was not a valid JSON array (${(error as Error).message}).`];
       continue;
@@ -275,7 +175,7 @@ async function writeBatch(
     for (const { slot, ...item } of items) {
       const index = slot - 1;
       if (!batch[index] || done.has(index)) continue;
-      const found = problems(batch[index], name, item, `Slot ${slot}`);
+      const found = problems(batch[index], item, `Slot ${slot}`);
       if (found.length === 0) done.set(index, item);
       else feedback.push(...found);
     }
@@ -317,20 +217,6 @@ async function writeLane(lane: Lane): Promise<Array<Content>> {
     console.log(`${lane.name} ${index}/${lane.first + lane.slots.length} written, $${spent.cost.toFixed(2)} so far`);
   }
   return written;
-}
-
-/** Runs the tasks with at most `limit` at a time, in their order. */
-async function pool<T>(tasks: Array<() => Promise<T>>, limit: number): Promise<Array<T>> {
-  const results: Array<T> = [];
-  let next = 0;
-  async function worker() {
-    while (next < tasks.length) {
-      const index = next++;
-      results[index] = await tasks[index]!();
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, worker));
-  return results;
 }
 
 const names = PROJECTS.map((project) => project.name).filter((name) => !options.only || name === options.only);

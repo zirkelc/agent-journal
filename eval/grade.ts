@@ -68,10 +68,10 @@ function recallChecks(test: Case, session: Session, placed: Array<Placed>): Arra
       detail: found.join(', '),
     });
   }
-  if (expect.date_of) {
-    const { day } = keyed(placed, expect.date_of);
+  for (const key of [expect.date_of ?? []].flat()) {
+    const { day } = keyed(placed, key);
     checks.push({
-      name: `names the day of ${expect.date_of}`,
+      name: `names the day of ${key}`,
       isPassed: dayPatterns(day, session.start).some((pattern) => pattern.test(answer)),
       detail: day.toDateString(),
     });

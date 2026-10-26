@@ -159,6 +159,29 @@
       "why": "Nothing matches. The answer must say so and not make something up."
     },
     {
+      "id": "recall-dates-of-steps",
+      "kind": "recall",
+      "dir": "Developer/acme-dashboard",
+      "git": true,
+      "messages": ["On which days did the login of this project change, and what changed each time?"],
+      "expect": {
+        "all": ["jwt", "rotat", "server[- ]side session|sessions? (rows )?in the database|database sessions"],
+        "date_of": ["A1", "A2", "A3"]
+      },
+      "why": "The three changes of the login, each with its day. Many other entries of the project talk about the tokens and the sessions between the changes, such as a logout that does not log out, but none of them is a change of the login."
+    },
+    {
+      "id": "recall-redis-dropped",
+      "kind": "recall",
+      "dir": "Developer/nebula",
+      "git": true,
+      "messages": ["What did we try with Redis in this project over the last 60 days that we then dropped?"],
+      "expect": {
+        "all": ["compress", "client librar", "pipelin"]
+      },
+      "why": "Three filler entries about attempts that were dropped, among about 70 entries about Redis in those 60 days. Many of the others say that memory or a rate 'dropped', so a search for the word alone finds the wrong ones."
+    },
+    {
       "id": "write-milestone",
       "kind": "write",
       "dir": "Developer/billing-api",
@@ -208,6 +231,113 @@
         }
       },
       "why": "Nothing worth remembering, so no entry, also at the end of the session."
+    },
+    {
+      "id": "write-small-fix",
+      "kind": "write",
+      "dir": "Developer/acme-dashboard",
+      "git": true,
+      "messages": [
+        "The date picker showed UTC dates instead of local dates for users east of UTC. I changed one line in DatePicker.tsx to use the local date, tested it in two time zones and pushed it. No need to look at the code.",
+        "thanks, bye"
+      ],
+      "expect": {
+        "entries": {
+          "min": 1,
+          "max": 1
+        },
+        "project": "acme-dashboard",
+        "body": ["utc|local (date|time)"]
+      },
+      "why": "A small fix is still work worth an entry. The rules against needless entries must not stop it."
+    },
+    {
+      "id": "write-decision",
+      "kind": "write",
+      "dir": "Developer/acme-dashboard",
+      "git": true,
+      "messages": [
+        "We decided not to upgrade to React 20 this quarter, because two of our chart libraries do not support it yet. We will check again next quarter. No code changes today. Good night."
+      ],
+      "expect": {
+        "entries": {
+          "min": 1,
+          "max": 1
+        },
+        "project": "acme-dashboard",
+        "body": ["react 20", "chart"]
+      },
+      "why": "A decision without any code change. It is worth an entry, because a later session needs to know why the upgrade waits."
+    },
+    {
+      "id": "write-lookup-then-work",
+      "kind": "write",
+      "dir": "Developer/nebula",
+      "git": true,
+      "messages": [
+        "What did we decide about the Redis eviction policy?",
+        "OK. I also set the TTL of the report cache keys to 6 hours in cache.ts just now, which was the cause of the memory growth. No need to look at the code. Done for today."
+      ],
+      "expect": {
+        "entries": {
+          "min": 1,
+          "max": 1
+        },
+        "project": "nebula",
+        "body": ["ttl|6 hours|six hours"]
+      },
+      "why": "A look into the journal, then new work. The look alone gives no entry, and the work after it gives one."
+    },
+    {
+      "id": "write-two-milestones",
+      "kind": "write",
+      "dir": "Developer/billing-api",
+      "git": true,
+      "messages": [
+        "Found it: the invoice PDF was cut off for US customers, because the renderer used A4 margins on US Letter paper. The page size now follows the country of the customer, and the test passes. Pushed, no need to look at the code.",
+        "The next one is done too: the dunning emails now have a link to update the card, through a signed URL that is valid for 7 days. Tests pass, pushed.",
+        "That's all for today, good night."
+      ],
+      "expect": {
+        "entries": {
+          "min": 2,
+          "max": 3
+        },
+        "project": "billing-api",
+        "body": ["letter|page size|margin", "dunning|update the card|signed url"]
+      },
+      "why": "Two separate results in one session, so at least two entries."
+    },
+    {
+      "id": "write-nothing-lookup",
+      "kind": "write",
+      "dir": "Developer/billing-api",
+      "git": true,
+      "messages": ["What did we work on yesterday?", "great, thanks, good night"],
+      "expect": {
+        "entries": {
+          "min": 0,
+          "max": 0
+        }
+      },
+      "why": "Only a look into the journal, then an end of session. The journal already holds what was found, so no entry."
+    },
+    {
+      "id": "write-nothing-general",
+      "kind": "write",
+      "dir": "Developer/oss/chunkdown",
+      "git": true,
+      "messages": [
+        "How does Promise.allSettled differ from Promise.all? Answer from memory.",
+        "got it, I'm off for today"
+      ],
+      "expect": {
+        "entries": {
+          "min": 0,
+          "max": 0
+        }
+      },
+      "why": "A general question, then an end of session. The answer is in the docs, not in this project, so no entry."
     }
   ]
 }

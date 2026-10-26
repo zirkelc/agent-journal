@@ -20,8 +20,8 @@ export type Expect = {
   all?: Array<string>;
   /** Regexes that the answer must not match. One check for all of them. */
   none?: Array<string>;
-  /** The answer must name the local day of this entry. */
-  date_of?: string;
+  /** The answer must name the local day of this entry, or of each of these entries. One check each. */
+  date_of?: string | Array<string>;
   /** The answer must give the number of entries of each project in these local days. One check each project. */
   counts?: { from: number; to: number };
   /** The answer must say that nothing was found. */
