@@ -22,7 +22,7 @@ Write a journal entry whenever this session does work worth remembering; most wo
 
 When the session contains important context that is worth remembering:
 
-- At each significant milestone (bug fixed, feature done, refactor complete)
+- At each significant milestone (a problem solved, a piece of work finished, a plan or document done)
 - At each a-ha moment or pivotal decision
 - At the end of session, when it did something worth remembering that no entry has recorded yet (e.g. departure signals like "good night", "we're done", "I'm off"; "thanks", "ok", "done" are acknowledgment, NOT end of session)
 
@@ -30,20 +30,18 @@ Once there is something worth remembering, a little noise is better than missed 
 
 ### When NOT to write
 
-Some sessions contain nothing worth remembering: greetings, a question answered from what you already knew, a couple of commands that changed nothing. Do not write an entry and do not announce it. That holds at the end of such a session too.
+Some sessions hold nothing worth remembering. Then write no entry and do not announce it, also at the end of the session. Such sessions are:
 
-Two kinds of session look like work but are not:
-
-- A general question answered, such as what a flag of a tool does or how an API works. The answer is in the docs, not in this project. Write only if it changed something here or led to a decision.
+- Greetings, small talk, and a few steps that changed nothing.
+- A general question answered from general knowledge, such as what a term means or how a common tool or service works. The answer belongs to the world, not to this work. Write only if it changed something here or led to a decision.
 - A look into the journal. When the session only read past entries and answered from them, the journal already holds what was found. "Reconstructed the login history from the journal" adds a copy, not a memory. Write only if the session also did or decided something new.
-
 Never write an entry about the entry: "Created the required journal entry for this session" and "Session opened, no task has been requested yet" tell a future reader only that a session happened. If a summary would mean nothing to someone reading it in a year, there is nothing to write yet.
 
 ### Writing an entry
 
 <!-- with tools -->
 
-Write each entry with the `__TOOLS__write` tool. It takes two things, `summary` and `body`, and sets everything else itself: the date from the clock, the project and the directory from where this session works, the host, the user, the agent and the session id. It answers with the new entry's id. One call is one entry. Never create an entry file any other way, and never edit a past one unless explicitly asked.
+Write each entry with the `__TOOLS__write` tool, one call per entry. It takes two things, `summary` and `body`, and sets everything else itself: the date from the clock, the project and the directory from where this session works, the host, the user, the agent and the session id. It answers with the new entry's id. Never create an entry file any other way, and never edit a past one unless explicitly asked.
 
 The `summary` is one line, 200 characters at most, without double quotes. This is what makes a directory of entries scannable, so it has to stand on its own: what happened and what it means, never a topic tag. "Fixed the auth bug" is a tag. "Token refresh raced the retry and logged users out, so it is serialized behind a mutex now" is a summary.
 <!-- end -->
@@ -111,20 +109,27 @@ Read the journal when the user asks about past work. Not otherwise, and never at
 
 <!-- with tools -->
 
-Read it with the journal's own tools, never with a shell or a file read of the journal folder:
+Read it with the journal's own tools, never with a shell or a file read of the journal folder. Load them by these names first if they are not loaded yet. Every day they take is a local day in the user's time zone, so a day the user names goes in as it is.
 
-- `__TOOLS__list` lists entries, oldest first, one line each with the id, the project and the summary. It gives the 50 most recent matches, or up to 200 with `limit`, and a last line then names the `offset` that gives the older ones. With `terms`, it searches the summaries and the bodies: each term is a regex that ignores case, an entry must match every term, and each line also gets the body line that matched. With `by`, it lists no entries but counts every match for each project or day, with a total: use it for any count, and never count lines yourself.
-- `__TOOLS__read` returns entries in full: the latest, one or more by id, or every entry of a day, a month or a year.
+- `__TOOLS__list` lists entries, oldest first, one line each with the id, the project and the summary. It filters by `project` (`.` is the current project), by `date` (one year, month or day, `today` or `yesterday`), and by `since` and `until` (a day, `today`, a number of days back such as `7d`, or a time). It gives the 50 most recent matches, or up to 200 with `limit`, and a last line then names the `offset` that gives the older ones. With `terms`, it searches the summaries and the bodies: each term is a regex that ignores case, an entry must match every term, and each line also gets the body line that matched. With `by`, it lists no entries but counts every match for each project or day, with a total.
+- `__TOOLS__read` returns entries in full: the latest, one or more by id, or every entry of one period (`today`, `yesterday`, or one year, month or day). For a period, it also takes `project` and `limit`.
 
-Load them by these names first if they are not loaded yet. `project` `.` is the current project. The dates and periods are days in the user's time zone (`2026-01-11`, `today`, `yesterday`, `7d`), so a day the user names goes in as it is.
+How to find what the user asks for:
 
-Narrow with the summaries first and read whole entries only once they point somewhere. A question about a kind of thing, such as what failed, what was decided or what changed, has no one word that finds every entry: list all summaries of the project in that time, and also search with one term of several words for the same thing, such as `decided|chose|picked|went with` for a decision, because a body can say what its summary does not. For the first entries of something, or a story over a long time, follow the offset until no older matches are left.
+- Narrow with the summaries first, and read whole entries only once they point somewhere.
+- A question about a kind of thing, such as what failed, what was decided or what changed, has no one word that finds every entry. List all summaries of the project in that time, and also search with one term of several words for the same thing, such as `decided|chose|picked|went with` for a decision, because a body can say what its summary does not.
+- For the first entries of something, or a story over a long time, follow the offset until no older matches are left.
+- For any count, use `by`. Never count the lines of a list yourself.
 <!-- end -->
 <!-- without tools -->
 
 Read it with the shell. Each file name is the UTC instant of its entry, so `ls` is in time order and a span of time is a span of names. A day the user names ("yesterday", "last week", "on Monday") is a day in their time zone, and it does not start at midnight UTC. So never select a day by the UTC date in the names, and never by `date -u`: take its UTC bounds from the clock below, and keep the names between them.
 
-The clock when this session started. A range is `<range>_since` and `<range>_until`, both included. `utc_` values are the bounds to compare with the names; drop the colons first, so `2026-01-10T23:00:00Z` is `2026-01-10T230000Z`. If the session has run past midnight, run `date` and move the ranges by the days since.
+The clock when this session started:
+
+- A range is `<range>_since` and `<range>_until`, both included.
+- `utc_` values are the bounds to compare with the names. Drop the colons first, so `2026-01-10T23:00:00Z` is `2026-01-10T230000Z`.
+- If the session has run past midnight, run `date` and move the ranges by the days since.
 
 ```
 __TIME__
@@ -140,5 +145,8 @@ Some commands that work, all from inside the folder:
     grep -il -E 'deploy|release' *.md | xargs grep -H '^summary:'            # entries with either word, with their summaries
     ls | awk '$0 >= "2026-01-04T230000Z"' | xargs grep -h '^project:' | sort | uniq -c   # entries per project since a day
 
-Narrow with the summaries first and open whole entries only once they point somewhere. A question about a kind of thing, such as what failed, what was decided or what changed, has no one word that finds every entry: read all summaries of the project in that time, then search the bodies with several words for the same thing, such as `decided|chose|picked|went with` for a decision.
+How to find what the user asks for:
+
+- Narrow with the summaries first, and open whole entries only once they point somewhere.
+- A question about a kind of thing, such as what failed, what was decided or what changed, has no one word that finds every entry. Read all summaries of the project in that time, then search the bodies with several words for the same thing, such as `decided|chose|picked|went with` for a decision.
 <!-- end -->

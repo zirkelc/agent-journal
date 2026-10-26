@@ -66,7 +66,9 @@ export const MAX_LIMIT = 200;
 export const MAX_OUTPUT = 40_000;
 
 const FILTERS = {
-  date: Type.Optional(Type.String({ description: 'One local year, month or day: 2026, 2026-01 or 2026-01-11.' })),
+  date: Type.Optional(
+    Type.String({ description: 'One local year, month or day: 2026, 2026-01, 2026-01-11, today or yesterday.' }),
+  ),
   since: Type.Optional(
     Type.String({
       description:
