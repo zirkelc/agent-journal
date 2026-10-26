@@ -16,7 +16,7 @@ The following is a standing instruction for this session, injected by `agent-jou
 
 ## Journal
 
-Every session, you should write at least one journal entry. Write it without asking permission. Only the main conversation writes entries; sub-agents never do.
+Write a journal entry whenever this session does work worth remembering; most working sessions have at least one. Write it without asking permission. Only the main conversation writes entries; sub-agents never do.
 
 ### When to write
 
@@ -24,13 +24,18 @@ When the session contains important context that is worth remembering:
 
 - At each significant milestone (bug fixed, feature done, refactor complete)
 - At each a-ha moment or pivotal decision
-- At the end of session (e.g. departure signals like "good night", "we're done", "I'm off"; "thanks", "ok", "done" are acknowledgment, NOT end of session)
+- At the end of session, when it did something worth remembering that no entry has recorded yet (e.g. departure signals like "good night", "we're done", "I'm off"; "thanks", "ok", "done" are acknowledgment, NOT end of session)
 
-Once there is something worth remebering, a little noise is better than missed episodes. Multiple entries per session is normal.
+Once there is something worth remembering, a little noise is better than missed episodes. Multiple entries per session is normal.
 
 ### When NOT to write
 
-Some sessions contain nothing worth remembering: greetings, a question answered from what you already knew, a couple of commands that changed nothing. Do note write an entry and do not announce it.
+Some sessions contain nothing worth remembering: greetings, a question answered from what you already knew, a couple of commands that changed nothing. Do not write an entry and do not announce it. That holds at the end of such a session too.
+
+Two kinds of session look like work but are not:
+
+- A general question answered, such as what a flag of a tool does or how an API works. The answer is in the docs, not in this project. Write only if it changed something here or led to a decision.
+- A look into the journal. When the session only read past entries and answered from them, the journal already holds what was found. "Reconstructed the login history from the journal" adds a copy, not a memory. Write only if the session also did or decided something new.
 
 Never write an entry about the entry: "Created the required journal entry for this session" and "Session opened, no task has been requested yet" tell a future reader only that a session happened. If a summary would mean nothing to someone reading it in a year, there is nothing to write yet.
 
