@@ -91,7 +91,19 @@ const FILTERS = {
   ),
 };
 
-type Filters = { date?: string; since?: string; until?: string; project?: string; limit?: number; offset?: number };
+/** The fields that the list tool can count the matches by. */
+export const BY_FIELDS = ['project', 'date', 'host', 'user', 'agent'] as const;
+type ByField = (typeof BY_FIELDS)[number];
+
+type Filters = {
+  date?: string;
+  since?: string;
+  until?: string;
+  project?: string;
+  limit?: number;
+  offset?: number;
+  by?: ByField;
+};
 
 /** The CLI flags of the filters that the model gave. */
 export function filterArgs(filters: Filters): Array<string> {
@@ -99,6 +111,12 @@ export function filterArgs(filters: Filters): Array<string> {
   for (const key of ['date', 'since', 'until', 'project'] as const) {
     const value = filters[key]?.trim();
     if (value) args.push(`--${key}`, value);
+  }
+  /** A count reads every match, so it takes no page: the CLI refuses a limit or an offset with it. */
+  if (filters.by) {
+    if (filters.limit || filters.offset) throw new Error('by counts every match, so leave out limit and offset.');
+    args.push('--by', filters.by);
+    return args;
   }
   args.push('--limit', String(Math.min(filters.limit ?? DEFAULT_LIMIT, MAX_LIMIT)));
   if (filters.offset) args.push('--offset', String(filters.offset));
@@ -270,7 +288,7 @@ export default function agentJournal(pi: ExtensionAPI) {
       name: TOOL_LIST,
       label: 'Journal list',
       description:
-        'Lists journal entries, oldest first: one line each with id, project and summary, separated by tabs. With terms, it searches the summaries and the bodies, and each line ends with the body line that matched (empty when the summary matched). A last line says which offset gives the older matches that the limit left out.',
+        'Lists journal entries, oldest first: one line each with id, project and summary, separated by tabs. With terms, it searches the summaries and the bodies, and each line ends with the body line that matched (empty when the summary matched). A last line says which offset gives the older matches that the limit left out. With by, it lists no entries but counts every match for each value of that field, one line each with the count and the value, and a last line with the total: use it for any count, and never count the lines of a list yourself.',
       promptSnippet: 'List or search journal entries by text, date and project',
       parameters: Type.Object({
         terms: Type.Optional(
@@ -281,6 +299,14 @@ export default function agentJournal(pi: ExtensionAPI) {
         ),
         fixed: Type.Optional(Type.Boolean({ description: 'Read the terms as plain text, not as a regex.' })),
         ...FILTERS,
+        by: Type.Optional(
+          Type.Unsafe<ByField>({
+            type: 'string',
+            enum: [...BY_FIELDS],
+            description:
+              'Count the matches for each value of this field instead of listing them: project, date (the local day), host, user or agent. Every match counts, so it takes no limit or offset.',
+          }),
+        ),
       }),
       annotations: { readOnlyHint: true, openWorldHint: false },
       async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -290,6 +316,7 @@ export default function agentJournal(pi: ExtensionAPI) {
         if (dashed) throw new Error(`A term cannot start with "-": ${dashed}. Write [-] for the dash.`);
         const args = ['list', ...terms, ...(params.fixed ? ['--fixed'] : []), ...filterArgs(params)];
         const run = await runTool(args, ctx);
+        if (params.by) return textResult(capped(run.stdout.trim()));
         const text = fitList(run.stdout, run.stderr, params.offset) ?? withNote(run.stdout, run.stderr);
         return textResult(capped(text || 'No entries match.'));
       },

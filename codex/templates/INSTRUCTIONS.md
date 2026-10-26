@@ -113,7 +113,7 @@ Read the journal when the user asks about past work. Not otherwise, and never at
 
 Read it with the journal's own tools, never with a shell or a file read of the journal folder:
 
-- `__TOOLS__list` lists entries, oldest first, one line each with the id, the project and the summary. It gives the 50 most recent matches, or up to 200 with `limit`, and a last line then names the `offset` that gives the older ones. With `terms`, it searches the summaries and the bodies: each term is a regex that ignores case, an entry must match every term, and each line also gets the body line that matched.
+- `__TOOLS__list` lists entries, oldest first, one line each with the id, the project and the summary. It gives the 50 most recent matches, or up to 200 with `limit`, and a last line then names the `offset` that gives the older ones. With `terms`, it searches the summaries and the bodies: each term is a regex that ignores case, an entry must match every term, and each line also gets the body line that matched. With `by`, it lists no entries but counts every match for each project or day, with a total: use it for any count, and never count lines yourself.
 - `__TOOLS__read` returns entries in full: the latest, one or more by id, or every entry of a day, a month or a year.
 
 Load them by these names first if they are not loaded yet. `project` `.` is the current project. The dates and periods are days in the user's time zone (`2026-01-11`, `today`, `yesterday`, `7d`), so a day the user names goes in as it is.

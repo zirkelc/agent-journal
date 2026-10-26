@@ -22,15 +22,15 @@ Then restart Pi or run `/reload` to load the new version.
 
 ## Tools
 
-| Tool            | What it does                                                                                                                                        |
-| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `journal_write` | Writes one new entry from a `summary` and a `body`, and answers with the entry's ID.                                                                |
-| `journal_list`  | Lists entries, one line each with ID, project and summary. With `terms`, it searches the summaries and bodies, and adds the body line that matched. |
-| `journal_read`  | Gives entries in full: the latest, one or more by ID, or every entry of a day, a month or a year.                                                   |
+| Tool            | What it does                                                                                                                                                                   |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `journal_write` | Writes one new entry from a `summary` and a `body`, and answers with the entry's ID.                                                                                           |
+| `journal_list`  | Lists entries, one line each with ID, project and summary. With `terms`, it searches the summaries and bodies, and adds the body line that matched. With `by`, it counts them. |
+| `journal_read`  | Gives entries in full: the latest, one or more by ID, or every entry of a day, a month or a year.                                                                              |
 
 The model gives only the summary and the body. `journal_write` sets the other fields itself: the date from the clock, the project and the directory from the session's working directory, the host, the user, the agent with its model (for example `pi/claude-opus-5-5`) and the session ID.
 
-`journal_list` takes the same filters as [`aj list`](https://github.com/zirkelc/agent-journal/blob/main/docs/cli.md#aj-list): `date`, `since`, `until`, `project`, `limit` and `offset`. Each search term is an extended regex that ignores case, and an entry must match every term. `fixed` reads the terms as plain text. The tool gives 50 entries when the model does not set `limit`, and 200 at most. When the limit leaves older matches out, the last line says which `offset` gives them.
+`journal_list` takes the same filters as [`aj list`](https://github.com/zirkelc/agent-journal/blob/main/docs/cli.md#aj-list): `date`, `since`, `until`, `project`, `limit` and `offset`. Each search term is an extended regex that ignores case, and an entry must match every term. `fixed` reads the terms as plain text. The tool gives 50 entries when the model does not set `limit`, and 200 at most. When the limit leaves older matches out, the last line says which `offset` gives them. With `by` (`project`, `date`, `host`, `user` or `agent`), it lists no entries but counts every match for each value of that field, with a total, as `aj list --by` does. It then takes no `limit` or `offset`.
 
 `journal_read` takes `latest`, IDs, or one period (`today`, `yesterday`, `2026`, `2026-10` or `2026-10-22`), as [`aj read`](https://github.com/zirkelc/agent-journal/blob/main/docs/cli.md#aj-read) does. For a period, it also takes `project` and `limit`. A tool result holds at most 40,000 characters. When the entries of a period are longer, `journal_read` gives their summaries instead, and the model reads the ones it needs by ID.
 

@@ -328,6 +328,40 @@ describe('the tools', () => {
     );
   });
 
+  test(`should count every match for each project with by, also beyond the default limit`, async () => {
+    // Arrange
+    const store = fixture();
+    /** 60 entries, more than the default limit: 40 of demo and 20 of other. */
+    seed(
+      store,
+      Array.from({ length: 60 }, (_, index) => ({
+        stem: `2026-10-${String(10 + Math.floor(index / 10)).padStart(2, '0')}T${String(8 + (index % 10)).padStart(2, '0')}0000Z`,
+        project: index % 3 === 2 ? 'other' : 'demo',
+        summary: `Entry ${index}.`,
+      })),
+    );
+    const host = pi(store);
+
+    // Act
+    const answer = await host.call(TOOL_LIST, { by: 'project' });
+
+    // Assert
+    expect(answer).toBe('40\tdemo\n20\tother\ntotal\t60');
+  });
+
+  test(`should refuse by together with a limit, because a count reads every match`, async () => {
+    // Arrange
+    const store = fixture();
+    seed(store, [{ stem: '2026-10-10T090000Z', project: 'demo', summary: 'One.' }]);
+    const host = pi(store);
+
+    // Act
+    const result = host.call(TOOL_LIST, { by: 'project', limit: 10 });
+
+    // Assert
+    await expect(result).rejects.toThrow();
+  });
+
   test(`should drop the oldest lines of a list that is too long, and say which offset gives them`, async () => {
     // Arrange
     const store = fixture();
