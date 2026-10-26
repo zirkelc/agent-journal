@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { chmodSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 import { configure, type Fixture, fails, fixture, frontmatter, rows, run, tilde, worktree } from './helpers.js';
@@ -246,6 +246,44 @@ describe('write', () => {
 
     // Assert
     expect(frontmatter(written(store).text).session_id).toBe('abc-123');
+  });
+
+  test(`should write a whole entry from flags alone, as an agent's tool does, without an editor`, () => {
+    // Arrange
+    const store = fixture();
+    const elsewhere = join(store.home, 'elsewhere');
+    mkdirSync(elsewhere);
+
+    // Act
+    const out = run(
+      store,
+      [
+        'write',
+        '--summary',
+        'Written through a tool.',
+        '--body',
+        'The body.',
+        '--cwd',
+        store.repo,
+        '--agent',
+        'pi/test-model',
+        '--session-id',
+        'abc-123',
+      ],
+      { at: elsewhere, env: { EDITOR: 'false', VISUAL: 'false' } },
+    );
+
+    // Assert
+    const entry = written(store);
+    expect(out).toBe(`${join(store.journalDir, entry.name)}\n`);
+    const fields = frontmatter(entry.text);
+    expect(`${fields.date.replaceAll(':', '')}.md`).toBe(entry.name);
+    expect(fields.project).toBe('repo');
+    expect(fields.summary).toBe('Written through a tool.');
+    expect(fields.cwd).toBe(tilde(store, store.repo));
+    expect(fields.agent).toBe('pi/test-model');
+    expect(fields.session_id).toBe('abc-123');
+    expect(entry.text.endsWith('---\n\nThe body.\n')).toBe(true);
   });
 
   test(`should leave the session id out when there is none`, () => {

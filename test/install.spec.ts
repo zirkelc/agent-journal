@@ -23,8 +23,9 @@ const INSTALLER = join(ROOT, 'install.sh');
  * with no agent's directory in it, and fake launchers for the agents a case
  * wants to be present.
  *
- * `CODEX_HOME` is cleared explicitly. It is set for real on some machines, and
- * a case about an absent Codex would otherwise pass or fail by accident.
+ * `CODEX_HOME` and `PI_CODING_AGENT_DIR` are cleared explicitly. They are set
+ * for real on some machines, and a case about an absent Codex or Pi would
+ * otherwise pass or fail by accident.
  */
 const BARE_PATH = '/usr/bin:/bin:/usr/sbin:/sbin';
 
@@ -67,6 +68,7 @@ function run(home: string, args: Array<string>): string {
       /** The installer ends by detecting agents, so no real one may leak in. */
       PATH: BARE_PATH,
       CODEX_HOME: '',
+      PI_CODING_AGENT_DIR: '',
     },
   });
 }
@@ -237,6 +239,7 @@ function env(store: Fixture, agents: Array<string>): Record<string, string> {
   return {
     PATH: dirs.length ? `${dirs[0]}:${BARE_PATH}` : BARE_PATH,
     CODEX_HOME: '',
+    PI_CODING_AGENT_DIR: '',
   };
 }
 
@@ -290,6 +293,44 @@ describe('install', () => {
 
     // Assert
     expect(listed).toContain('Codex detected');
+  });
+
+  test(`should offer the Pi package from npm when Pi is on PATH`, () => {
+    // Arrange
+    const store = fixture();
+
+    // Act
+    const listed = runBin(store, ['install'], { env: env(store, ['pi']) });
+
+    // Assert
+    expect(listed).toContain('Pi detected');
+    expect(listed).toContain('agent-journal install pi');
+    expect(listed).toContain('pi install npm:pi-agent-journal');
+  });
+
+  test(`should find Pi through PI_CODING_AGENT_DIR when no launcher is on PATH`, () => {
+    // Arrange
+    const store = fixture();
+    const piDir = join(store.home, 'elsewhere', 'pi');
+    mkdirSync(piDir, { recursive: true });
+
+    // Act
+    const listed = runBin(store, ['install'], { env: { PATH: BARE_PATH, PI_CODING_AGENT_DIR: piDir } });
+
+    // Assert
+    expect(listed).toContain('Pi detected');
+  });
+
+  test(`should run the Pi install command when asked to install for Pi`, () => {
+    // Arrange
+    const store = fixture();
+
+    // Act
+    runBin(store, ['install', 'pi'], { env: env(store, ['pi']) });
+
+    // Assert
+    const ran = readFileSync(join(store.home, 'pi-ran'), 'utf8');
+    expect(ran).toBe('install npm:pi-agent-journal\n');
   });
 
   test(`should print the steps but run nothing when asked to dry run`, () => {
@@ -368,7 +409,7 @@ describe('install', () => {
 
     // Act
     const result = capture(store, ['install', 'codex'], {
-      env: { PATH: `${dir}:${BARE_PATH}`, CODEX_HOME: '' },
+      env: { PATH: `${dir}:${BARE_PATH}`, CODEX_HOME: '', PI_CODING_AGENT_DIR: '' },
     });
 
     // Assert
@@ -416,7 +457,7 @@ describe('running an agent bit by bit', () => {
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'codex'), `#!/bin/sh\necho '${says}'\nexit ${exit}\n`);
     chmodSync(join(dir, 'codex'), 0o755);
-    return { PATH: `${dir}:${BARE_PATH}`, CODEX_HOME: '' };
+    return { PATH: `${dir}:${BARE_PATH}`, CODEX_HOME: '', PI_CODING_AGENT_DIR: '' };
   }
 
   test(`should show what each command said for itself`, () => {

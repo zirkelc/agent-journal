@@ -1319,7 +1319,9 @@ const TAGGED: Array<Entry> = [
 
 /** Whether the awk here reads an escape in a regex, which POSIX leaves open. */
 function awkKnows(escape: string): boolean {
-  const probe = spawnSync('awk', ['BEGIN { exit !match("a", ENVIRON["RE"]) }'], { env: { ...process.env, RE: escape } });
+  const probe = spawnSync('awk', ['BEGIN { exit !match("a", ENVIRON["RE"]) }'], {
+    env: { ...process.env, RE: escape },
+  });
   return probe.status === 0;
 }
 
@@ -2039,5 +2041,50 @@ describe('read with several ids', () => {
 
     // Assert
     expect(result.status).toBe(2);
+  });
+});
+
+describe('a journal with more names than one command line holds', () => {
+  /**
+   * The names of all entries together are longer than the arguments that one
+   * program can get (1 MB on macOS, 2 MB on most Linux systems), as they are in
+   * a journal of a few years in a deep directory.
+   */
+  function large(): { store: Fixture; newest: string; oldest: string } {
+    const store = fixture();
+    /** A path of about 800 characters, near the limit of a path on macOS, so that fewer files are enough. */
+    const dir = join(store.home, ...Array.from({ length: 3 }, () => 'a'.repeat(240)), 'journal');
+    mkdirSync(dir, { recursive: true });
+    const stems = Array.from({ length: 3_000 }, (_, index) => {
+      const date = new Date(Date.UTC(2020, 0, 1) + index * 3_600_000);
+      return date
+        .toISOString()
+        .replace(/\.\d{3}Z$/, 'Z')
+        .replaceAll(':', '');
+    });
+    for (const stem of stems) {
+      writeFileSync(
+        join(dir, `${stem}.md`),
+        `---\ndate: ${stem}\nproject: big\nsummary: "Entry ${stem}"\n---\n\nBody.\n`,
+      );
+    }
+    run(store, ['config', 'set', 'journal_dir', dir]);
+    return { store, newest: stems.at(-1)!, oldest: stems[0]! };
+  }
+
+  test(`should list and read its entries`, { timeout: 30_000 }, () => {
+    // Arrange
+    const { store, newest, oldest } = large();
+
+    // Act
+    const listed = output(store, ['list', '--limit', '1']);
+    const searched = output(store, ['list', `Entry ${oldest}`, '--fixed']);
+    const read = output(store, ['read', newest.slice(0, 10)]);
+
+    // Assert
+    expect(rows(listed.stdout).map((row) => row.id)).toEqual([newest]);
+    expect(rows(searched.stdout).map((row) => row.id)).toEqual([oldest]);
+    expect(read.status).toBe(0);
+    expect(read.stdout).toContain(`summary: "Entry ${newest}"`);
   });
 });

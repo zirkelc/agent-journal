@@ -137,6 +137,8 @@ export function worktree(store: Fixture, name: string): string {
 
 type RunOptions = {
   cwd?: string;
+  /** More arguments, after the ones the helper gives. */
+  extra?: Array<string>;
   /** The directory the process itself is started in, for relative-path cases. */
   at?: string;
   sessionId?: string;
@@ -144,7 +146,7 @@ type RunOptions = {
   stdin?: string;
 };
 
-function baseEnv(store: Fixture, extra: Record<string, string | undefined> = {}): NodeJS.ProcessEnv {
+export function baseEnv(store: Fixture, extra: Record<string, string | undefined> = {}): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     /**
@@ -354,6 +356,7 @@ export function frontmatter(entry: string): Record<string, string> {
 export function context(store: Fixture, options: RunOptions = {}): string {
   const args = ['context', '--cwd', options.cwd ?? store.repo];
   if (options.sessionId !== undefined) args.push('--session-id', options.sessionId);
+  args.push(...(options.extra ?? []));
   return run(store, args, options);
 }
 

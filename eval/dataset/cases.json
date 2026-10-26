@@ -1,0 +1,213 @@
+{
+  "$comment": "Each case is one session. `dir` is the working directory relative to the home directory, and `git` makes it a repository named after its last part. The messages are sent one after the other, and each waits for the agent to finish. `{day:KEY}` in a message is the local day of that entry, written as in 'Saturday, October 3', and `{month:KEY}` is its month, as in 'June 2025'. See eval/README.md for the meaning of each `expect` field.",
+  "cases": [
+    {
+      "id": "recall-yesterday",
+      "kind": "recall",
+      "dir": "Developer/billing-api",
+      "git": true,
+      "messages": ["What did we work on yesterday?"],
+      "expect": {
+        "all": ["reindex", "csv", "refund|idempotency", "berkeley mono"],
+        "none": ["shard"]
+      },
+      "why": "Yesterday in the local time zone. Y1 has the UTC date of the day before, and TRAP (today) has yesterday's UTC date, so a glob over the UTC date of yesterday misses one and includes the other."
+    },
+    {
+      "id": "recall-project-week",
+      "kind": "recall",
+      "dir": "Developer/billing-api",
+      "git": true,
+      "messages": ["What did we do in this project over the last 7 days?"],
+      "expect": {
+        "all": ["refund|idempotency", "pdf", "stripe|v17", "webhook|clock|skew"],
+        "none": ["partition"]
+      },
+      "why": "A project filter and a date range together."
+    },
+    {
+      "id": "recall-last-time",
+      "kind": "recall",
+      "dir": "Developer/agent-journal",
+      "git": true,
+      "messages": ["When did we last work on the README GIFs?"],
+      "expect": {
+        "date_of": "G2"
+      },
+      "why": "A text search, and the newest match. An older entry (G1) also matches."
+    },
+    {
+      "id": "recall-latest-full",
+      "kind": "recall",
+      "dir": "Developer/acme-dashboard",
+      "git": true,
+      "messages": ["Show me my most recent journal entry in full."],
+      "expect": {
+        "all": ["pdf_v2", "single flag flip", "20 invoices"]
+      },
+      "why": "The newest entry, with its body."
+    },
+    {
+      "id": "recall-counts",
+      "kind": "recall",
+      "dir": "Developer/acme-dashboard",
+      "git": true,
+      "messages": [
+        "Which projects did we work on in the last 14 days, counting today, and how many journal entries does each have? Give me the exact numbers."
+      ],
+      "expect": {
+        "counts": {
+          "from": -13,
+          "to": 0
+        }
+      },
+      "why": "Counts per project over local days. The list of those days is long."
+    },
+    {
+      "id": "recall-needle",
+      "kind": "recall",
+      "dir": "Developer/nebula",
+      "git": true,
+      "messages": ["What did we decide about the Redis eviction policy, and why?"],
+      "expect": {
+        "all": ["allkeys-lfu", "ttl"]
+      },
+      "why": "The answer is only in a body, and its summary does not name Redis. Another entry (N2) names Redis in its summary."
+    },
+    {
+      "id": "recall-failures",
+      "kind": "recall",
+      "dir": "Developer/nebula",
+      "git": true,
+      "messages": ["What did we try in this project over the last 60 days that did not work out?"],
+      "expect": {
+        "all": [
+          "http/3",
+          "(by|per) tenant|tenants? (queue|split)|split.{0,30}tenant",
+          "postgres 17|planner",
+          "protobuf",
+          "retry wrapper"
+        ]
+      },
+      "why": "Several words for failure (reverted, abandoned, rolled back, ruled out, did not help), in summaries and in one body, among about 300 nebula entries of those 60 days and about 2,000 before them. The filler talks about tenants and Postgres too, so the checks ask for the queue split by tenant and the Postgres 17 upgrade."
+    },
+    {
+      "id": "recall-busy-day",
+      "kind": "recall",
+      "dir": "Developer/nebula",
+      "git": true,
+      "messages": ["What happened on {day:K1}?"],
+      "expect": {
+        "all": ["503", "certificate", "alert", "postmortem"]
+      },
+      "why": "A day with 40 long entries, about 90,000 characters in total."
+    },
+    {
+      "id": "recall-first",
+      "kind": "recall",
+      "dir": "Developer/spellbee",
+      "git": true,
+      "messages": ["When did we start this project?"],
+      "expect": {
+        "date_of": "S1"
+      },
+      "why": "The oldest of about 400 entries of a project, more than two years ago. A list gives the newest first."
+    },
+    {
+      "id": "recall-evolution",
+      "kind": "recall",
+      "dir": "Developer/acme-dashboard",
+      "git": true,
+      "messages": ["How did the login of this project change over the years? And when did we first switch to JWT?"],
+      "expect": {
+        "all": ["jwt", "rotat", "server[- ]side session|sessions? (rows )?in the database|database sessions"],
+        "date_of": "A1"
+      },
+      "why": "Three entries over three years tell one story, among about 1,000 entries of the project."
+    },
+    {
+      "id": "recall-old-needle",
+      "kind": "recall",
+      "dir": "Developer/nebula",
+      "git": true,
+      "messages": ["Which database did we pick for the analytics events back then, and why?"],
+      "expect": {
+        "all": ["clickhouse", "38|410|smaller|less (disk|storage|space)|6 to 20|6-20|20x|20 times"]
+      },
+      "why": "A decision of about two years ago, only in a body. The summary says 'store for the analytics events', not the name of the database. Later filler names ClickHouse as the store that is there, but never why it was chosen."
+    },
+    {
+      "id": "recall-old-month",
+      "kind": "recall",
+      "dir": "Developer/billing-api",
+      "git": true,
+      "messages": ["What did we do in this project in {month:M1}?"],
+      "expect": {
+        "all": ["postmark", "sepa", "rounding|half to even"]
+      },
+      "why": "One month of a project more than a year ago, with three key entries among about 25 filler entries."
+    },
+    {
+      "id": "recall-nothing",
+      "kind": "recall",
+      "dir": "Developer/nebula",
+      "git": true,
+      "messages": ["Did we ever work on Kubernetes autoscaling? Check the journal."],
+      "expect": {
+        "negative": true
+      },
+      "why": "Nothing matches. The answer must say so and not make something up."
+    },
+    {
+      "id": "write-milestone",
+      "kind": "write",
+      "dir": "Developer/billing-api",
+      "git": true,
+      "messages": [
+        "I traced the double charges: the webhook retry made a new idempotency key on every attempt, so the payment provider saw each retry as a new charge. I changed it to derive the key from the event id, and the regression test passes now. No need to look at the code, I already pushed it.",
+        "Great, that's it for today. Good night!"
+      ],
+      "expect": {
+        "entries": {
+          "min": 1,
+          "max": 2
+        },
+        "project": "billing-api",
+        "body": ["idempotency|event id"]
+      },
+      "why": "A milestone and an end of session. One entry, perhaps two, with every field right."
+    },
+    {
+      "id": "write-no-project",
+      "kind": "write",
+      "dir": "notes",
+      "git": false,
+      "messages": [
+        "I decided to move my notes from Obsidian to plain Markdown files in git, because the sync plugin corrupted two files last week. I moved everything over this afternoon. Done for today, good night."
+      ],
+      "expect": {
+        "entries": {
+          "min": 1,
+          "max": 1
+        },
+        "project": null,
+        "body": ["obsidian|sync plugin|corrupt"]
+      },
+      "why": "A session outside a repository: the entry has no project."
+    },
+    {
+      "id": "write-nothing",
+      "kind": "write",
+      "dir": "Developer/acme-dashboard",
+      "git": true,
+      "messages": ["What does the -n flag of git commit do? Answer from memory.", "ok thanks, bye"],
+      "expect": {
+        "entries": {
+          "min": 0,
+          "max": 0
+        }
+      },
+      "why": "Nothing worth remembering, so no entry, also at the end of the session."
+    }
+  ]
+}

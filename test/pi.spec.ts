@@ -1,0 +1,602 @@
+import { execFile, execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import type { ExtensionAPI, ExecResult } from '@earendil-works/pi-coding-agent';
+import { afterEach, describe, expect, test, vi } from 'vitest';
+import agentJournal, {
+  capped,
+  CLI,
+  filterArgs,
+  MAX_OUTPUT,
+  SECTION,
+  TOOL_LIST,
+  TOOL_READ,
+  TOOL_WRITE,
+  TOOLS_ENV,
+  withNote,
+} from '../pi/extensions/agent-journal.ts';
+import {
+  baseEnv,
+  type Fixture,
+  fixture,
+  frontmatter,
+  GIT_IDENTITY,
+  output,
+  ROOT,
+  rows,
+  seed,
+  tilde,
+} from './helpers.ts';
+
+type Handler = (event: any, ctx: any) => unknown;
+type Tool = {
+  name: string;
+  annotations?: Record<string, boolean>;
+  execute: (id: string, params: any, signal: undefined, onUpdate: undefined, ctx: any) => Promise<any>;
+};
+
+/** The tools Pi starts with, before an extension adds its own. */
+const BUILT_IN = ['read', 'bash', 'edit', 'write'];
+
+/**
+ * Pi as the extension sees it. Only the boundary is fake: the handlers and the
+ * tools are called as Pi calls them, and `exec` runs the real CLI of the
+ * package, with the fixture's home, so nothing reads the machine's own config.
+ */
+function pi(store: Fixture) {
+  const handlers = new Map<string, Array<Handler>>();
+  const tools = new Map<string, Tool>();
+  let active = [...BUILT_IN];
+  const api = {
+    on: (event: string, handler: Handler) => {
+      handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+    },
+    registerTool: (tool: Tool) => {
+      tools.set(tool.name, tool);
+      active.push(tool.name);
+    },
+    getActiveTools: () => [...active],
+    setActiveTools: (names: Array<string>) => {
+      active = [...names];
+    },
+    exec: (command: string, args: Array<string>, options: { cwd?: string; timeout?: number } = {}) =>
+      new Promise<ExecResult>((done) => {
+        execFile(
+          command,
+          args,
+          { cwd: options.cwd, timeout: options.timeout, env: baseEnv(store, GIT_IDENTITY), encoding: 'utf8' },
+          (error, stdout, stderr) => {
+            const code = error ? (typeof error.code === 'number' ? error.code : 1) : 0;
+            done({ stdout, stderr, code, killed: Boolean(error?.killed) });
+          },
+        );
+      }),
+  };
+  agentJournal(api as unknown as ExtensionAPI);
+
+  const setStatus = vi.fn<(key: string, text: string | undefined) => void>();
+  const ctx = (options: { hasUI?: boolean } = {}) => ({
+    hasUI: options.hasUI ?? true,
+    cwd: store.repo,
+    model: { id: 'test-model' },
+    sessionManager: { getSessionId: () => 'pi-session-1' },
+    ui: { setStatus },
+  });
+
+  /** Calls each handler of an event in order, and gives back the last result. */
+  async function emit(event: string, payload: Record<string, unknown>, context = ctx()): Promise<any> {
+    let result: unknown;
+    for (const handler of handlers.get(event) ?? []) result = await handler({ type: event, ...payload }, context);
+    return result;
+  }
+
+  /** Calls a tool as the model would, and gives back its text. */
+  async function call(name: string, params: Record<string, unknown>, context = ctx()): Promise<string> {
+    const result = await tools.get(name)!.execute('call-1', params, undefined, undefined, context);
+    return result.content.map((part: { text: string }) => part.text).join('');
+  }
+
+  return { emit, call, ctx, setStatus, tools, active: () => active };
+}
+
+/** The event of a run on Pi 1.0 and later, which builds the system prompt from sections. */
+function runStart() {
+  return { systemPrompt: 'base prompt', systemPromptOptions: { cwd: '', sections: {} as Record<string, string> } };
+}
+
+function git(cwd: string, ...args: Array<string>): string {
+  return execFileSync('git', ['-C', cwd, ...args], {
+    encoding: 'utf8',
+    env: { ...process.env, ...GIT_IDENTITY, GIT_CEILING_DIRECTORIES: cwd },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  }).trim();
+}
+
+const subjects = (cwd: string): Array<string> => git(cwd, 'log', '--format=%s', '--branches').split('\n');
+
+/** A journal with sync on and one entry committed. A remote that does not exist makes the push fail. */
+function synced(store: Fixture, origin?: string): void {
+  seed(store, [{ stem: '2026-10-11T090000Z', project: 'demo', summary: 'First.' }]);
+  output(store, ['sync', 'init', ...(origin ? [origin] : [])], { env: GIT_IDENTITY });
+}
+
+const SECOND = { stem: '2026-10-11T100000Z', project: 'demo', summary: 'Second.' };
+
+/** The id in the write tool's answer. */
+const idOf = (answer: string): string => /(\d{4}-\d{2}-\d{2}T\d{6}Z)/.exec(answer)![1]!;
+
+describe('the rules', () => {
+  test(`should run the CLI copy in its own package`, () => {
+    // Assert
+    expect(CLI).toBe(join(ROOT, 'pi', 'scripts', 'agent-journal'));
+  });
+
+  test(`should add the rules for the tools as a system prompt section`, async () => {
+    // Arrange
+    const store = fixture();
+    const host = pi(store);
+    const event = runStart();
+
+    // Act
+    await host.emit('session_start', { reason: 'startup' });
+    const result = await host.emit('before_agent_start', event);
+
+    // Assert
+    expect(result).toBeUndefined();
+    const rules = event.systemPromptOptions.sections[SECTION]!;
+    expect(rules).toContain(`\`${TOOL_WRITE}\` tool`);
+    expect(rules).toContain(`\`${TOOL_READ}\``);
+    expect(rules).not.toContain('date -u');
+  });
+
+  test(`should add the rules at the end of the system prompt when Pi has no sections`, async () => {
+    // Arrange
+    const store = fixture();
+    const host = pi(store);
+
+    // Act
+    await host.emit('session_start', { reason: 'startup' });
+    const result = await host.emit('before_agent_start', { systemPrompt: 'base prompt', systemPromptOptions: {} });
+
+    // Assert
+    expect(result.systemPrompt.startsWith('base prompt\n\n')).toBe(true);
+    expect(result.systemPrompt).toContain(`\`${TOOL_WRITE}\` tool`);
+  });
+
+  test(`should give no rules and no tools to a session without a UI, such as a subagent in print mode`, async () => {
+    // Arrange
+    const store = fixture();
+    const host = pi(store);
+    const event = runStart();
+
+    // Act
+    await host.emit('session_start', { reason: 'startup' }, host.ctx({ hasUI: false }));
+    const result = await host.emit('before_agent_start', event, host.ctx({ hasUI: false }));
+
+    // Assert
+    expect(result).toBeUndefined();
+    expect(event.systemPromptOptions.sections).toEqual({});
+    expect(host.active()).toEqual(BUILT_IN);
+  });
+});
+
+describe('the tools', () => {
+  /** Pi asks for no approval, but a permission extension decides by these hints. */
+  test(`should mark the read tools as read-only, and the write tool as not destructive`, () => {
+    // Arrange
+    const host = pi(fixture());
+
+    // Act
+    const hints = (name: string) => host.tools.get(name)!.annotations;
+
+    // Assert
+    expect(hints(TOOL_LIST)!.readOnlyHint).toBe(true);
+    expect(hints(TOOL_READ)!.readOnlyHint).toBe(true);
+    expect(hints(TOOL_WRITE)).toEqual({
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: false,
+    });
+  });
+
+  test(`should write an entry with the values of the session, and answer with its id`, async () => {
+    // Arrange
+    const store = fixture();
+    const host = pi(store);
+    await host.emit('session_start', { reason: 'startup' });
+
+    // Act
+    const answer = await host.call(TOOL_WRITE, { summary: 'Wrote it through the tool.', body: 'The body.' });
+
+    // Assert
+    const text = readFileSync(join(store.journalDir, `${idOf(answer)}.md`), 'utf8');
+    const fields = frontmatter(text);
+    expect(fields.project).toBe('repo');
+    expect(fields.summary).toBe('Wrote it through the tool.');
+    expect(fields.cwd).toBe(tilde(store, store.repo));
+    expect(fields.agent).toBe('pi/test-model');
+    expect(fields.session_id).toBe('pi-session-1');
+    expect(text.endsWith('---\n\nThe body.\n')).toBe(true);
+  });
+
+  test(`should fail the call when the CLI refuses the entry`, async () => {
+    // Arrange
+    const store = fixture();
+    const host = pi(store);
+
+    // Act
+    const result = host.call(TOOL_WRITE, { summary: 'x'.repeat(201), body: 'The body.' });
+
+    // Assert
+    await expect(result).rejects.toThrow();
+  });
+
+  test(`should commit the entry after the write tool when sync is on`, async () => {
+    // Arrange
+    const store = fixture();
+    synced(store);
+    const host = pi(store);
+    await host.emit('session_start', { reason: 'startup' });
+
+    // Act
+    const answer = await host.call(TOOL_WRITE, { summary: 'Synced by the tool.', body: 'The body.' });
+
+    // Assert
+    await vi.waitFor(() => expect(subjects(store.journalDir)[0]).toBe(`journal: ${idOf(answer)} Synced by the tool.`), {
+      timeout: 5_000,
+    });
+  });
+
+  test(`should list the entries of one project, as many as asked for`, async () => {
+    // Arrange
+    const store = fixture();
+    seed(store, [
+      { stem: '2026-10-10T090000Z', project: 'demo', summary: 'Old.' },
+      { stem: '2026-10-11T090000Z', project: 'other', summary: 'Elsewhere.' },
+      { stem: '2026-10-12T090000Z', project: 'demo', summary: 'New.' },
+      { stem: '2026-10-13T090000Z', project: 'demo', summary: 'Newest.' },
+    ]);
+    const host = pi(store);
+
+    // Act
+    const answer = await host.call(TOOL_LIST, { project: 'demo', limit: 2 });
+
+    // Assert
+    expect(rows(answer).map((row) => row.summary)).toEqual(['New.', 'Newest.']);
+  });
+
+  test(`should search the summaries and bodies, with every term a regex that must match`, async () => {
+    // Arrange
+    const store = fixture();
+    seed(store, [
+      { stem: '2026-10-10T090000Z', project: 'demo', summary: 'One.', body: 'About the rate limit.\nAnd the retry.' },
+      { stem: '2026-10-11T090000Z', project: 'demo', summary: 'Two.', body: 'About the rate limit only.' },
+      { stem: '2026-10-12T090000Z', project: 'demo', summary: 'Three.', body: 'About something else.' },
+    ]);
+    const host = pi(store);
+
+    // Act
+    const answer = await host.call(TOOL_LIST, { terms: ['RATE|nothing', 'retry'] });
+
+    // Assert
+    expect(answer).toBe('2026-10-10T090000Z\tdemo\tOne.\tAbout the rate limit.');
+  });
+
+  test(`should read the terms as text when they are fixed`, async () => {
+    // Arrange
+    const store = fixture();
+    seed(store, [
+      { stem: '2026-10-10T090000Z', project: 'demo', summary: 'Called retry(3) twice.' },
+      { stem: '2026-10-11T090000Z', project: 'demo', summary: 'Called retry once.' },
+    ]);
+    const host = pi(store);
+
+    // Act
+    const answer = await host.call(TOOL_LIST, { terms: ['retry(3)'], fixed: true });
+
+    // Assert
+    expect(rows(answer).map((row) => row.id)).toEqual(['2026-10-10T090000Z']);
+  });
+
+  test(`should refuse a term that the CLI would read as an option`, async () => {
+    // Arrange
+    const host = pi(fixture());
+
+    // Act
+    const result = host.call(TOOL_LIST, { terms: ['--all'] });
+
+    // Assert
+    await expect(result).rejects.toThrow();
+  });
+
+  test(`should say which offset gives the older matches that the limit left out`, async () => {
+    // Arrange
+    const store = fixture();
+    seed(store, [
+      { stem: '2026-10-10T090000Z', project: 'demo', summary: 'One.' },
+      { stem: '2026-10-11T090000Z', project: 'demo', summary: 'Two.' },
+    ]);
+    const host = pi(store);
+
+    // Act
+    const answer = await host.call(TOOL_LIST, { limit: 1 });
+
+    // Assert
+    expect(answer).toBe(
+      '2026-10-11T090000Z\tdemo\tTwo.\nmatches 1 to 1, counted from the newest; call again with offset 1 for older ones',
+    );
+  });
+
+  test(`should drop the oldest lines of a list that is too long, and say which offset gives them`, async () => {
+    // Arrange
+    const store = fixture();
+    /** 100 entries with summaries of 500 characters, 50,000 characters in all. */
+    const stems = Array.from(
+      { length: 100 },
+      (_, index) =>
+        `2026-10-${String(1 + Math.floor(index / 10)).padStart(2, '0')}T${String(8 + (index % 10)).padStart(2, '0')}0000Z`,
+    );
+    seed(
+      store,
+      stems.map((stem, index) => ({ stem, project: 'demo', summary: `${index} ${'y'.repeat(495)}` })),
+    );
+    const host = pi(store);
+
+    // Act
+    const answer: string = await host.call(TOOL_LIST, { limit: 100, offset: 5 });
+
+    // Assert
+    const lines = answer.split('\n');
+    const shown = rows(answer);
+    expect(answer.length).toBeLessThanOrEqual(MAX_OUTPUT);
+    expect(shown.at(-1)!.id).toBe(stems.at(-6));
+    expect(shown[0]!.id).toBe(stems.at(-5 - shown.length));
+    expect(lines.at(-1)).toBe(
+      `matches 6 to ${5 + shown.length}, counted from the newest; call again with offset ${5 + shown.length} for older ones`,
+    );
+  });
+
+  test(`should say so when nothing matches`, async () => {
+    // Arrange
+    const store = fixture();
+    seed(store, [{ stem: '2026-10-10T090000Z', project: 'demo', summary: 'One.' }]);
+    const host = pi(store);
+
+    // Act
+    const answer = await host.call(TOOL_LIST, { terms: ['nowhere'] });
+
+    // Assert
+    expect(answer).toBe('No entries match.');
+  });
+
+  test(`should read one entry in full`, async () => {
+    // Arrange
+    const store = fixture();
+    seed(store, [{ stem: '2026-10-10T090000Z', project: 'demo', summary: 'One.', body: 'The whole body.' }]);
+    const host = pi(store);
+
+    // Act
+    const answer = await host.call(TOOL_READ, { which: ['2026-10-10T090000Z'] });
+
+    // Assert
+    expect(answer).toBe(readFileSync(join(store.journalDir, '2026-10-10T090000Z.md'), 'utf8').trim());
+  });
+
+  test(`should read several entries in the order given`, async () => {
+    // Arrange
+    const store = fixture();
+    seed(store, [
+      { stem: '2026-10-10T090000Z', project: 'demo', summary: 'One.' },
+      { stem: '2026-10-11T090000Z', project: 'demo', summary: 'Two.' },
+    ]);
+    const host = pi(store);
+    const file = (stem: string) => readFileSync(join(store.journalDir, `${stem}.md`), 'utf8');
+
+    // Act
+    const answer = await host.call(TOOL_READ, { which: ['2026-10-11T090000Z', '2026-10-10T09'] });
+
+    // Assert
+    expect(answer).toBe(`${file('2026-10-11T090000Z').trim()}\n\n${file('2026-10-10T090000Z').trim()}`);
+  });
+
+  test(`should read every entry of a period of one project, oldest first`, async () => {
+    // Arrange
+    const store = fixture();
+    seed(store, [
+      { stem: '2026-09-30T120000Z', project: 'demo', summary: 'Before.' },
+      { stem: '2026-10-10T120000Z', project: 'demo', summary: 'First.' },
+      { stem: '2026-10-11T120000Z', project: 'other', summary: 'Elsewhere.' },
+      { stem: '2026-10-12T120000Z', project: 'demo', summary: 'Second.' },
+    ]);
+    const host = pi(store);
+
+    // Act
+    const answer = await host.call(TOOL_READ, { which: ['2026-10'], project: 'demo' });
+
+    // Assert
+    expect([...answer.matchAll(/^summary: "(.+)"$/gm)].map((match) => match[1])).toEqual(['First.', 'Second.']);
+  });
+
+  test(`should give the summaries of a period that is too long to read whole`, async () => {
+    // Arrange
+    const store = fixture();
+    /** 30 entries of 2,000 characters each, every half hour from 06:00 UTC on. */
+    const stems = Array.from(
+      { length: 30 },
+      (_, index) =>
+        `2026-10-10T${String(6 + Math.floor(index / 2)).padStart(2, '0')}${index % 2 === 0 ? '00' : '30'}00Z`,
+    );
+    seed(
+      store,
+      stems.map((stem, index) => ({ stem, project: 'demo', summary: `Entry ${index}.`, body: 'x'.repeat(2_000) })),
+    );
+    const host = pi(store);
+
+    // Act
+    const answer: string = await host.call(TOOL_READ, { which: ['2026-10-10'], project: 'demo' });
+
+    // Assert
+    expect(answer.split('\n')[0]).toMatch(
+      /^The entries of 2026-10-10 are \d+ characters, more than one result holds\./,
+    );
+    expect(rows(answer).map((row) => row.summary)).toEqual(stems.map((_, index) => `Entry ${index}.`));
+    expect(answer).not.toContain('xxxx');
+  });
+
+  test(`should say so for an entry that does not exist`, async () => {
+    // Arrange
+    const store = fixture();
+    seed(store, [{ stem: '2026-10-10T090000Z', project: 'demo', summary: 'One.' }]);
+    const host = pi(store);
+
+    // Act
+    const answer = await host.call(TOOL_READ, { which: ['2020-01-01T000000Z'] });
+
+    // Assert
+    expect(answer).toBe('No entries match. no entry matches 2020-01-01T000000Z');
+  });
+
+  test(`should fail the call for ids with a filter, which the CLI refuses`, async () => {
+    // Arrange
+    const store = fixture();
+    seed(store, [{ stem: '2026-10-10T090000Z', project: 'demo', summary: 'One.' }]);
+    const host = pi(store);
+
+    // Act
+    const result = host.call(TOOL_READ, { which: ['2026-10-10T090000Z'], project: 'demo' });
+
+    // Assert
+    await expect(result).rejects.toThrow();
+  });
+});
+
+describe('without the tools', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  test(`should register no tool when the environment turns them off`, () => {
+    // Arrange
+    vi.stubEnv(TOOLS_ENV, 'off');
+
+    // Act
+    const host = pi(fixture());
+
+    // Assert
+    expect(host.tools.size).toBe(0);
+    expect(host.active()).toEqual(BUILT_IN);
+  });
+
+  test(`should give the rules for files, with the values of the session`, async () => {
+    // Arrange
+    vi.stubEnv(TOOLS_ENV, 'off');
+    const store = fixture();
+    const host = pi(store);
+    const event = runStart();
+
+    // Act
+    await host.emit('session_start', { reason: 'startup' });
+    await host.emit('before_agent_start', event);
+
+    // Assert
+    const rules = event.systemPromptOptions.sections[SECTION]!;
+    expect(rules).toContain('date -u');
+    expect(rules).toContain('- `agent`: `pi/test-model`');
+    expect(rules).toContain('- `session_id`: `pi-session-1`');
+    expect(rules).not.toContain(TOOL_WRITE);
+  });
+
+  test(`should keep the tools for any other value`, () => {
+    // Arrange
+    vi.stubEnv(TOOLS_ENV, 'on');
+
+    // Act
+    const host = pi(fixture());
+
+    // Assert
+    expect([...host.tools.keys()]).toEqual([TOOL_WRITE, TOOL_LIST, TOOL_READ]);
+  });
+});
+
+describe('the filters and the output', () => {
+  test(`should give the CLI only the filters that were set, and the default limit`, () => {
+    // Act
+    const args = filterArgs({ since: '7d', project: ' ', offset: 0 });
+
+    // Assert
+    expect(args).toEqual(['--since', '7d', '--limit', '50']);
+  });
+
+  test(`should not ask for more than the most entries`, () => {
+    // Act
+    const args = filterArgs({ limit: 1_000, offset: 20 });
+
+    // Assert
+    expect(args).toEqual(['--limit', '200', '--offset', '20']);
+  });
+
+  test(`should add the note on stderr after the output`, () => {
+    // Act
+    const text = withNote('a\tb\tc\n', 'the note\n');
+
+    // Assert
+    expect(text).toBe('a\tb\tc\nthe note');
+  });
+
+  test(`should cut a long output and say so`, () => {
+    // Act
+    const text = capped('x'.repeat(MAX_OUTPUT + 1));
+
+    // Assert
+    expect(text.startsWith('x'.repeat(MAX_OUTPUT))).toBe(true);
+    expect(text.endsWith('narrow the filters to see the rest.')).toBe(true);
+  });
+});
+
+describe('the end of the session', () => {
+  test(`should commit what was written another way`, async () => {
+    // Arrange
+    const store = fixture();
+    synced(store);
+    const host = pi(store);
+    await host.emit('session_start', { reason: 'startup' });
+    seed(store, [SECOND]);
+
+    // Act
+    await host.emit('session_shutdown', { reason: 'quit' });
+
+    // Assert
+    expect(subjects(store.journalDir)[0]).toBe(`journal: ${SECOND.stem} Second.`);
+  });
+
+  test(`should show a push that failed in the footer`, async () => {
+    // Arrange
+    const store = fixture();
+    synced(store, join(store.home, 'missing.git'));
+    const host = pi(store);
+    await host.emit('session_start', { reason: 'startup' });
+    seed(store, [SECOND]);
+
+    // Act
+    await host.emit('session_shutdown', { reason: 'quit' });
+
+    // Assert
+    const [key, text] = host.setStatus.mock.calls.at(-1)!;
+    expect(key).toBe('agent-journal');
+    expect(text).toMatch(/^journal sync failed: committed 2026-10-11T100000Z · push failed: .+$/);
+  });
+
+  test(`should not sync when sync is off`, async () => {
+    // Arrange
+    const store = fixture();
+    const host = pi(store);
+    await host.emit('session_start', { reason: 'startup' });
+
+    // Act
+    await host.emit('session_shutdown', { reason: 'quit' });
+
+    // Assert
+    expect(host.setStatus.mock.calls.length).toBe(0);
+  });
+});

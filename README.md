@@ -50,10 +50,10 @@ The file starts with frontmatter, so a search across many files can match single
 ---
 date: 2026-10-07T14:20:00Z
 project: acme-dashboard
-summary: "Export timed out because the CSV was built on the main thread. Moved it to a worker."
+summary: 'Export timed out because the CSV was built on the main thread. Moved it to a worker.'
 cwd: ~/Developer/acme-dashboard
-host: "macbook"
-user: "chris"
+host: 'macbook'
+user: 'chris'
 agent: claude/opus-5-5
 session_id: 743d02a3-22f3-4016-b13e-dd448ad58daf
 ---
@@ -170,22 +170,34 @@ writable_roots = ["/Users/you/agent-journal"]
 
 Use the full path rather than `~`. `writable_roots` only applies in `workspace-write` mode; in `read-only` every entry stops to ask, and in `danger-full-access` nothing is restricted and this is unnecessary.
 
+### Pi
+
+Install the package from npm:
+
+```sh
+pi install npm:pi-agent-journal
+```
+
+Then open a new session and ask Pi to write a journal entry. By default, it writes to the directory `~/agent-journal/`. In Pi, the model writes and reads the journal with three tools of its own (`journal_write`, `journal_list` and `journal_read`). Pi does not ask for approval before a tool call, so there is no permission step.
+
+For the tools, how the extension gives the rules to the session, and what it runs, reads and sends, see the [Pi package README](pi/README.md).
+
 ## CLI
 
 > [!NOTE]
 > You need to run the [shell installation](#shell) to make the CLI available.
 
-The CLI is optional. You need it only to work with the journal from your shell. It is installed as `agent-journal` and as the short name `aj`, and it is a thin layer over `ls`, `grep` and `cat`. 
+The CLI is optional. You need it only to work with the journal from your shell. It is installed as `agent-journal` and as the short name `aj`, and it is a thin layer over `ls`, `grep` and `cat`.
 
-| command                                 | description                                                      |
-| --------------------------------------- | ---------------------------------------------------------------- |
+| command                                | description                                                      |
+| -------------------------------------- | ---------------------------------------------------------------- |
 | [`aj list`](docs/cli.md#aj-list)       | list entries, or search them                                     |
 | [`aj read`](docs/cli.md#aj-read)       | print entries in full, by ID or by period                        |
 | [`aj write`](docs/cli.md#aj-write)     | add an entry yourself                                            |
 | [`aj config`](docs/cli.md#aj-config)   | read and change the settings                                     |
 | [`aj sync`](docs/cli.md#aj-sync)       | commit the journal folder and push it, see [Git sync](#git-sync) |
 | [`aj install`](docs/cli.md#aj-install) | find the agents on this machine and wire each one up             |
-| `aj help`                               | the usage help                                                   |
+| `aj help`                              | the usage help                                                   |
 
 The [CLI reference](docs/cli.md) has every option, with examples and the same command without the CLI.
 
@@ -242,6 +254,7 @@ Use your own journal folder in `--source` if you changed `journal_dir`.
 When sync is on, `aj sync` runs:
 
 - in Claude Code, after each entry and when the session ends ([more](claude-code/README.md#git-sync)).
+- in Pi, after each entry and when the session ends ([more](pi/README.md#git-sync)).
 - after `aj write`.
 - when you run `aj sync` yourself, for example for entries that Codex wrote.
 

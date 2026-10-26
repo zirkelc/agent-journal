@@ -63,6 +63,12 @@ function isExecutable(path: string): boolean {
   }
 }
 
+/** The Pi package. Pi installs it from npm, and its manifest is its package.json. */
+const PI = { name: 'Pi', dir: 'pi', manifest: join('pi', 'package.json') };
+
+/** Every plugin folder, each of which carries a copy of the shared core. */
+const PLUGINS: Array<{ name: string; dir: string }> = [...AGENTS, PI];
+
 /**
  * Claude Code takes an update only when the version string changes, so the
  * manifests and the package must name the same one, or a release reaches one
@@ -70,7 +76,11 @@ function isExecutable(path: string): boolean {
  */
 test(`should give every manifest and the package the same version`, () => {
   // Arrange
-  const versions = [...AGENTS.map((agent) => read(agent.manifest).version), read('package.json').version];
+  const versions = [
+    ...AGENTS.map((agent) => read(agent.manifest).version),
+    read(PI.manifest).version,
+    read('package.json').version,
+  ];
 
   // Act
   const distinct = new Set(versions);
@@ -189,7 +199,7 @@ function sharedPairs(dir: string): Array<{ source: string; copy: string }> {
  * The pre-commit hook makes the copies, and these cases catch a commit made
  * without it.
  */
-describe.each(AGENTS)('the shared core in the $name plugin', (agent) => {
+describe.each(PLUGINS)('the shared core in the $name plugin', (agent) => {
   test(`should hold a copy of each shared file and nothing else`, () => {
     // Arrange
     const expected = sharedPairs(agent.dir)
@@ -248,6 +258,40 @@ describe('the Claude Code hooks module', () => {
     expect(modules.length).toBe(1);
     expect(statSync(join(ROOT, 'claude-code', dirname(plugin.hooks), modules[0]!)).isFile()).toBe(true);
     expect(statSync(join(ROOT, 'claude-code', plugin.types)).isFile()).toBe(true);
+  });
+});
+
+describe('the Pi package', () => {
+  test(`should be a Pi package that loads its extensions folder`, () => {
+    // Arrange, Act
+    const pkg = read(PI.manifest);
+
+    // Assert
+    expect(pkg.name).toBe('pi-agent-journal');
+    expect(pkg.license).toBe('MIT');
+    expect(pkg.keywords).toContain('pi-package');
+    expect(pkg.pi).toEqual({ extensions: ['./extensions'] });
+    expect(statSync(join(ROOT, 'pi', 'extensions', 'agent-journal.ts')).isFile()).toBe(true);
+  });
+
+  /** npm publishes only the paths in `files`, and the extension runs the CLI and reads the templates. */
+  test(`should publish the extension, the CLI and the templates`, () => {
+    // Arrange, Act
+    const pkg = read(PI.manifest);
+
+    // Assert
+    expect(pkg.files).toEqual(['extensions', 'scripts', 'templates', 'LICENSE', 'README.md']);
+    for (const path of pkg.files) expect(statSync(join(ROOT, 'pi', path), { throwIfNoEntry: false })).toBeDefined();
+  });
+
+  /** Pi gives its own packages to an extension, so a package must not install a second copy. */
+  test(`should take Pi as a peer and have no dependencies of its own`, () => {
+    // Arrange, Act
+    const pkg = read(PI.manifest);
+
+    // Assert
+    expect(pkg.peerDependencies).toEqual({ '@earendil-works/pi-coding-agent': '*' });
+    expect(pkg.dependencies).toBeUndefined();
   });
 });
 

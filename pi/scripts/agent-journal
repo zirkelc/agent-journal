@@ -1,0 +1,2568 @@
+#!/bin/sh
+#
+# The whole of agent-journal that is not prose.
+#
+#   agent-journal list    [TERM...] [--fixed] [filters]
+#   agent-journal read    ID... | PERIOD [filters]
+#   agent-journal write   [--summary S] [--body B]
+#   agent-journal config  [set|unset <key> [value]]
+#   agent-journal sync    [init [URL]]
+#   agent-journal context [--cwd DIR] [--session-id ID] [--agent A] [--recall | --tools PREFIX]
+#
+# `context` is left out of the help, since only the agent hooks and the journal
+# pane call it. It prints the text a session should be given: templates/INSTRUCTIONS.md,
+# resolved against the settings and against where the session is. With --recall
+# it prints templates/RECALL.md instead, the text for a model that only reads the
+# journal, with the clock and the calendar. With --tools it prints the variant
+# of the rules for an agent that has the journal's own tools, named PREFIX
+# followed by write, list, search and read, instead of a file to write and
+# commands to read with.
+# It prints plain text and knows nothing about any agent, which is the seam that
+# lets one adapter per agent wrap it in whatever that agent reads.
+#
+# `config` reads and writes the settings, and is the only thing that knows the
+# config file's syntax, so a shell, an installer and a model all go through it
+# rather than each carrying a copy of the format.
+#
+# `list`, `read` and `write` are the human half. They are what a person
+# has instead of remembering grep recipes, and they are the seam an index can sit
+# behind later without any adapter noticing.
+#
+# POSIX sh and awk only. No runtime to install, and fast enough to sit in front
+# of every session.
+
+set -u
+
+self=$0
+case $self in
+  */*) ;;
+  *) self=./$self ;;
+esac
+
+# An installed copy is reached through a symlink, since `agent-journal` and `aj`
+# both point here from a bin directory. Following them is what makes the root the
+# checkout rather than that bin directory, which is where the templates would
+# otherwise be looked for and never found. Bounded, so a symlink that points at
+# itself cannot hang a session.
+links=0
+while [ -L "$self" ] && [ "$links" -lt 32 ]; do
+  links=$((links + 1))
+  target=$(readlink "$self") || break
+  case $target in
+    /*) self=$target ;;
+    *) self=$(dirname "$self")/$target ;;
+  esac
+done
+
+root=$(cd "$(dirname "$self")/.." 2>/dev/null && pwd) || root=
+
+config_file="${XDG_CONFIG_HOME:-$HOME/.config}/agent-journal/config"
+
+# The shipped default, stated once. `config` reports it back as the effective
+# value whenever the key is unset. A value set with `config set` is kept as it
+# was given, the default included, so changing it here reaches only the
+# installs that never set one.
+default_journal_dir=$HOME/agent-journal
+
+help_text() {
+  cat <<'EOF'
+usage: agent-journal list   [TERM...] [--fixed] [filters]
+       agent-journal read   latest | ID... | PERIOD [filters]
+       agent-journal write  [--summary S] [--body B] [--project P] [--cwd DIR] [--agent A]
+                            [--session-id ID] [--no-sync]
+       agent-journal config [set|unset <key> [value]]
+       agent-journal sync   [init [URL]]
+       agent-journal install [claude|codex|pi] [--all] [--dry-run]
+       agent-journal help
+
+install with no agent named lists the ones found on this machine and what to
+type for each. Naming one registers this plugin with it, by running that
+agent's own plugin commands.
+
+write takes the summary and the body as flags, and anything piped in is the
+body. Without a summary it opens $EDITOR on a template, carrying any body it
+already has. The project and the directory come from where you are unless the
+flags say otherwise. --project . names the repository of --cwd, and fails
+outside one. --agent and --session-id record which agent and session wrote it.
+It prints the new entry's path, whose name without .md is its id. --no-sync
+leaves the sync to the caller.
+
+list with terms searches the summaries and the bodies. Each term is an
+extended regex, as grep -E reads it, matched within one line and ignoring
+case, and an entry must match every term: 'gif|vhs' is either word, and
+codex trust is both. --fixed reads the terms as text, which may then run
+across a line break. Each line then ends with the part of the body line that
+matched, as a fourth column down a pipe and on a line of its own in a
+terminal. It is empty when the summary matched, since the summary is shown
+anyway.
+
+read takes one id or several, each whole or a prefix that matches one entry,
+and prints them in full in that order. A prefix that matches several lists
+them. With a period instead, it prints every entry of the period, oldest
+first, with the filters, and all of them unless --limit is given.
+
+When a limit leaves older matches out, a last line on stderr says so, and
+which --offset shows the next ones.
+
+filters: --date D      one local year, month or day: 2026, 2026-01, 2026-01-11,
+                       today or yesterday
+         --since D     from this local day or time on: YYYY-MM-DD, today, 7d,
+                       or a time such as 2026-01-11T14:30:00+01:00
+         --until D     up to and including this local day or time, same forms
+         --project P   entries filed under one project, or . for the current project
+         --cwd DIR     entries from a directory and everything under it, where
+                       * and ? stay within one name of the path
+         --host H      entries written on one machine
+         --user U      entries written by one account
+         --agent A     entries of one agent, such as claude, or of one model,
+                       such as opus-5-5, or of both, such as claude/opus-5-5
+         --limit N     how many of the most recent to print, default 20
+         --offset N    skip this many of the most recent first, for the next page
+         --all         no limit
+
+The values of --project, --cwd, --host, --user and --agent can have * for any
+text and ? for one character, as a shell glob reads them: --agent 'opus-*'.
+Put them in quotes, so the shell does not expand them first.
+
+settings: journal_dir    where journal entries are written
+          sync           git: commit the journal folder after each write, and
+                         push it when the branch has a remote
+          host           the machine name entries record, by default the
+                         system's; set it to '' to record none
+          user           the account name entries record, by default the
+                         login name; set it to '' to record none
+
+sync commits every file in the journal folder and pushes the branch. It runs
+on its own after write and after the journal pane sees a new entry. sync init
+makes the folder a git repository if it is not in one, adds URL as origin,
+and turns sync on.
+
+Entries are listed oldest first, so the newest is nearest the prompt. Each
+line starts with the id that read takes. Down a pipe the columns are id,
+project and summary, and the matching body line for a search, separated by
+one tab each.
+
+The filters take days in your time zone, and the ids are UTC, so an entry
+written just after midnight can carry the date before. A time takes an
+offset (+01:00) or Z; without one it is your local time.
+EOF
+}
+
+# The same text, and the difference is who asked for it. A mistake belongs on
+# stderr and has to fail, or a script would carry on as though it had worked;
+# `agent-journal help` was asked for, so it belongs on stdout and succeeds, which
+# is also what makes piping it into a pager work.
+usage() {
+  help_text >&2
+  exit 2
+}
+
+show_help() {
+  help_text
+  exit 0
+}
+
+newline='
+'
+tab=$(printf '\t')
+cr=$(printf '\r')
+# The shell's own field separators, to go back to after splitting on new lines.
+default_ifs=" $tab$newline"
+
+# ---------------------------------------------------------------- config
+
+# One file decides where entries go. Flat `key=value`, one per line, `#`
+# comments, read by shell and written by a setup script or a model, so it stays
+# the simplest format both can handle without a parser.
+#
+# Unrecognised keys are ignored rather than rejected. A newer version writing a
+# key this one has not heard of must not break the session, and the reverse has
+# to hold too, because both will exist on the same machine during any upgrade.
+cfg_journal_dir=
+cfg_sync=
+# The machine and the account an entry records. An absent key takes the name
+# from the system. An empty key keeps the field out of every entry. So each key
+# needs a flag that says it was set.
+cfg_host=
+cfg_host_set=0
+cfg_user=
+cfg_user_set=0
+
+# Each read starts from nothing, so a key removed since the last read is no
+# longer set.
+read_config() {
+  cfg_journal_dir=
+  cfg_sync=
+  cfg_host=
+  cfg_host_set=0
+  cfg_user=
+  cfg_user_set=0
+  [ -f "$1" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    case $line in
+      '' | '#'*) continue ;;
+      *=*) ;;
+      *) continue ;;
+    esac
+    # A file saved with CRLF line endings must give the same values.
+    line=${line%"$cr"}
+    key=${line%%=*}
+    value=${line#*=}
+    key=${key% }
+    key=${key# }
+    value=${value# }
+    value=${value% }
+
+    case $key in
+      journal_dir) cfg_journal_dir=$value ;;
+      sync) cfg_sync=$value ;;
+      host) cfg_host=$value; cfg_host_set=1 ;;
+      user) cfg_user=$value; cfg_user_set=1 ;;
+    esac
+  done < "$1"
+}
+
+# A config file is hand-editable, so a leading `~` is likely and expanding it
+# costs less than the bug report.
+expand_home() {
+  case $1 in
+    '~') printf '%s\n' "$HOME" ;;
+    '~/'*) printf '%s\n' "$HOME/${1#\~/}" ;;
+    *) printf '%s\n' "$1" ;;
+  esac
+}
+
+# The inverse, for anything a human reads. Entries record `cwd` in this form,
+# which is also the form every existing entry already uses.
+abbrev_home() {
+  case $1 in
+    "$HOME") printf '~\n' ;;
+    "$HOME"/*) printf '~/%s\n' "${1#"$HOME"/}" ;;
+    *) printf '%s\n' "$1" ;;
+  esac
+}
+
+# The only thing that writes the config, so the format has one owner.
+#
+# Rewrites in place, keeping every line it is not changing: comments, blank
+# lines, ordering, and keys it does not recognise all survive. A value is
+# written as it was given, even when it is the default. An empty one removes
+# the line, unless the fourth argument is 1: then the key stays, with nothing
+# after it, for the settings where empty means off.
+write_config() {
+  target=$1
+  set_key=$2
+  set_value=$3
+  keep_empty=${4:-0}
+
+  mkdir -p "$(dirname "$target")" || return 1
+  tmp=$target.$$
+
+  : > "$tmp" || return 1
+  written=0
+
+  # A file nobody has seen before gets a header saying what may go in it, since
+  # the point of a plain text config is that opening it explains itself.
+  if [ ! -f "$target" ]; then
+    cat >> "$tmp" <<'EOF'
+# agent-journal
+#
+# Written by `agent-journal config set`. Editing by hand works, but that command
+# validates values and is what the setup and the slash command both use.
+#
+#   journal_dir    where journal entries are written
+#   sync           git, to commit and push the journal folder after each write
+#   host           the machine name each entry records. `host=` records none
+#   user           the account name each entry records. `user=` records none
+#
+# A key that is absent follows the default. A key that is set stays as it is,
+# even when it names the default.
+
+EOF
+  fi
+
+  if [ -f "$target" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      case $line in
+        '' | '#'*) printf '%s\n' "$line" >> "$tmp"; continue ;;
+        *=*) ;;
+        *) printf '%s\n' "$line" >> "$tmp"; continue ;;
+      esac
+      key=${line%%=*}
+      key=${key% }
+      key=${key# }
+      if [ "$key" = "$set_key" ]; then
+        # Replaced in place rather than appended, so a key keeps its position
+        # and the file does not grow a second copy of itself over time.
+        if [ -n "$set_value" ] || [ "$keep_empty" = 1 ]; then
+          printf '%s=%s\n' "$set_key" "$set_value" >> "$tmp"
+        fi
+        written=1
+      else
+        printf '%s\n' "$line" >> "$tmp"
+      fi
+    done < "$target"
+  fi
+
+  if [ "$written" = 0 ] && { [ -n "$set_value" ] || [ "$keep_empty" = 1 ]; }; then
+    printf '%s=%s\n' "$set_key" "$set_value" >> "$tmp"
+  fi
+
+  mv "$tmp" "$target"
+}
+
+# ---------------------------------------------------------------- location
+
+# The name a session's entries are filed under. It comes from the common git
+# dir, never from the working tree's own root: a worktree's root is named after
+# its branch, so `--show-toplevel` would file `nebula.worktrees/fix-auth` under
+# `fix-auth` and scatter one repository across a project per branch. The common
+# dir always points at the main repository, so every worktree agrees. It also
+# collapses subdirectories and bare repositories.
+#
+# Storing entries inside a repository would be the other question, and would
+# take the other answer: that is per-worktree content and would come from
+# `--show-toplevel`. Nothing asks it yet.
+resolve_project() {
+  project=
+  gitdir=$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || gitdir=
+
+  if [ -n "$gitdir" ]; then
+    case $gitdir in
+      */.git) gitdir=${gitdir%/.git} ;;
+    esac
+    project=${gitdir##*/}
+    project=${project%.git}
+  fi
+
+  # Outside a repository there is no project, and the directory's own name is not
+  # a substitute for one: it would file `Downloads` as a project and dilute the
+  # one field whose job is grouping. Left empty, which drops the line and takes
+  # the field out of the entry. `cwd` still records where the work happened.
+}
+
+# `--project .` where there is no project to name. Each command decides which
+# directory `.` means, so only the failure is shared. Carrying on is not an
+# option: an empty project filter means no filter at all, and would list every
+# project under the name of this one.
+no_project_here() {
+  printf '%s is not in a repository, so --project . has no project to name\n' "$(abbrev_home "$1")" >&2
+  exit 1
+}
+
+# A name an entry can record in double quotes. A quote, a backslash or a control
+# character would end the value or change it, so a name with one is refused.
+is_quotable_name() {
+  case $1 in
+    '' | *'"'* | *'\'* | *[[:cntrl:]]*) return 1 ;;
+  esac
+}
+
+# The machine and the account the session is on, in `host` and `user`. With git
+# sync, one journal holds entries from several machines. A session can be
+# resumed only on the machine that has its transcript.
+#
+# A key that is set gives the value, also when it is empty. Otherwise the value
+# comes from the system. On macOS, the host is the local host name, because
+# `uname -n` there comes from the network and changes with it. Elsewhere, it is
+# `uname -n` without its domain. The user is the login name from the
+# environment, and `id -un` only when the environment has none.
+#
+# A name that cannot be quoted is left out, also from a config edited by hand.
+resolve_machine() {
+  if [ "$cfg_host_set" = 1 ]; then
+    host=$cfg_host
+  else
+    host=
+    if command -v scutil >/dev/null 2>&1; then
+      host=$(scutil --get LocalHostName 2>/dev/null) || host=
+    fi
+    if [ -z "$host" ]; then
+      host=$(uname -n 2>/dev/null) || host=
+      host=${host%%.*}
+    fi
+  fi
+  is_quotable_name "$host" || host=
+  if [ "$cfg_user_set" = 1 ]; then
+    user=$cfg_user
+  else
+    user=${LOGNAME:-${USER:-}}
+    [ -n "$user" ] || user=$(id -un 2>/dev/null) || user=
+  fi
+  is_quotable_name "$user" || user=
+}
+
+# ---------------------------------------------------------------- time
+
+# What time it is and what the user's calendar looks like, so a model is told
+# the dates rather than left to work them out. Each function sets variables
+# instead of printing, so a command calls only the ones it needs, without a
+# subshell per value. The clock is read once, by `clock_now`, and everything
+# else is derived from that one instant.
+#
+# Names starting with `t_` are scratch values of these functions.
+
+# Days since 1970-01-01 for a civil date, and back, in `days` and in `civil`
+# (YYYY-MM-DD) with `civil_y`, `civil_m` and `civil_d`. Integer arithmetic
+# (Howard Hinnant's algorithm), so month lengths, leap years and year
+# boundaries need no `date`, and GNU and BSD cannot disagree about them. Valid
+# from 1970 on, which is all a journal needs.
+civil_to_days() {
+  t_cy=$1
+  if [ "$2" -le 2 ]; then
+    t_cy=$((t_cy - 1))
+    t_mp=$(($2 + 9))
+  else
+    t_mp=$(($2 - 3))
+  fi
+  t_era=$((t_cy / 400))
+  t_yoe=$((t_cy - t_era * 400))
+  t_doy=$(((153 * t_mp + 2) / 5 + $3 - 1))
+  days=$((t_era * 146097 + t_yoe * 365 + t_yoe / 4 - t_yoe / 100 + t_doy - 719468))
+}
+
+days_to_civil() {
+  t_z=$(($1 + 719468))
+  t_era=$((t_z / 146097))
+  t_doe=$((t_z - t_era * 146097))
+  t_yoe=$(((t_doe - t_doe / 1460 + t_doe / 36524 - t_doe / 146096) / 365))
+  t_doy=$((t_doe - (365 * t_yoe + t_yoe / 4 - t_yoe / 100)))
+  t_mp=$(((5 * t_doy + 2) / 153))
+  civil_d=$((t_doy - (153 * t_mp + 2) / 5 + 1))
+  civil_y=$((t_yoe + t_era * 400))
+  if [ "$t_mp" -lt 10 ]; then
+    civil_m=$((t_mp + 3))
+  else
+    civil_m=$((t_mp - 9))
+    civil_y=$((civil_y + 1))
+  fi
+  pad2 "$civil_m"
+  civil=$civil_y-$two
+  pad2 "$civil_d"
+  civil=$civil-$two
+}
+
+# Two digits, for the parts of a date or a time, in `two`. Set rather than
+# printed, because a substitution is a fork, and a range takes dozens of these.
+pad2() {
+  if [ "$1" -lt 10 ]; then two=0$1; else two=$1; fi
+}
+
+# Digits as a decimal number, in `decimal`. Shell arithmetic reads a leading
+# zero as octal, where `08` and `09` do not exist and `010` is eight.
+to_decimal() {
+  decimal=$1
+  while :; do
+    case $decimal in
+      0?*) decimal=${decimal#0} ;;
+      *) break ;;
+    esac
+  done
+}
+
+# The first day of a month and the first day of the month after it, as day
+# numbers in `month_first` and `month_next`, so the month's last day is the one
+# before `month_next`, whatever its length.
+month_bounds() {
+  civil_to_days "$1" "$2" 1
+  month_first=$days
+  if [ "$2" -eq 12 ]; then
+    civil_to_days $(($1 + 1)) 1 1
+  else
+    civil_to_days "$1" $(($2 + 1)) 1
+  fi
+  month_next=$days
+}
+
+# A date typed as YYYY-MM-DD, as a day number in `days`, or a failure when it
+# names no day of the calendar, such as the 30th of February.
+parse_date() {
+  case $1 in
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;;
+    *) return 1 ;;
+  esac
+  to_decimal "${1%%-*}"
+  t_py=$decimal
+  t_md=${1#*-}
+  to_decimal "${t_md%-*}"
+  t_pm=$decimal
+  to_decimal "${t_md#*-}"
+  t_pd=$decimal
+  [ "$t_pm" -ge 1 ] && [ "$t_pm" -le 12 ] && [ "$t_pd" -ge 1 ] || return 1
+  month_bounds "$t_py" "$t_pm"
+  [ "$t_pd" -le $((month_next - month_first)) ] || return 1
+  days=$((month_first + t_pd - 1))
+}
+
+# A UTC offset in seconds as `+02:00`, in `offset_text`.
+format_offset() {
+  t_off=$1
+  t_sign=+
+  if [ "$t_off" -lt 0 ]; then
+    t_sign=-
+    t_off=$((-t_off))
+  fi
+  pad2 $((t_off / 3600))
+  offset_text=$t_sign$two
+  pad2 $((t_off % 3600 / 60))
+  offset_text=$offset_text:$two
+}
+
+# An instant as ISO 8601, in `instant`, with its parts in `instant_date` and
+# `instant_time`. With an offset in seconds it is the wall clock at that
+# offset, written with it; without one it is UTC, written with `Z`.
+format_instant() {
+  t_wall=$(($1 + ${2:-0}))
+  days_to_civil $((t_wall / 86400))
+  t_sec=$((t_wall % 86400))
+  instant_date=$civil
+  pad2 $((t_sec / 3600))
+  instant_time=$two
+  pad2 $((t_sec % 3600 / 60))
+  instant_time=$instant_time:$two
+  pad2 $((t_sec % 60))
+  instant_time=$instant_time:$two
+  if [ -n "${2:-}" ]; then
+    format_offset "$2"
+    instant=${instant_date}T$instant_time$offset_text
+  else
+    instant=${instant_date}T${instant_time}Z
+  fi
+}
+
+# Reads the clock: `now_epoch`, and `now_offset`, the zone's UTC offset at
+# that instant in seconds. One `date` call, so the two always belong to the
+# same second. `AGENT_JOURNAL_NOW` (seconds since the epoch) stands in for the
+# clock in tests, through `-r` on BSD and `-d @` on GNU. Called once per
+# command: a second call is a second reading, and values derived from the two
+# could belong to different seconds.
+clock_now() {
+  if [ -n "${AGENT_JOURNAL_NOW:-}" ]; then
+    t_out=$(date -r "$AGENT_JOURNAL_NOW" '+%s %z' 2>/dev/null) ||
+      t_out=$(date -d "@$AGENT_JOURNAL_NOW" '+%s %z' 2>/dev/null) ||
+      return 1
+  else
+    t_out=$(date '+%s %z') || return 1
+  fi
+  now_epoch=${t_out%% *}
+  parse_offset "${t_out#* }"
+  now_offset=$offset_seconds
+}
+
+# A UTC offset as `+0200` or `+02:00` in seconds, in `offset_seconds`, or a
+# failure for anything else.
+parse_offset() {
+  case $1 in
+    [+-][0-9][0-9]:[0-9][0-9]) t_hm=${1#?}; t_hm=${t_hm%:*}${t_hm#*:} ;;
+    [+-][0-9][0-9][0-9][0-9]) t_hm=${1#?} ;;
+    *) return 1 ;;
+  esac
+  # Through `1HH - 100`, because a leading zero would read as octal.
+  offset_seconds=$(((1${t_hm%??} - 100) * 3600 + (1${t_hm#??} - 100) * 60))
+  case $1 in -*) offset_seconds=$((-offset_seconds)) ;; esac
+}
+
+# The zone's name, such as `Europe/Berlin`, in `timezone`. From `TZ` when it is
+# set, else from where `/etc/localtime` points, else from `/etc/timezone`.
+# Empty when none of them says, which leaves the offset to speak for it.
+timezone_name() {
+  timezone=${TZ:-}
+  timezone=${timezone#:}
+  case $timezone in
+    /*zoneinfo/*) timezone=${timezone#*zoneinfo/} ;;
+    /*) timezone= ;;
+  esac
+  [ -z "$timezone" ] || return 0
+  t_link=$(readlink /etc/localtime 2>/dev/null) || t_link=
+  case $t_link in
+    *zoneinfo/*) timezone=${t_link#*zoneinfo/} ;;
+  esac
+  [ -z "$timezone" ] || return 0
+  [ -r /etc/timezone ] && IFS= read -r timezone </etc/timezone
+  return 0
+}
+
+# The first day of the week for a region, in `t_ws` (1 is Monday, 7 is
+# Sunday), from CLDR's week data. Most of the world starts on Monday, so only
+# the regions that do not are listed.
+region_week_start() {
+  case $1 in
+    MV) t_ws=5 ;;
+    AF | BH | DJ | DZ | EG | IQ | IR | JO | KW | LY | OM | QA | SD | SY) t_ws=6 ;;
+    AG | AS | BD | BR | BS | BT | BW | BZ | CA | CO | DM | DO | ET | GT | GU | HK | HN | ID | IL | IN | IS | \
+      JM | JP | KE | KH | KR | LA | MH | MM | MO | MT | MX | MZ | NI | NP | PA | PE | PH | PK | PR | PT | \
+      PY | SA | SG | SV | TH | TT | TW | UM | US | VE | VI | WS | YE | ZA | ZW) t_ws=7 ;;
+    [A-Z][A-Z]) t_ws=1 ;;
+    *) return 1 ;;
+  esac
+}
+
+# The region of a locale name, upper case, in `t_cc`: the `rg` override of a
+# macOS locale (`en_US@rg=dezzzz` is Germany) before its country (`en_US`).
+locale_region() {
+  case $1 in
+    *@rg=??*)
+      t_cc=${1#*@rg=}
+      t_cc=${t_cc%"${t_cc#??}"}
+      ;;
+    *_*)
+      # The last part before any encoding or modifier, past a script such as
+      # the `Latn` in `sr_Latn_RS`.
+      t_cc=${1%%[.@]*}
+      t_cc=${t_cc##*_}
+      ;;
+    *) return 1 ;;
+  esac
+  case $t_cc in
+    [A-Za-z][A-Za-z]) ;;
+    *) return 1 ;;
+  esac
+  # Only an `rg` value is lower case, so only that one costs a process.
+  case $t_cc in
+    *[a-z]*) t_cc=$(printf '%s' "$t_cc" | tr '[:lower:]' '[:upper:]') ;;
+  esac
+}
+
+# The user's first day of the week, in `week_start` (1 is Monday, 7 is Sunday).
+# The first of these that answers:
+#
+# 1. An explicit setting: macOS's first weekday, or, on Linux, what the
+#    installed locale says. `C` and `POSIX` say Sunday by default rather than by
+#    anyone's choice, and a locale that is not installed falls back to them, so
+#    neither counts.
+# 2. The region: of the macOS locale, where `rg` is the region chosen in System
+#    Settings and can differ from the language's country, then of `LC_ALL`,
+#    `LC_TIME` or `LANG`, whichever decides the time format.
+# 3. Monday, the ISO 8601 week.
+resolve_week_start() {
+  week_start=
+  t_first=
+  t_apple=
+  t_plist=$HOME/Library/Preferences/.GlobalPreferences.plist
+  if [ -f "$t_plist" ] && command -v plutil >/dev/null 2>&1; then
+    # One conversion for both keys. The file is binary, and plutil reads it
+    # faster than one `defaults` call per key.
+    t_out=$(plutil -convert xml1 -o - "$t_plist" 2>/dev/null | awk '
+      /<key>AppleFirstWeekday<\/key>/ { first = 1; next }
+      first && /<key>gregorian<\/key>/ { gregorian = 1; next }
+      gregorian && /<integer>/ { gsub(/.*<integer>|<\/integer>.*/, ""); weekday = $0; gregorian = 0 }
+      first && /<\/dict>/ { first = 0 }
+      /<key>AppleLocale<\/key>/ { locale = 1; next }
+      locale { gsub(/.*<string>|<\/string>.*/, ""); name = $0; locale = 0 }
+      END { print weekday; print name }
+    ')
+    t_first=${t_out%%"$newline"*}
+    t_apple=${t_out#*"$newline"}
+  fi
+
+  case $t_first in
+    [1-7])
+      # Counted from Sunday as 1.
+      week_start=$(((t_first + 5) % 7 + 1))
+      return 0
+      ;;
+  esac
+
+  t_var=LANG
+  [ -z "${LC_TIME:-}" ] || t_var=LC_TIME
+  [ -z "${LC_ALL:-}" ] || t_var=LC_ALL
+  eval "t_name=\${$t_var:-}"
+
+  case $t_name in
+    '' | C | C.* | POSIX) ;;
+    *)
+      if command -v locale >/dev/null 2>&1; then
+        t_out=$(locale -k LC_TIME 2>&1)
+        case $t_out in
+          *'Cannot set'*) ;;
+          *week-1stday=*first_weekday=*)
+            # glibc counts the first weekday from the day `week-1stday` names.
+            t_day=${t_out#*week-1stday=}
+            t_day=${t_day%%"$newline"*}
+            t_n=${t_out#*first_weekday=}
+            t_n=${t_n%%"$newline"*}
+            civil_to_days "${t_day%????}" $((1${t_day#????} / 100 - 100)) $((1${t_day#??????} - 100))
+            week_start=$((((days + 3) % 7 + t_n - 1) % 7 + 1))
+            return 0
+            ;;
+        esac
+      fi
+      ;;
+  esac
+
+  if [ -n "$t_apple" ] && locale_region "$t_apple" && region_week_start "$t_cc"; then
+    week_start=$t_ws
+    return 0
+  fi
+  if locale_region "$t_name" && region_week_start "$t_cc"; then
+    week_start=$t_ws
+    return 0
+  fi
+
+  week_start=1
+}
+
+# The instant a local day starts, in `midnight`, for a day number. It needs
+# the zone's rules for that day, which may differ from today's, so it asks
+# `date`, as BSD (`-j -f`) or as GNU (`-d`). Kept per day, so a day that
+# starts one range and ends another is converted once.
+local_midnight() {
+  # The day number names a variable, and a minus sign cannot be part of one.
+  t_key=$1
+  case $t_key in -*) t_key=m${t_key#-} ;; esac
+  eval "midnight=\${t_midnight_$t_key:-}"
+  [ -z "$midnight" ] || return 0
+  days_to_civil "$1"
+  # A zone that moves its clocks forward at midnight has no 00:00 on that day,
+  # and the day starts at 01:00. BSD date moves a missing time forward by
+  # itself; GNU date refuses it, so 01:00 is asked for next.
+  for t_at in 00:00:00 01:00:00; do
+    midnight=$(date -j -f '%Y-%m-%d %H:%M:%S' "$civil $t_at" '+%s' 2>/dev/null) ||
+      midnight=$(date -d "$civil $t_at" '+%s' 2>/dev/null) ||
+      midnight=
+    [ -z "$midnight" ] || break
+  done
+  [ -n "$midnight" ] || return 1
+  eval "t_midnight_$t_key=\$midnight"
+}
+
+# A range of local days, from day number `$1` up to but not including `$2`, as
+# instants: `range_local_since` and `range_local_until` with the zone's
+# offsets, and `range_utc_since` and `range_utc_until`. The end is the last
+# second of the range, so both are inclusive.
+#
+# Each offset is the difference between the wall clock and the instant, which
+# holds even on a day that changes it: the week of 25 October 2026 in Berlin
+# starts at +02:00 and ends at +01:00.
+range_instants() {
+  local_midnight "$1" || return 1
+  t_start=$midnight
+  local_midnight "$2" || return 1
+  t_end=$((midnight - 1))
+  days_to_civil "$1"
+  format_offset $(($1 * 86400 - t_start))
+  range_local_since=${civil}T00:00:00$offset_text
+  days_to_civil $(($2 - 1))
+  format_offset $(($2 * 86400 - 1 - t_end))
+  range_local_until=${civil}T23:59:59$offset_text
+  format_instant "$t_start"
+  range_utc_since=$instant
+  format_instant "$t_end"
+  range_utc_until=$instant
+}
+
+# The calendar around the clock's instant, as day numbers: `today`, and the
+# first day of each range with the first day after it, in `<name>_first` and
+# `<name>_next`. Needs `clock_now` and `resolve_week_start` first.
+resolve_calendar_days() {
+  today=$(((now_epoch + now_offset) / 86400))
+  weekday=$(((today + 3) % 7 + 1))
+
+  yesterday_first=$((today - 1))
+  yesterday_next=$today
+  today_first=$today
+  today_next=$((today + 1))
+
+  this_week_first=$((today - (weekday - week_start + 7) % 7))
+  this_week_next=$((this_week_first + 7))
+  last_week_first=$((this_week_first - 7))
+  last_week_next=$this_week_first
+
+  days_to_civil "$today"
+  month_bounds "$civil_y" "$civil_m"
+  this_month_first=$month_first
+  this_month_next=$month_next
+  # The month before is the one that holds the day before this one started.
+  days_to_civil $((this_month_first - 1))
+  month_bounds "$civil_y" "$civil_m"
+  last_month_first=$month_first
+  last_month_next=$month_next
+}
+
+# The English name of a weekday number (1 is Monday, 7 is Sunday), in
+# `weekday_name`.
+weekday_name() {
+  case $1 in
+    1) weekday_name=Monday ;;
+    2) weekday_name=Tuesday ;;
+    3) weekday_name=Wednesday ;;
+    4) weekday_name=Thursday ;;
+    5) weekday_name=Friday ;;
+    6) weekday_name=Saturday ;;
+    7) weekday_name=Sunday ;;
+  esac
+}
+
+# Every value about the current time, read from the clock once: one variable
+# per key, named as the key is, and all of them as `key=value` lines in
+# `time_text`, in a fixed order. A command prints `time_text` as it is, or uses
+# the variables by name when it needs another form. Every range, a single day
+# included, is two keys in both forms, `<range>_since` and `<range>_until`,
+# the same two instants each. One value per key, named after the flag it goes
+# to, because a model given a pair on one line passed the whole line, key and
+# all, as one flag. `local_date` is today's plain date.
+resolve_time() {
+  clock_now || {
+    printf 'cannot read the clock\n' >&2
+    return 1
+  }
+  timezone_name
+  resolve_week_start
+  resolve_calendar_days
+
+  format_instant "$now_epoch" "$now_offset"
+  local_now=$instant
+  local_date=$instant_date
+  local_time=$instant_time
+  weekday_name "$weekday"
+  local_weekday=$weekday_name
+  weekday_name "$week_start"
+  local_week_start=$weekday_name
+  local_timezone=$timezone
+  local_utc_offset=$offset_text
+  format_instant "$now_epoch"
+  utc_now=$instant
+  utc_date=$instant_date
+  utc_time=$instant_time
+
+  time_text="local_now=$local_now
+local_date=$local_date
+local_time=$local_time
+local_weekday=$local_weekday
+local_week_start=$local_week_start
+local_timezone=$local_timezone
+local_utc_offset=$local_utc_offset
+utc_now=$utc_now
+utc_date=$utc_date
+utc_time=$utc_time"
+
+  for t_range in today yesterday this_week last_week this_month last_month; do
+    eval "t_rf=\$${t_range}_first t_rn=\$${t_range}_next"
+    # An empty range would read as a value. Without the zone's rules there
+    # is no right answer to give, so there is none.
+    range_instants "$t_rf" "$t_rn" || {
+      printf 'cannot convert %s to UTC\n' "$t_range" >&2
+      return 1
+    }
+    eval "local_${t_range}_since=\$range_local_since local_${t_range}_until=\$range_local_until"
+    eval "utc_${t_range}_since=\$range_utc_since utc_${t_range}_until=\$range_utc_until"
+    time_text="$time_text
+local_${t_range}_since=$range_local_since
+local_${t_range}_until=$range_local_until
+utc_${t_range}_since=$range_utc_since
+utc_${t_range}_until=$range_utc_until"
+  done
+}
+
+# ---------------------------------------------------------------- arguments
+
+# Bare `agent-journal` lists, because the question a person arrives with is what
+# is in the journal, not how to ask. `--help` is still there for the other one.
+if [ $# -eq 0 ]; then
+  cmd=list
+else
+  case $1 in
+    help | -h | --help) show_help ;;
+    # A filter with no command in front of it is still a question about the
+    # entries, so `aj --since 7d` reads the way it looks.
+    -*) cmd=list ;;
+    *)
+      cmd=$1
+      shift
+      ;;
+  esac
+fi
+
+cwd=
+cwd_set=0
+session_id=
+agent=
+
+date_filter=
+since=
+until=
+project_filter=
+host_filter=
+user_filter=
+limit=20
+limit_set=0
+offset=0
+fixed=0
+opt_summary=
+summary_set=0
+opt_body=
+body_set=0
+all_set=0
+dry_run=0
+recall=0
+tools=
+no_sync=0
+keep_empty=0
+
+arg1=
+arg2=
+arg3=
+argc=0
+# Every argument that is not a flag, one per line, for `list`, which takes any
+# number of terms, and `read`, which takes any number of ids, where the other
+# commands take at most three.
+terms=
+
+while [ $# -gt 0 ]; do
+  case $1 in
+    # One flag, two readings: for `context` it says where the session is, and for
+    # the query commands it says which entries to keep. Each command below takes
+    # the one it means.
+    --cwd) [ $# -ge 2 ] || usage; cwd=$2; cwd_set=1; shift 2 ;;
+    --cwd=*) cwd=${1#--cwd=}; cwd_set=1; shift ;;
+    --session-id) [ $# -ge 2 ] || usage; session_id=$2; shift 2 ;;
+    --session-id=*) session_id=${1#--session-id=}; shift ;;
+    # Which agent is running, and which model it is running as, in the form
+    # `name` or `name/model`. Only an adapter knows this, so only an adapter
+    # passes it, and an entry written without one simply has no such field.
+    --agent) [ $# -ge 2 ] || usage; agent=$2; shift 2 ;;
+    --agent=*) agent=${1#--agent=}; shift ;;
+    --date) [ $# -ge 2 ] || usage; date_filter=$2; shift 2 ;;
+    --date=*) date_filter=${1#--date=}; shift ;;
+    --since) [ $# -ge 2 ] || usage; since=$2; shift 2 ;;
+    --since=*) since=${1#--since=}; shift ;;
+    --until) [ $# -ge 2 ] || usage; until=$2; shift 2 ;;
+    --until=*) until=${1#--until=}; shift ;;
+    --project) [ $# -ge 2 ] || usage; project_filter=$2; shift 2 ;;
+    --project=*) project_filter=${1#--project=}; shift ;;
+    --host) [ $# -ge 2 ] || usage; host_filter=$2; shift 2 ;;
+    --host=*) host_filter=${1#--host=}; shift ;;
+    --user) [ $# -ge 2 ] || usage; user_filter=$2; shift 2 ;;
+    --user=*) user_filter=${1#--user=}; shift ;;
+    --limit) [ $# -ge 2 ] || usage; limit=$2; limit_set=1; shift 2 ;;
+    --limit=*) limit=${1#--limit=}; limit_set=1; shift ;;
+    --offset) [ $# -ge 2 ] || usage; offset=$2; shift 2 ;;
+    --offset=*) offset=${1#--offset=}; shift ;;
+    # Two readings again: for the query commands it lifts the limit, and for
+    # `install` it means every agent found rather than one named.
+    --all) limit=0; all_set=1; shift ;;
+    # How `list` reads its terms: as text rather than as an extended regex.
+    --fixed) fixed=1; shift ;;
+    --dry-run) dry_run=1; shift ;;
+    # For `context`: the text for a reader of the journal instead of the rules
+    # for writing it.
+    --recall) recall=1; shift ;;
+    # For `context`: the rules for an agent that writes and reads the journal
+    # through tools of its own, which the value names: each tool is this prefix
+    # followed by write, list, search or read.
+    --tools) [ $# -ge 2 ] || usage; tools=$2; shift 2 ;;
+    --tools=*) tools=${1#--tools=}; shift ;;
+    # For `write`: the caller syncs on its own, after the write has returned, so
+    # a slow push does not hold up the one who wrote.
+    --no-sync) no_sync=1; shift ;;
+    # One flag per field, rather than one flag for "the message". An entry is a
+    # summary and a body, and a single `-m` cannot say which it meant. Spelled
+    # out like every other flag here, none of which has a short form.
+    --summary) [ $# -ge 2 ] || usage; opt_summary=$2; summary_set=1; shift 2 ;;
+    --summary=*) opt_summary=${1#--summary=}; summary_set=1; shift ;;
+    --body) [ $# -ge 2 ] || usage; opt_body=$2; body_set=1; shift 2 ;;
+    --body=*) opt_body=${1#--body=}; body_set=1; shift ;;
+    -h | --help) show_help ;;
+    -*) usage ;;
+    *)
+      argc=$((argc + 1))
+      terms=$terms$1$newline
+      case $argc in
+        1) arg1=$1 ;;
+        2) arg2=$1 ;;
+        3) arg3=$1 ;;
+        *) [ "$cmd" = list ] || [ "$cmd" = read ] || usage ;;
+      esac
+      shift
+      ;;
+  esac
+done
+
+case $limit in
+  '' | *[!0-9]*) printf '%s: --limit takes a number\n' "$limit" >&2; exit 2 ;;
+esac
+case $offset in
+  '' | *[!0-9]*) printf '%s: --offset takes a number\n' "$offset" >&2; exit 2 ;;
+esac
+
+[ -n "$cwd" ] || cwd=$(pwd)
+# Entries record this path, and one that reads `.` records nothing at all. An
+# adapter passes an absolute path, but a shell invocation is where the mistake
+# would be made and it costs one line to make it impossible.
+abs=$(cd "$cwd" 2>/dev/null && pwd) && cwd=$abs
+
+read_config "$config_file"
+journal_dir=$(expand_home "${cfg_journal_dir:-$default_journal_dir}")
+
+# ---------------------------------------------------------------- config
+
+if [ "$cmd" = config ]; then
+  action=$arg1
+
+  if [ -z "$action" ]; then
+    # Effective value first, then where it came from, so the common question
+    # ("what is it doing") is answered before the rarer one ("why").
+    printf 'journal_dir=%s\n' "$journal_dir"
+    printf 'journal_dir_from=%s\n' "$([ -n "$cfg_journal_dir" ] && echo config || echo default)"
+    printf 'config_file=%s\n' "$config_file"
+    printf 'sync=%s\n' "${cfg_sync:-off}"
+    # Empty when an entry records none, so the line says what entries get.
+    resolve_machine
+    printf 'host=%s\n' "$host"
+    printf 'user=%s\n' "$user"
+    exit 0
+  fi
+
+  case $action in
+    set) [ "$argc" -ge 3 ] || usage; set_key=$arg2; set_value=$arg3 ;;
+    unset) [ "$argc" -ge 2 ] || usage; set_key=$arg2; set_value= ;;
+    *) usage ;;
+  esac
+
+  case $set_key in
+    journal_dir) ;;
+    sync)
+      # Off is the absent key, so there is one way to say it.
+      case $set_value in
+        '' | git) ;;
+        *) printf '%s: sync takes git, or config unset sync to turn it off\n' "$set_value" >&2; exit 2 ;;
+      esac
+      ;;
+    host | user)
+      # `set` to nothing keeps the key, which turns the field off; `unset`
+      # removes it, which gives the name from the system back.
+      if [ "$action" = set ]; then
+        keep_empty=1
+        [ -z "$set_value" ] || is_quotable_name "$set_value" || {
+          printf 'a %s cannot contain a quote, a backslash or a control character\n' "$set_key" >&2
+          exit 2
+        }
+      fi
+      ;;
+    *) printf '%s: not a setting\n' "$set_key" >&2; exit 2 ;;
+  esac
+
+  write_config "$config_file" "$set_key" "$set_value" "$keep_empty" || exit 1
+
+  # Created here rather than at session start, so the directory exists before
+  # anything tries to write an entry into it and no hook has a side effect.
+  read_config "$config_file"
+  mkdir -p "$(expand_home "${cfg_journal_dir:-$default_journal_dir}")" || exit 1
+  exit 0
+fi
+
+# ---------------------------------------------------------------- install
+
+# In its own file, sourced only when it is asked for. It is the longest thing
+# here and the least often run, and `context` sits in front of every session, so
+# it is worth keeping the two apart.
+if [ "$cmd" = install ]; then
+  [ -n "$root" ] && [ -r "$root/lib/install.sh" ] || {
+    printf 'cannot find lib/install.sh next to this script\n' >&2
+    exit 1
+  }
+  . "$root/lib/install.sh"
+  exit 0
+fi
+
+# ---------------------------------------------------------------- entries
+
+# A local day from what a person types, as a day number in `day`: a date,
+# `today`, or `Nd` for N days before today. Today is the user's, from the
+# clock and the zone, so `today` at 01:00 in Berlin is already the new day
+# there although UTC has not reached it.
+resolve_day() {
+  case $1 in
+    today | *d)
+      t_n=0
+      if [ "$1" != today ]; then
+        case ${1%d} in
+          '' | *[!0-9]*) return 1 ;;
+        esac
+        to_decimal "${1%d}"
+        t_n=$decimal
+      fi
+      # Read once, so `--since today --until today` cannot straddle a midnight.
+      [ -n "${now_epoch:-}" ] || clock_now || return 1
+      day=$(((now_epoch + now_offset) / 86400 - t_n))
+      ;;
+    *)
+      parse_date "$1" || return 1
+      day=$days
+      ;;
+  esac
+}
+
+# An instant as typed, as seconds since the epoch in `epoch`: a date and a time,
+# `2026-01-11T14:30:00` or `2026-01-11T14:30`, then `Z`, an offset such as
+# `+01:00` or `+0100`, or nothing for local time. These are the forms the
+# ranges of `resolve_time` are written in, so a prompt can pass them on as they
+# are. A local time the clocks skip, such as 02:30 on the morning they move to
+# summer time, names no instant: it fails, and `instant_skipped` says why.
+resolve_instant() {
+  instant_skipped=
+  case $1 in
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*) ;;
+    *) return 1 ;;
+  esac
+  parse_date "${1%%T*}" || return 1
+  t_iday=$days
+  t_rest=${1#*T}
+  case $t_rest in
+    *Z) t_clock=${t_rest%Z} t_zone=Z ;;
+    *[+-]*) t_clock=${t_rest%%[+-]*} t_zone=${t_rest#"${t_rest%%[+-]*}"} ;;
+    *) t_clock=$t_rest t_zone= ;;
+  esac
+  case $t_clock in
+    [0-9][0-9]:[0-9][0-9]) t_clock=$t_clock:00 ;;
+    [0-9][0-9]:[0-9][0-9]:[0-9][0-9]) ;;
+    *) return 1 ;;
+  esac
+  to_decimal "${t_clock%%:*}"
+  t_ih=$decimal
+  t_ims=${t_clock#*:}
+  to_decimal "${t_ims%:*}"
+  t_im=$decimal
+  to_decimal "${t_ims#*:}"
+  t_is=$decimal
+  [ "$t_ih" -le 23 ] && [ "$t_im" -le 59 ] && [ "$t_is" -le 59 ] || return 1
+  t_iwall=$((t_iday * 86400 + t_ih * 3600 + t_im * 60 + t_is))
+
+  case $t_zone in
+    Z) epoch=$t_iwall ;;
+    '')
+      # The zone's rules for that moment, from `date`, with the offset it used,
+      # so a time it moved past a gap shows up as a different wall clock.
+      t_out=$(date -j -f '%Y-%m-%d %H:%M:%S' "${1%%T*} $t_clock" '+%s %z' 2>/dev/null) ||
+        t_out=$(date -d "${1%%T*} $t_clock" '+%s %z' 2>/dev/null) || {
+        instant_skipped=1
+        return 1
+      }
+      epoch=${t_out%% *}
+      parse_offset "${t_out#* }" || return 1
+      [ $((epoch + offset_seconds)) -eq "$t_iwall" ] || {
+        instant_skipped=1
+        return 1
+      }
+      ;;
+    *)
+      parse_offset "$t_zone" || return 1
+      epoch=$((t_iwall - offset_seconds))
+      ;;
+  esac
+}
+
+# An instant as an entry id, `2026-01-11T143000Z`, in `id`, so it compares with
+# the names of the entries as a string.
+format_id() {
+  format_instant "$1"
+  t_h=${instant_time%%:*}
+  t_rest=${instant_time#*:}
+  id=${instant_date}T$t_h${t_rest%%:*}${t_rest#*:}Z
+}
+
+# How the lines are laid out for the stream they go to, given as a file
+# descriptor. A terminal gets aligned columns, narrowed to its width. Anything
+# else gets one tab between columns, so a script can split them even when the
+# project is empty. `NO_COLOR` turns off colour only, never the layout.
+#
+# The width comes from `stty`, which asks the stream itself. `tput cols` would
+# have to find the terminal through its own stderr once its output is captured,
+# and reports a default 80 when that is silenced. An exported `COLUMNS` still
+# wins, as it does for `tput`.
+layout_for() {
+  tty=0
+  color=0
+  cols=0
+  [ -t "$1" ] || return 0
+  tty=1
+  [ -n "${NO_COLOR:-}" ] || color=1
+  cols=${COLUMNS:-}
+  if [ -z "$cols" ]; then
+    # Through a third descriptor, because inside the substitution the first
+    # one is the pipe that collects the answer, not the terminal.
+    { size=$(stty size <&3 2>/dev/null) || size=; } 3<&"$1"
+    cols=${size#* }
+  fi
+  case $cols in
+    '' | *[!0-9]*) cols=0 ;;
+  esac
+}
+
+# One line per entry, out of the files it is given, with the matching line as
+# a fourth column when there are terms. `read` borrows it to show what an
+# ambiguous id matched, so the format is defined once. With `full` set it prints
+# the paths of the entries it keeps instead, for `read` with a period to print
+# in full.
+#
+# The files come oldest first, as the glob sorts them, and are read newest first,
+# so the most recent matches are the ones a limit keeps. The reading stops at
+# the first match past the limit, which is enough to say on stderr that the list
+# is cut, where it does not get in the way of a script that splits the lines. A
+# range is checked on the name, before the file is opened, and the reading stops
+# at the first file older than it. Without terms only the frontmatter is read,
+# because that is all a line shows. awk opens the files itself in `BEGIN`,
+# because its own input loop only runs forward and cannot stop one file early in
+# POSIX. The names come one per line on standard input, not as arguments: the
+# names of a journal of a few years are more than the arguments one program can
+# get, and `printf` is built into the shell, so it has no such limit.
+#
+# The terms and every value that was typed go through the environment rather
+# than -v, which would treat a backslash in them as an escape. A regex needs
+# its backslashes, and a name can have one.
+render() {
+  printf '%s\n' "$@" |
+  AGENT_JOURNAL_TERMS=${terms:-} \
+  AGENT_JOURNAL_PROJECT=$project_filter \
+  AGENT_JOURNAL_CWD=$cwd_filter \
+  AGENT_JOURNAL_HOST=$host_filter \
+  AGENT_JOURNAL_USER=$user_filter \
+  AGENT_JOURNAL_AGENT=$agent \
+  AGENT_JOURNAL_LABEL=${label:-} \
+  awk \
+    -v fixed="$fixed" \
+    -v full="${full:-0}" \
+    -v since="$since" \
+    -v until="$until" \
+    -v limit="$limit" \
+    -v offset="$offset" \
+    -v tty="$tty" \
+    -v color="$color" \
+    -v cols="$cols" '
+    # Whether an entry passes the filters that its frontmatter decides. An
+    # agent is recorded as `name/model`, and a filter without a slash is the
+    # name or the model, so `claude` and `opus-*` both work.
+    function wanted(proj, dir, h, u, ag,   name, model) {
+      if (project != "" && !match(proj, projectre)) return 0
+      if (cwdf != "" && !match(dir, cwdre)) return 0
+      if (hostf != "" && !match(h, hostre)) return 0
+      if (userf != "" && !match(u, userre)) return 0
+      if (agentf != "") {
+        if (index(agentf, "/")) return match(ag, agentre)
+        name = ag
+        sub(/\/.*/, "", name)
+        model = ""
+        if (index(ag, "/")) model = substr(ag, index(ag, "/") + 1)
+        if (!match(name, agentre) && !match(model, agentre)) return 0
+      }
+      return 1
+    }
+
+    # A filter as a regex, the way a shell glob reads: a star is any text, a
+    # question mark one character, and every other character stands for
+    # itself. In a directory, both stay within one name, and the pattern also
+    # matches every directory under the one it names, but not a longer name
+    # that only starts the same. Any other value must match as a whole.
+    function pattern(glob, dir,   re, i, c, any) {
+      any = dir ? "[^/]" : "."
+      if (dir) sub(/\/+$/, "", glob)
+      re = "^"
+      for (i = 1; i <= length(glob); i++) {
+        c = substr(glob, i, 1)
+        if (c == "*") re = re any "*"
+        else if (c == "?") re = re any
+        else if (index("\\.[](){}+^$|", c)) re = re "\\" c
+        else re = re c
+      }
+      return re (dir ? "(/|$)" : "$")
+    }
+
+    # The value of a frontmatter line from column `n` on, without the space in
+    # front and without the quotes around it.
+    function unquote(line, n) {
+      line = substr(line, n)
+      sub(/^[ \t]*/, "", line)
+      if (substr(line, 1, 1) == "\"") line = substr(line, 2)
+      if (substr(line, length(line), 1) == "\"") line = substr(line, 1, length(line) - 1)
+      return line
+    }
+
+    # Looks for the terms not found yet in `text`, which is lower case, and is
+    # `line` from position `at` on. Keeps the part of a body line around the
+    # first match there, for the fourth column; a match in the summary keeps
+    # nothing, since the summary is shown anyway. Returns whether every term
+    # has matched now.
+    function look(text, line, at, body,   t, p) {
+      for (t = 1; t <= nt; t++) {
+        if (hit[t]) continue
+        if (regex) {
+          if (!match(text, term[t])) continue
+          p = RSTART
+        } else if (!(p = index(text, term[t]))) continue
+        hit[t] = 1
+        nhit++
+        if (body && shown == "") shown = excerpt(line, p - at + 1)
+      }
+      return nhit == nt
+    }
+
+    # At most `span` characters of a line, from a little before position `p`,
+    # since one body line is often a whole paragraph. A cut is moved off the
+    # middle of a UTF-8 character, which an awk that counts bytes would make.
+    function excerpt(line, p,   span, s, e, text) {
+      gsub(/\t/, " ", line)
+      span = 160
+      if (p < 1) p = 1
+      s = 1
+      e = length(line)
+      if (e > span) {
+        s = p - 60
+        if (s < 1) s = 1
+        if (s + span - 1 > e) s = e - span + 1
+        while (s > 1 && index(cont, substr(line, s, 1))) s--
+        e = s + span - 1
+        while (e < length(line) && index(cont, substr(line, e + 1, 1))) e++
+      }
+      text = substr(line, s, e - s + 1)
+      sub(/^[ ]+/, "", text)
+      sub(/[ ]+$/, "", text)
+      return (s > 1 ? "…" : "") text (e < length(line) ? "…" : "")
+    }
+
+    # Reads one file and keeps it when it passes the filters. Matches are kept
+    # newest first, the order they are found in. Returns 1 once the file is
+    # older than `since`, because every file after it is older still.
+    function scan(file,   stem, line, got, first, fm, proj, dir, h, u, ag, summary, found, tail, text, t) {
+      if (file in skip) return 0
+      stem = file
+      sub(/.*\//, "", stem)
+      sub(/\.md$/, "", stem)
+      if (since != "" && stem < since) return 1
+      if (until != "" && stem > until) return 0
+
+      first = 1; fm = 0; proj = ""; dir = ""; h = ""; u = ""; ag = ""; summary = ""; found = 0; tail = ""
+      for (t = 1; t <= nt; t++) hit[t] = 0
+      nhit = 0
+      shown = ""
+      while ((got = (getline line < file)) > 0) {
+        # An entry saved with CRLF endings is still an entry. Without this its
+        # first line is not `---`, and every value would carry the return.
+        # Compared rather than matched, as below: this runs on every line of
+        # every entry, and a regex costs several times a string comparison.
+        if (substr(line, length(line)) == "\r") line = substr(line, 1, length(line) - 1)
+        if (first) {
+          first = 0
+          if (line != "---") break
+          fm = 1
+          continue
+        }
+        if (fm == 1) {
+          if (line == "---") {
+            fm = 2
+            # Everything a line shows is known now, so the body is read only
+            # for terms, and only for an entry the other filters keep.
+            if (nt == 0 || !wanted(proj, dir, h, u, ag)) break
+            # The text searched is the summary, a space, then each body line
+            # after a space of its own. A regex is matched within one line. A
+            # fixed text that ends in a new line starts at most one term length
+            # before it, so that much of the text read so far is kept. The read
+            # stops once the entry matches.
+            text = tolower(summary " ")
+            if (look(regex ? tolower(summary) : text, summary, 1, 0)) { found = 1; break }
+            if (!regex) tail = substr(text, length(text) - longest + 2)
+            continue
+          }
+          if (substr(line, 1, 8) == "project:") {
+            proj = substr(line, 9)
+            sub(/^[ \t]*/, "", proj)
+          } else if (substr(line, 1, 4) == "cwd:") {
+            dir = substr(line, 5)
+            sub(/^[ \t]*/, "", dir)
+          } else if (substr(line, 1, 5) == "host:") {
+            h = unquote(line, 6)
+          } else if (substr(line, 1, 5) == "user:") {
+            u = unquote(line, 6)
+          } else if (substr(line, 1, 6) == "agent:") {
+            ag = unquote(line, 7)
+          } else if (substr(line, 1, 8) == "summary:") {
+            # The one quoted field, and the quotes are punctuation rather than value.
+            summary = unquote(line, 9)
+          }
+          continue
+        }
+        if (regex) {
+          if (look(tolower(line), line, 1, 1)) { found = 1; break }
+          continue
+        }
+        text = tail " " tolower(line)
+        if (look(text, line, length(tail) + 2, 1)) { found = 1; break }
+        tail = substr(text, length(text) - longest + 2)
+      }
+      # A file that cannot be opened is not an empty one. Said rather than
+      # skipped in silence, so a missing entry has a reason next to it.
+      if (got < 0 && first) printf "cannot read %s\n", file > "/dev/stderr"
+      close(file)
+
+      if (fm == 0) return 0
+      if (!wanted(proj, dir, h, u, ag)) return 0
+      # Frontmatter that never closes has no body, only its summary to search.
+      if (nt && fm == 1) found = look(regex ? tolower(summary) : tolower(summary " "), summary, 1, 0)
+      if (nt && !found) return 0
+      # The newest matches an earlier page already showed are passed. The
+      # first one past the limit is not kept, but says that the list is cut,
+      # and nothing older needs to be read.
+      matched++
+      if (matched <= offset) return 0
+      if (limit > 0 && n >= limit) {
+        more = 1
+        return 1
+      }
+
+      n++
+      # The file name itself rather than a friendlier date and time, because it is
+      # what `read` takes: a line can be copied straight into it, and two entries
+      # from the same minute still come out different.
+      id[n] = stem
+      who[n] = proj
+      what[n] = summary
+      where[n] = shown
+      path[n] = file
+      return 0
+    }
+
+    # Said after every list that leaves older matches out, so in a terminal it
+    # is the line next to the prompt. The range is of the matches counted from
+    # the newest, the way `--offset` counts them.
+    function note() {
+      if (!more) return
+      # The rows first, also when both streams go into one pipe.
+      fflush()
+      printf "matches %d to %d, counted from the newest; --offset %d for older ones\n",
+          offset + 1, offset + n, offset + n > "/dev/stderr"
+    }
+
+    # A term in lower case, so that case is ignored, but with the character
+    # after a backslash kept, since `\S` is not `\s` in an awk that knows both.
+    function lowered(s,   out, i, c) {
+      if (!regex) return tolower(s)
+      out = ""
+      for (i = 1; i <= length(s); i++) {
+        c = substr(s, i, 1)
+        if (c == "\\" && i < length(s)) {
+          out = out c substr(s, i + 1, 1)
+          i++
+        } else out = out tolower(c)
+      }
+      return out
+    }
+
+    BEGIN {
+      # Lower case, so case is ignored. The longest fixed term says how much of
+      # one line to keep for a match that runs on into the next.
+      regex = !fixed
+      split(ENVIRON["AGENT_JOURNAL_TERMS"], given, "\n")
+      for (k = 1; (k in given); k++) {
+        if (given[k] == "") continue
+        term[++nt] = lowered(given[k])
+        if (length(term[nt]) > longest) longest = length(term[nt])
+      }
+      # The bytes that continue a UTF-8 character, which a cut must not split.
+      # Only an awk that counts bytes can split one. One that counts characters
+      # would read these numbers as characters of their own.
+      if (length("\303\251") == 2)
+        for (c = 128; c < 192; c++) cont = cont sprintf("%c", c)
+      project = ENVIRON["AGENT_JOURNAL_PROJECT"]
+      cwdf = ENVIRON["AGENT_JOURNAL_CWD"]
+      hostf = ENVIRON["AGENT_JOURNAL_HOST"]
+      userf = ENVIRON["AGENT_JOURNAL_USER"]
+      agentf = ENVIRON["AGENT_JOURNAL_AGENT"]
+      label = ENVIRON["AGENT_JOURNAL_LABEL"]
+      projectre = pattern(project, 0)
+      cwdre = pattern(cwdf, 1)
+      hostre = pattern(hostf, 0)
+      userre = pattern(userf, 0)
+      agentre = pattern(agentf, 0)
+      # Through the environment rather than -v, which would treat a backslash
+      # in a path as an escape.
+      split(ENVIRON["AGENT_JOURNAL_SKIP"], skipped, "\n")
+      for (k in skipped) skip[skipped[k]] = 1
+      while ((getline name) > 0) names[++count] = name
+      for (a = count; a >= 1; a--)
+        if (scan(names[a])) break
+
+      # The paths, oldest first. Nothing kept is an answer of its own, told
+      # apart by its status, and so is a list that is cut, since the caller
+      # prints the note after the entries.
+      if (full) {
+        if (n == 0) {
+          printf "no entry matches %s\n", label > "/dev/stderr"
+          exit 3
+        }
+        for (i = n; i >= 1; i--) print path[i]
+        exit more ? 4 : 0
+      }
+
+      if (!tty) {
+        for (i = n; i >= 1; i--) {
+          # A tab in either field would add a column. `write` refuses one in
+          # the project, but an entry written by hand is never checked.
+          proj = who[i]
+          gsub(/\t/, " ", proj)
+          text = what[i]
+          gsub(/\t/, " ", text)
+          if (nt)
+            printf "%s\t%s\t%s\t%s\n", id[i], proj, text, where[i]
+          else
+            printf "%s\t%s\t%s\n", id[i], proj, text
+        }
+        note()
+        exit
+      }
+
+      # Measured over the rows that will be printed, not over everything that
+      # matched: one long project name in January should not indent all of today.
+      for (i = 1; i <= n; i++)
+        if (length(who[i]) > width) width = length(who[i])
+
+      for (i = n; i >= 1; i--) {
+        pad = who[i]
+        while (length(pad) < width) pad = pad " "
+        text = what[i]
+        if (cols > 0) {
+          room = cols - (length(id[i]) + 2 + width + 2)
+          if (room > 4 && length(text) > room) text = substr(text, 1, room - 3) "…"
+        }
+        if (color)
+          printf "\033[2m%s\033[0m  \033[36m%s\033[0m  %s\n", id[i], pad, text
+        else
+          printf "%s  %s  %s\n", id[i], pad, text
+        if (nt && color && where[i] != "")
+          printf "    \033[2m%s\033[0m\n", where[i]
+        else if (nt && where[i] != "")
+          printf "    %s\n", where[i]
+      }
+      note()
+      exit
+    }
+  '
+}
+
+# The selection of `render`, with a directory named like an entry left out.
+# awk stops outright on a directory, which a glob for names cannot tell from a
+# file without a test per name on every run. So the test runs only once awk has
+# failed: a directory named like an entry is named and left out, and the list
+# is read again. Anything else that failed keeps its status, so it cannot pass
+# for a journal with nothing to show. For `read` with a period, status 3 says
+# that nothing was kept and status 4 that the list is cut, and both are answers
+# rather than failures.
+render_all() {
+  render "$@" && return 0
+  status=$?
+  case $status in 3 | 4) return "$status" ;; esac
+  skip=
+  for candidate in "$journal_dir"/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*.md/; do
+    [ -d "$candidate" ] || continue
+    candidate=${candidate%/}
+    printf '%s is a directory, not an entry\n' "$candidate" >&2
+    skip=$skip$candidate$newline
+  done
+  [ -n "$skip" ] || return "$status"
+  AGENT_JOURNAL_SKIP=$skip render "$@"
+}
+
+# The refusal for a `--since` or `--until` that is neither a day nor an
+# instant, with the reason when it was a local time the clocks skip.
+not_a_bound() {
+  if [ -n "${instant_skipped:-}" ]; then
+    printf 'no such local time: %s. The clocks skip it here; give it with an offset, such as %s+01:00\n' "$1" "$1" >&2
+  else
+    printf 'not a day or a time: %s. Use YYYY-MM-DD, today, 7d, or a time such as 2026-01-11T14:30:00+01:00\n' "$1" >&2
+  fi
+  exit 2
+}
+
+# Whether a word names a period that `--date` and `read` take: a year, a month,
+# a day, today or yesterday.
+is_period() {
+  case $1 in
+    today | yesterday) return 0 ;;
+    [0-9][0-9][0-9][0-9] | [0-9][0-9][0-9][0-9]-[0-9][0-9] | [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) return 0 ;;
+  esac
+  return 1
+}
+
+if [ "$cmd" = list ] || [ "$cmd" = read ]; then
+  # `read` with a period prints every entry in it, so the period is the same
+  # filter `--date` is. An id is anything else: a full one, or a prefix of one
+  # that is not a period, such as `2026-01-11T14`. Without an id, a period or a
+  # range given as a filter means the same. Nothing at all is refused rather
+  # than read as `latest`, so a pipe that found no ids prints nothing.
+  # Several ids are read one after the other, and a period among them would
+  # be a second answer to one call, so it is refused.
+  read_period=0
+  if [ "$cmd" = read ]; then
+    if [ "$argc" -eq 1 ] && is_period "$arg1"; then
+      [ -z "$date_filter" ] || {
+        printf 'give the period once: read %s, or read --date %s\n' "$arg1" "$date_filter" >&2
+        exit 2
+      }
+      date_filter=$arg1
+      read_period=1
+    elif [ "$argc" -eq 0 ]; then
+      [ -n "$date_filter$since$until" ] || usage
+      read_period=1
+    else
+      while IFS= read -r t_word; do
+        ! is_period "$t_word" || {
+          printf 'a period is read on its own, not with other ids: %s\n' "$t_word" >&2
+          exit 2
+        }
+      done <<EOF
+$terms
+EOF
+      # An id names its entry, so a filter could only hide it, or narrow the
+      # matches of a prefix without saying so.
+      if [ -n "$date_filter$since$until$project_filter$host_filter$user_filter$agent" ] ||
+        [ "$cwd_set" = 1 ] || [ "$limit_set" = 1 ] || [ "$all_set" = 1 ] || [ "$offset" != 0 ]; then
+        printf 'read with ids takes no filters; they work with read PERIOD and with list\n' >&2
+        exit 2
+      fi
+    fi
+  fi
+
+  # A period and a range are two ways to say the same thing, and honouring both
+  # at once would quietly return the intersection nobody asked for.
+  if [ -n "$date_filter" ] && { [ -n "$since" ] || [ -n "$until" ]; }; then
+    printf 'use --date or --since/--until, not both\n' >&2
+    exit 2
+  fi
+
+  # Every filter is in local days, and the entries are named in UTC, so each
+  # end becomes the id of the instant it stands for: the first second of the
+  # first day and the last second of the last. A day number is kept until then.
+  since_day=
+  until_day=
+  if [ -n "$date_filter" ]; then
+    case $date_filter in
+      [0-9][0-9][0-9][0-9])
+        to_decimal "$date_filter"
+        civil_to_days "$decimal" 1 1
+        since_day=$days
+        civil_to_days $((decimal + 1)) 1 1
+        until_day=$((days - 1))
+        ;;
+      [0-9][0-9][0-9][0-9]-[0-9][0-9])
+        to_decimal "${date_filter%-*}"
+        t_fy=$decimal
+        to_decimal "${date_filter#*-}"
+        if [ "$decimal" -ge 1 ] && [ "$decimal" -le 12 ]; then
+          month_bounds "$t_fy" "$decimal"
+          since_day=$month_first
+          until_day=$((month_next - 1))
+        fi
+        ;;
+      [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] | today)
+        resolve_day "$date_filter" && since_day=$day && until_day=$day
+        ;;
+      yesterday)
+        resolve_day 1d && since_day=$day && until_day=$day
+        ;;
+    esac
+    [ -n "$since_day" ] || {
+      printf 'not a period: %s. Use a year, a month or a day (2026, 2026-01, 2026-01-11), or today or yesterday\n' "$date_filter" >&2
+      [ "$cmd" = read ] ||
+        printf 'for one entry by its id, use: agent-journal read %s\n' "$date_filter" >&2
+      exit 2
+    }
+  fi
+  # A day or an instant. A day is the whole of it, an instant only that
+  # second, so `--until` with an instant includes the entry written at it.
+  since_epoch=
+  until_epoch=
+  if [ -n "$since" ]; then
+    if resolve_day "$since"; then
+      since_day=$day
+    elif resolve_instant "$since"; then
+      since_epoch=$epoch
+    else
+      not_a_bound "$since"
+    fi
+  fi
+  if [ -n "$until" ]; then
+    if resolve_day "$until"; then
+      until_day=$day
+    elif resolve_instant "$until"; then
+      until_epoch=$epoch
+    else
+      not_a_bound "$until"
+    fi
+  fi
+
+  # A day before 1970 is before every entry, so as a start it limits nothing,
+  # and as an end it leaves nothing: an id below every name.
+  if [ -n "$since_day" ] && [ "$since_day" -lt 0 ]; then
+    since_day=
+    since=
+  fi
+  if [ -n "$until_day" ] && [ "$until_day" -lt 0 ]; then
+    until_day=
+    until=0
+  fi
+  if [ -n "$since_epoch" ]; then
+    if [ "$since_epoch" -lt 0 ]; then
+      since=
+    else
+      format_id "$since_epoch"
+      since=$id
+    fi
+  fi
+  if [ -n "$until_epoch" ]; then
+    if [ "$until_epoch" -lt 0 ]; then
+      until=0
+    else
+      format_id "$until_epoch"
+      until=$id
+    fi
+  fi
+  if [ -n "$since_day" ]; then
+    local_midnight "$since_day" || {
+      printf 'cannot convert %s to UTC\n' "${since:-$date_filter}" >&2
+      exit 1
+    }
+    format_id "$midnight"
+    since=$id
+  fi
+  if [ -n "$until_day" ]; then
+    local_midnight $((until_day + 1)) || {
+      printf 'cannot convert %s to UTC\n' "${until:-$date_filter}" >&2
+      exit 1
+    }
+    format_id $((midnight - 1))
+    until=$id
+  fi
+
+  # Entries record `cwd` abbreviated, and a filter is compared against what is
+  # written rather than what is on disk. `--cwd .` therefore means here. A
+  # pattern names no directory, so it was not made absolute above, and one that
+  # is relative is taken from here as well.
+  cwd_filter=
+  if [ "$cwd_set" = 1 ]; then
+    case $cwd in
+      /* | '~' | '~/'*) ;;
+      *) cwd=$(pwd)/$cwd ;;
+    esac
+    cwd_filter=$(abbrev_home "$cwd")
+  fi
+
+  # `.` is the project of the directory this runs in, resolved exactly as the
+  # session-start hook resolves it, so a caller never repeats the git logic and
+  # risks a different answer. Not the project of `--cwd`, as for `write`: here
+  # that is a filter on what entries recorded, and it often names a worktree
+  # that has been removed since, which has no project to resolve. `read` with
+  # an id takes no filters, so it is left alone.
+  if [ "$project_filter" = . ] && { [ "$cmd" != read ] || [ "$read_period" = 1 ]; }; then
+    here=$(pwd)
+    resolve_project "$here"
+    [ -n "$project" ] || no_project_here "$here"
+    project_filter=$project
+  fi
+
+  # The options that say how to read the terms mean nothing without them, and
+  # a caller that passed one expects it to narrow the answer.
+  if [ "$cmd" = read ] && [ "$fixed" = 1 ]; then
+    printf '%s\n' '--fixed works with list' >&2
+    exit 2
+  fi
+  if [ "$cmd" = list ] && [ -z "$terms" ] && [ "$fixed" = 1 ]; then
+    printf '%s\n' '--fixed needs a term to look for' >&2
+    exit 2
+  fi
+
+
+  # A term that is not a regex would stop awk halfway through the journal with
+  # its own message, so each is tried on its own first, and the refusal says
+  # what to do instead.
+  if [ "$cmd" = list ] && [ "$fixed" = 0 ]; then
+    while IFS= read -r t_term; do
+      [ -n "$t_term" ] || continue
+      AGENT_JOURNAL_TERM=$t_term awk 'BEGIN { match("", ENVIRON["AGENT_JOURNAL_TERM"]) }' 2>/dev/null || {
+        printf 'not an extended regex: %s. Add --fixed to look for the text as it is\n' "$t_term" >&2
+        exit 2
+      }
+    done <<EOF
+$terms
+EOF
+  fi
+
+  layout_for 1
+
+  if [ ! -d "$journal_dir" ]; then
+    printf 'no journal at %s\n' "$journal_dir" >&2
+    exit 1
+  fi
+fi
+
+if [ "$cmd" = list ]; then
+  # The filenames are the instant each entry records, so the shell's own ordering
+  # is chronological. A period is checked on the names, before any file is
+  # opened, rather than by the glob: a local day spans two UTC dates and is no
+  # prefix of them.
+  #
+  # Starting from the shape of an entry name matters. A journal directory is a
+  # plain directory and often holds a README, which `*.md` would sweep up and
+  # which sorts after every timestamp there will ever be.
+  set -- "$journal_dir"/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*.md
+
+  # A glob only ever expands to names that exist, so the one case to rule out is
+  # that it matched nothing and was left as its own pattern. Testing that the
+  # first argument exists settles it, whatever it is: a directory named like an
+  # entry is left out further on. Filtering the whole list instead would be quadratic:
+  # each `set -- "$@" ...` copies every argument, which on a year of entries is
+  # seconds of work to learn what the shell already guaranteed.
+  #
+  # An empty journal and a filter that excluded everything both print nothing,
+  # and the difference between them is the difference between advice and noise:
+  # silence on the first run of a new install reads as something being broken.
+  if [ ! -e "$1" ]; then
+    printf 'no entries yet in %s\n' "$journal_dir" >&2
+    printf 'your agent writes them on its own, or write one with: agent-journal write\n' >&2
+    exit 0
+  fi
+
+  render_all "$@"
+  exit
+fi
+
+# ---------------------------------------------------------------- read
+
+# Whether a file is an entry, by the rule `list` applies: a name in the shape of
+# an entry, and frontmatter from the first line. `read` checks it so the two
+# commands agree on what is in the journal, and an ambiguous id never counts a
+# file that it then cannot show.
+is_entry() {
+  case ${1##*/} in
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*.md) ;;
+    *) return 1 ;;
+  esac
+  [ -f "$1" ] || return 1
+  first=
+  IFS= read -r first <"$1" || :
+  [ "${first%"$cr"}" = --- ]
+}
+
+
+# Entries in full, one per path on stdin, with the blank lines at the end of
+# each left out and one blank line between two, so several read as one text. A
+# file that cannot be read, which a sync can remove after it was found, is
+# named and makes the status 1, so a caller never takes a part for the whole.
+show_files() {
+  awk '
+    $0 == "" { next }
+    {
+      if (shown++) print ""
+      blanks = 0
+      while ((got = (getline line < $0)) > 0) {
+        if (line == "" || line == "\r") { blanks++; continue }
+        for (; blanks > 0; blanks--) print ""
+        print line
+      }
+      if (got < 0) {
+        printf "cannot read %s\n", $0 > "/dev/stderr"
+        failed = 1
+      }
+      close($0)
+    }
+    END { exit failed }
+  '
+}
+
+# The file of one id in `entry`: `latest`, a whole id, or a prefix that matches
+# one entry. Otherwise it says why on stderr and fails. A prefix that matches
+# several lists them, because printing a guess would be the wrong answer more
+# often than it would be right, and the next attempt can then be exact.
+resolve_id() {
+  t_id=$1
+  entry=
+  if [ "$t_id" = latest ]; then
+    for candidate in "$journal_dir"/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*.md; do
+      is_entry "$candidate" || continue
+      entry=$candidate
+    done
+    [ -n "$entry" ] || {
+      printf 'no entries in %s\n' "$journal_dir" >&2
+      return 1
+    }
+    return 0
+  fi
+
+  # Collected rather than counted, so the list an ambiguous id prints is the
+  # same set of files the count came from.
+  set --
+  for candidate in "$journal_dir"/"$t_id"*.md; do
+    is_entry "$candidate" || continue
+    set -- "$@" "$candidate"
+  done
+
+  if [ "$#" = 0 ]; then
+    printf 'no entry matches %s\n' "$t_id" >&2
+    return 1
+  fi
+  if [ "$#" -gt 1 ]; then
+    printf '%s matches %d entries:\n' "$t_id" "$#" >&2
+    terms=
+    limit=0
+    offset=0
+    # The matches go to stderr with the message, so stdout stays empty for a
+    # caller that expected an entry, and the layout follows stderr instead.
+    layout_for 2
+    render "$@" >&2
+    return 1
+  fi
+  entry=$1
+}
+
+if [ "$cmd" = read ]; then
+  # A period is printed whole unless a limit was given, since it was asked for
+  # by its bounds. `--limit N` keeps the N most recent, as it does for `list`.
+  if [ "$read_period" = 1 ]; then
+    [ "$limit_set" = 1 ] || limit=0
+    terms=
+    full=1
+    label=${arg1:-those filters}
+    set -- "$journal_dir"/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*.md
+    [ -e "$1" ] || {
+      printf 'no entry matches %s\n' "$label" >&2
+      exit 1
+    }
+    paths=$(render_all "$@")
+    status=$?
+    [ "$status" != 3 ] || exit 1
+    cut=0
+    if [ "$status" = 4 ]; then
+      cut=1
+    elif [ "$status" != 0 ]; then
+      exit "$status"
+    fi
+    printf '%s\n' "$paths" | show_files || exit 1
+    # Said after the entries, as `list` says it after its lines, so in a
+    # terminal it is next to the prompt.
+    if [ "$cut" = 1 ]; then
+      shown=$(printf '%s\n' "$paths" | wc -l)
+      shown=$((shown + 0))
+      printf 'matches %d to %d, counted from the newest; --offset %d for older ones\n' \
+        $((offset + 1)) $((offset + shown)) $((offset + shown)) >&2
+    fi
+    exit 0
+  fi
+
+  # Every id is looked up before anything is printed, so a failed one leaves
+  # stdout empty and names itself, and every other failure with it.
+  paths=
+  failed=0
+  while IFS= read -r t_word; do
+    [ -n "$t_word" ] || continue
+    if resolve_id "$t_word"; then
+      paths=$paths$entry$newline
+    else
+      failed=1
+    fi
+  done <<EOF
+$terms
+EOF
+  [ "$failed" = 0 ] || exit 1
+  printf '%s' "$paths" | show_files
+  exit
+fi
+
+# ---------------------------------------------------------------- sync
+
+# With `sync=git`, the journal folder is a git repository of its own: everything
+# in it is committed, and its branch is pushed when it has a remote. A folder
+# inside a larger repository is refused rather than shared: a push sends the
+# whole branch, so it would publish the person's other commits along with the
+# journal, and a commit on whatever they had checked out could disappear from
+# the folder at their next checkout.
+#
+# It prints one line, what it committed and what it pushed, and exits 0 when
+# both went as far as they could, 3 when the commit is made but the push failed,
+# and 1 for anything else. A push that fails is not lost: the next sync pushes
+# whatever the remote has not got yet.
+
+# Signing is off for these commits, since a signing key's passphrase would be
+# asked for by a dialog nobody is watching for.
+sync_git() {
+  git -c commit.gpgsign=false -C "$journal_dir" "$@"
+}
+
+# Why git failed, in one line: the ref it rejected and why, else its `error:`
+# or `fatal:` line, else its first line that is not just the remote's name.
+first_reason() {
+  printf '%s\n' "$1" | awk '
+    /^ ! \[/ && rejected == "" { sub(/^ ! /, ""); gsub(/[ \t]+/, " "); rejected = $0 }
+    /^(fatal|error): / && error == "" { sub(/^(fatal|error): */, ""); error = $0 }
+    NF && !/^To / && first == "" { first = $0 }
+    END { print (rejected != "" ? rejected : error != "" ? error : first) }
+  '
+}
+
+# The repository the journal folder is the root of, as its git dir in
+# `sync_gitdir`; fails with the reason when the folder is in none, or is only
+# a folder inside a larger one.
+sync_repo() {
+  [ -d "$journal_dir" ] || {
+    printf '%s does not exist\n' "$(abbrev_home "$journal_dir")" >&2
+    return 1
+  }
+  sync_top=$(sync_git rev-parse --show-toplevel 2>/dev/null) || {
+    printf '%s is not a git repository. agent-journal sync init makes it one\n' "$(abbrev_home "$journal_dir")" >&2
+    return 1
+  }
+  sync_here=$(cd "$journal_dir" && pwd -P) || return 1
+  [ "$sync_top" = "$sync_here" ] || {
+    printf '%s is inside the repository %s. sync needs the journal folder to be a repository of its own\n' \
+      "$(abbrev_home "$journal_dir")" "$(abbrev_home "$sync_top")" >&2
+    return 1
+  }
+  sync_gitdir=$(sync_git rev-parse --absolute-git-dir) || return 1
+}
+
+# One sync at a time per repository: two at once would race on git's index
+# lock. The lock is a symlink whose target is the holder's pid, made in one
+# step, so it never exists without saying whose it is. A sync that finds it
+# held waits, so an entry written during a push is still committed by the sync
+# that asked for it.
+#
+# A lock whose holder is gone, or that is older than any sync runs, is taken
+# over: renamed away, which only one waiter can do, and put back if what was
+# renamed turns out to be a newer holder's. Should two syncs still meet, git's
+# own index lock fails one of them, and the next sync commits what it left.
+sync_lock() {
+  sync_tries=0
+  while ! ln -s "$$" "$sync_lock" 2>/dev/null; do
+    sync_holder=$(readlink "$sync_lock" 2>/dev/null) || sync_holder=
+    if [ -n "$sync_holder" ] && {
+      ! kill -0 "$sync_holder" 2>/dev/null || [ -n "$(find "$sync_lock" -maxdepth 0 -mmin +10 2>/dev/null)" ]
+    }; then
+      if mv "$sync_lock" "$sync_lock.$$" 2>/dev/null; then
+        if [ "$(readlink "$sync_lock.$$" 2>/dev/null)" = "$sync_holder" ]; then
+          rm -f "$sync_lock.$$"
+        else
+          mv "$sync_lock.$$" "$sync_lock" 2>/dev/null || rm -f "$sync_lock.$$"
+        fi
+      fi
+      continue
+    fi
+    sync_tries=$((sync_tries + 1))
+    [ "$sync_tries" -le 60 ] || return 1
+    sleep 1
+  done
+  trap 'sync_unlock' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+}
+
+# Removed only while it is still this process's, so a lock taken over from it
+# is left to its new holder.
+sync_unlock() {
+  [ "$(readlink "$sync_lock" 2>/dev/null)" != "$$" ] || rm -f "$sync_lock"
+  trap - EXIT INT TERM
+}
+
+# Why the repository cannot take a commit now, or nothing: a merge, rebase,
+# cherry-pick, revert or bisect the person left open, whose middle a commit
+# would change, or a detached HEAD, whose commits leave the folder at the next
+# checkout of a branch.
+sync_blocked() {
+  if [ -d "$sync_gitdir/rebase-merge" ] || [ -d "$sync_gitdir/rebase-apply" ] ||
+    [ -f "$sync_gitdir/MERGE_HEAD" ] || [ -f "$sync_gitdir/CHERRY_PICK_HEAD" ] ||
+    [ -f "$sync_gitdir/REVERT_HEAD" ] || [ -f "$sync_gitdir/BISECT_LOG" ]; then
+    printf 'a merge, rebase or bisect is open'
+  elif ! sync_branch=$(sync_git symbolic-ref -q --short HEAD); then
+    printf 'HEAD is detached'
+  fi
+}
+
+# The commit's subject: one new entry is named by its id and its summary, which
+# is what `git log --oneline` is then worth reading for. Anything else is a
+# count.
+sync_message() {
+  sync_files=$(sync_git diff --cached --name-only)
+  sync_count=$(printf '%s\n' "$sync_files" | awk 'NF { n++ } END { print n + 0 }')
+  sync_added=$(sync_git diff --cached --name-only --diff-filter=A)
+  if [ "$sync_count" = 1 ] && [ "$sync_added" = "$sync_files" ] && is_entry "$journal_dir/$sync_files"; then
+    sync_summary=$(awk '
+      fm == 1 && sub(/^summary:[ \t]*/, "") { gsub(/^"|"$/, ""); print; exit }
+      $0 == "---" { if (fm) exit; fm = 1 }
+    ' "$journal_dir/$sync_files")
+    sync_id=${sync_files%.md}
+    sync_subject="journal: $sync_id${sync_summary:+ $sync_summary}"
+    sync_done="committed $sync_id"
+  elif [ "$sync_count" = 1 ]; then
+    sync_subject="journal: $sync_files"
+    sync_done="committed 1 file"
+  else
+    sync_subject="journal: $sync_count files"
+    sync_done="committed $sync_count files"
+  fi
+}
+
+sync_journal() {
+  [ "$cfg_sync" = git ] || {
+    printf 'sync is off\n'
+    return 0
+  }
+  sync_repo || return 1
+
+  # Nothing here may wait for a person: a sync runs from hooks that nobody is
+  # watching. A credential that is missing fails the push instead of asking,
+  # Git Credential Manager opens no window, and a rebase takes its messages as
+  # they are. ssh runs in batch mode, added to the person's own ssh command when
+  # that is ssh; a GIT_SSH program is theirs and left alone.
+  GIT_TERMINAL_PROMPT=0
+  GCM_INTERACTIVE=never
+  GIT_EDITOR=true
+  GIT_SEQUENCE_EDITOR=true
+  export GIT_TERMINAL_PROMPT GCM_INTERACTIVE GIT_EDITOR GIT_SEQUENCE_EDITOR
+  sync_ssh=${GIT_SSH_COMMAND:-$(sync_git config core.sshCommand 2>/dev/null)}
+  if [ -n "$sync_ssh" ] || [ -z "${GIT_SSH:-}" ]; then
+    case ${sync_ssh:-ssh} in
+      ssh | ssh\ * | */ssh | */ssh\ *)
+        GIT_SSH_COMMAND="${sync_ssh:-ssh} -o BatchMode=yes"
+        export GIT_SSH_COMMAND
+        ;;
+    esac
+  fi
+
+  sync_lock=$sync_gitdir/agent-journal-sync.lock
+  sync_lock || {
+    printf 'another sync has held %s for a minute\n' "$sync_lock" >&2
+    return 1
+  }
+
+  sync_status=0
+  sync_why=$(sync_blocked)
+  if [ -n "$sync_why" ]; then
+    printf '%s in %s, so nothing is committed until it is over\n' "$sync_why" "$(abbrev_home "$journal_dir")" >&2
+    sync_status=1
+  else
+    sync_branch=$(sync_git symbolic-ref -q --short HEAD)
+    sync_commit && sync_push || sync_status=$?
+  fi
+  sync_unlock
+  return "$sync_status"
+}
+
+sync_commit() {
+  sync_out=$(sync_git add -A 2>&1) || {
+    printf 'cannot stage the journal: %s\n' "$(first_reason "$sync_out")" >&2
+    return 1
+  }
+  if sync_git diff --cached --quiet 2>/dev/null; then
+    sync_done='nothing to commit'
+    return 0
+  fi
+  sync_message
+  sync_out=$(sync_git commit -q -m "$sync_subject" 2>&1) || {
+    printf 'cannot commit the journal: %s\n' "$(first_reason "$sync_out")" >&2
+    return 1
+  }
+}
+
+sync_push() {
+  # A repository with no commit yet has nothing to send.
+  sync_git rev-parse -q --verify HEAD >/dev/null || {
+    printf '%s\n' "$sync_done"
+    return 0
+  }
+  sync_upstream=$(sync_git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null) || sync_upstream=
+  if [ -n "$sync_upstream" ]; then
+    [ "$(sync_git rev-list --count '@{upstream}..HEAD' 2>/dev/null)" != 0 ] || {
+      printf '%s · up to date\n' "$sync_done"
+      return 0
+    }
+    sync_remote=$(sync_git config "branch.$sync_branch.remote")
+    sync_dest=$(sync_git config "branch.$sync_branch.merge")
+    sync_target=$sync_upstream
+  else
+    # A branch that was never pushed has no upstream yet. With an origin, the
+    # push that works sets it; without one, committing is all there is to do.
+    sync_git remote get-url origin >/dev/null 2>&1 || {
+      printf '%s · no remote\n' "$sync_done"
+      return 0
+    }
+    sync_remote=origin
+    sync_dest=refs/heads/$sync_branch
+    sync_target=origin/$sync_branch
+  fi
+
+  sync_try_push && return 0
+  sync_reason=$(first_reason "$sync_out")
+
+  # Usually the remote has commits this one has not: another machine pushed
+  # first, or the repository was made with a README. Those come in under this
+  # one's, which cannot conflict as long as each writes files of its own name,
+  # and the push goes again. They are named by remote and branch rather than by
+  # the upstream, which a branch whose first push was refused does not have yet.
+  # A rebase that stops is undone, since nobody is there to finish it; it can
+  # only be this one, as sync does not start while another is open.
+  if sync_git pull -q --rebase --autostash "$sync_remote" "$sync_dest" >/dev/null 2>&1; then
+    sync_try_push && return 0
+    sync_reason=$(first_reason "$sync_out")
+  elif [ -d "$sync_gitdir/rebase-merge" ] || [ -d "$sync_gitdir/rebase-apply" ]; then
+    sync_git rebase --abort >/dev/null 2>&1
+  fi
+  printf '%s · push failed: %s\n' "$sync_done" "$sync_reason"
+  return 3
+}
+
+sync_try_push() {
+  sync_out=$(sync_git push -q -u "$sync_remote" "HEAD:$sync_dest" 2>&1) || return 1
+  printf '%s · pushed to %s\n' "$sync_done" "$sync_target"
+}
+
+if [ "$cmd" = sync ]; then
+  case $arg1 in
+    '') [ "$argc" -eq 0 ] || usage ;;
+    init)
+      [ "$argc" -le 2 ] || usage
+      mkdir -p "$journal_dir" || exit 1
+      if ! sync_git rev-parse --git-dir >/dev/null 2>&1; then
+        sync_out=$(sync_git init -q 2>&1) || {
+          printf 'cannot make a repository: %s\n' "$(first_reason "$sync_out")" >&2
+          exit 1
+        }
+      fi
+      # The same check sync makes, before anything is changed, so a folder in a
+      # larger repository is not left with an origin added or sync turned on.
+      sync_repo || exit 1
+      if [ -n "$arg2" ]; then
+        sync_origin=$(sync_git remote get-url origin 2>/dev/null) || sync_origin=
+        if [ -z "$sync_origin" ]; then
+          sync_git remote add origin "$arg2" || exit 1
+        elif [ "$sync_origin" != "$arg2" ]; then
+          printf 'origin already points at %s\n' "$sync_origin" >&2
+          exit 1
+        fi
+      fi
+      write_config "$config_file" sync git || exit 1
+      cfg_sync=git
+      # Said once, here, because from now on it happens without asking, and with
+      # the remote named, since that is where the entries go.
+      sync_origin=$(sync_git remote get-url origin 2>/dev/null) || sync_origin=
+      if [ -n "$sync_origin" ]; then
+        printf 'Every file in %s is now committed after each write and pushed to %s. Entries describe your work, so keep that repository private.\n' \
+          "$(abbrev_home "$journal_dir")" "$sync_origin" >&2
+      else
+        printf 'Every file in %s is now committed after each write. It has no remote, so nothing is pushed until it has an origin.\n' \
+          "$(abbrev_home "$journal_dir")" >&2
+      fi
+      ;;
+    *) usage ;;
+  esac
+  sync_journal
+  exit
+fi
+
+# ---------------------------------------------------------------- write
+
+if [ "$cmd" = write ]; then
+  [ "$argc" -eq 0 ] || usage
+
+  # The clock is read once and that one instant is both the filename and the
+  # `date` field, which is the rule the instruction asks a model to follow by
+  # hand. Here it is the only way it can happen.
+  #
+  # A name is one second wide, so two entries written in the same second want the
+  # same one. Waiting for the next second keeps the filename the instant it
+  # records, which every date filter and `read` prefix depends on; a suffix would
+  # buy nothing and cost that.
+  tries=0
+  while :; do
+    now=$(date -u +%Y-%m-%dT%H:%M:%SZ) || exit 1
+    stem=$(printf '%s' "$now" | tr -d ':')
+    entry=$journal_dir/$stem.md
+
+    [ -e "$entry" ] || break
+
+    tries=$((tries + 1))
+    [ "$tries" -le 3 ] || {
+      printf 'an entry already exists for this second: %s\n' "$entry" >&2
+      exit 1
+    }
+    sleep 1
+  done
+
+  # A value that would end its field early or split the line is refused rather
+  # than escaped. The summary is quoted, so only a quote or a newline can break
+  # it; the others are bare, where a colon ends the key as well.
+  refuse_if_unquotable() {
+    case $2 in
+      *'"'* | *"$newline"*)
+        printf 'the %s cannot contain a quote or a newline\n' "$1" >&2
+        exit 2
+        ;;
+    esac
+    [ "$3" = bare ] || return 0
+    case $2 in
+      *:*)
+        printf 'the %s cannot contain a colon\n' "$1" >&2
+        exit 2
+        ;;
+      *"$tab"*)
+        # Not a problem for the entry, but `list` separates its columns with
+        # tabs down a pipe, and one inside a value would add a column.
+        printf 'the %s cannot contain a tab\n' "$1" >&2
+        exit 2
+        ;;
+    esac
+  }
+
+  # `.` asks for the project derived from `--cwd`, the one an entry is filed
+  # under when no project is given at all. Here `--cwd` is where the session is,
+  # not a filter. It takes the derived name as it is, so it is not checked like
+  # a name that was typed.
+  dot=0
+  if [ "$project_filter" = . ]; then
+    dot=1
+    project_filter=
+  fi
+
+  refuse_if_unquotable summary "$opt_summary" quoted
+  refuse_if_unquotable project "$project_filter" bare
+  refuse_if_unquotable 'session id' "$session_id" bare
+  refuse_if_unquotable agent "$agent" bare
+
+  resolve_project "$cwd"
+  resolve_machine
+  [ "$dot" = 0 ] || [ -n "$project" ] || no_project_here "$cwd"
+  # Derived from where the session is, unless it was named. The same flag filters
+  # the other commands, and here it says which project the entry belongs to.
+  [ -z "$project_filter" ] || project=$project_filter
+
+  mkdir -p "$journal_dir" || exit 1
+
+  summary=$opt_summary
+  body=$opt_body
+
+  # Anything piped in is the body. Always, and nothing else, so there is one
+  # rule to remember rather than a table of which field a pipe lands in.
+  #
+  # Not read at all when --body already gave one, which is what stops
+  # `--summary X --body Y` waiting on a pipe nobody is going to write to.
+  if [ "$body_set" = 0 ] && [ ! -t 0 ]; then
+    body=$(cat)
+  fi
+
+  while :; do
+    case $body in
+      "$newline"*) body=${body#"$newline"} ;;
+      *) break ;;
+    esac
+  done
+
+  # In a directory of its own, so the name can end in `.md` for the editor while
+  # the path stays unguessable. A shared /tmp is somebody else's to write in too.
+  draft_dir=$(mktemp -d "${TMPDIR:-/tmp}/agent-journal-XXXXXX") || exit 1
+  draft=$draft_dir/entry.md
+  {
+    printf -- '---\n'
+    printf 'date: %s\n' "$now"
+    [ -z "$project" ] || printf 'project: %s\n' "$project"
+    printf 'summary: "%s"\n' "$summary"
+    printf 'cwd: %s\n' "$(abbrev_home "$cwd")"
+    # Quoted, so a name such as `null`, `yes` or `12345` stays a name for a
+    # YAML reader.
+    [ -z "$host" ] || printf 'host: "%s"\n' "$host"
+    [ -z "$user" ] || printf 'user: "%s"\n' "$user"
+    [ -z "$agent" ] || printf 'agent: %s\n' "$agent"
+    [ -z "$session_id" ] || printf 'session_id: %s\n' "$session_id"
+    printf -- '---\n\n'
+  } > "$draft" || exit 1
+
+  if [ "$summary_set" = 1 ]; then
+    [ -z "$body" ] || printf '%s\n' "$body" >> "$draft"
+  else
+    # A terminal is only needed for the fallback to `vi`, which would fight for a
+    # screen it has not got. An editor the caller named is the caller's business
+    # and may well be a script.
+    if [ -z "${VISUAL:-}" ] && [ -z "${EDITOR:-}" ] && { [ ! -t 0 ] || [ ! -t 1 ]; }; then
+      printf 'no summary. Use --summary, or run write with no arguments to open an editor\n' >&2
+      rm -rf "$draft_dir"
+      exit 2
+    fi
+
+    # The same idiom INSTRUCTIONS.md uses: guidance in a comment that the reader
+    # strips, so the template is a valid entry and the note never survives it.
+    cat >> "$draft" <<'EOF'
+<!--
+Fill in the summary between the quotes above: one line, at most 200 characters,
+what happened and what it means rather than a topic.
+
+Everything below is the body: what was decided, what was rejected and why, what
+is still open. This comment goes away when you save.
+-->
+
+EOF
+
+    # A body that arrived on a pipe or a flag goes in before the editor opens,
+    # rather than being dropped for want of a summary to go with it.
+    [ -z "$body" ] || printf '%s\n' "$body" >> "$draft"
+
+    # Through a shell, so that `EDITOR="code -w"` works. An editor setting is a
+    # command line rather than a program name, and every other tool that opens
+    # one treats it that way.
+    sh -c "${VISUAL:-${EDITOR:-vi}} \"\$1\"" sh "$draft" || {
+      printf 'editor exited without saving, draft kept at %s\n' "$draft" >&2
+      exit 1
+    }
+
+    stripped=$draft.stripped
+    awk '
+      fences < 2 { print; if ($0 == "---") fences++; next }
+      comment { if (/-->/) comment = 0; next }
+      /^<!--/ { comment = 1; next }
+      # The blank lines the comment leaves behind are not the start of the body,
+      # which begins one line after the frontmatter however much room the note
+      # took up.
+      !started && /^[ \t]*$/ { next }
+      { if (!started) { started = 1; print "" } print }
+    ' "$draft" > "$stripped" && mv "$stripped" "$draft"
+  fi
+
+  summary_line=$(awk '
+    fm == 1 && sub(/^summary:[ \t]*/, "") { print; exit }
+    $0 == "---" { fm = 1 }
+  ' "$draft")
+
+  reject() {
+    printf '%s\n' "$1" >&2
+    printf 'draft kept at %s\n' "$draft" >&2
+    exit 1
+  }
+
+  case $summary_line in
+    '"'*'"') ;;
+    *) reject 'the summary must be wrapped in double quotes' ;;
+  esac
+
+  inner=${summary_line#\"}
+  inner=${inner%\"}
+
+  [ -n "$inner" ] || reject 'the summary is empty'
+  [ "${#inner}" -le 200 ] ||
+    reject "the summary is ${#inner} characters, and the limit is 200"
+
+  mv "$draft" "$entry" || exit 1
+  printf '%s\n' "$entry"
+  # The entry is written whatever the sync makes of it, so its line goes to
+  # stderr and its failure does not fail the write.
+  [ "$no_sync" = 1 ] || [ "$cfg_sync" != git ] || sync_journal >&2 || :
+  exit 0
+fi
+
+# ---------------------------------------------------------------- resolve
+
+# Everything the CLI works out for itself, as key=value lines. For debugging
+# and tests, and left out of the help: the commands that need these values call
+# the same functions rather than this command.
+if [ "$cmd" = resolve ]; then
+  [ "$argc" -eq 0 ] || usage
+  resolve_time || exit 1
+  printf '%s\n' "$time_text"
+  resolve_project "$cwd"
+  printf 'project=%s\n' "$project"
+  printf 'cwd=%s\n' "$(abbrev_home "$cwd")"
+  resolve_machine
+  printf 'host=%s\n' "$host"
+  printf 'user=%s\n' "$user"
+  printf 'journal_dir=%s\n' "$(abbrev_home "$journal_dir")"
+  exit 0
+fi
+
+[ "$cmd" = context ] || usage
+
+# ---------------------------------------------------------------- context
+
+# Without --recall, the rules a session is given for writing entries, in the
+# variant --tools picks. With it, RECALL.md: what a model that only reads the
+# journal is told, which carries the clock and the calendar, so that model never
+# works out a date itself.
+instructions=$root/templates/INSTRUCTIONS.md
+[ "$recall" = 0 ] || instructions=$root/templates/RECALL.md
+
+# A missing file means nothing to say, which is not worth failing a session over.
+# Print nothing and let the caller decide that means nothing to inject.
+[ -n "$root" ] || exit 0
+[ -f "$instructions" ] || exit 0
+
+# A reader given a wrong date answers wrongly, so a clock that cannot be read
+# fails the command rather than printing the text without it. The rules without
+# tools get the clock too, since a model that reads the files has to turn the
+# local days the user names into UTC names. There a clock that cannot be read
+# only leaves the block out: the rules for writing matter more than it.
+time=
+if [ "$recall" = 1 ]; then
+  resolve_time || exit 1
+  time=$time_text
+elif [ -z "$tools" ] && resolve_time 2>/dev/null; then
+  time=$time_text
+fi
+
+resolve_project "$cwd"
+resolve_machine
+
+# Each template is the whole of its text, placeholders and all, so that every
+# word a model is given lives in one file a person can read. This is the only
+# thing that renders them. The time is several lines, which `-v` cannot
+# carry in every awk, so it goes through the environment.
+AGENT_JOURNAL_TIME=$time awk \
+  -v journal_dir="$journal_dir" \
+  -v project="$project" \
+  -v cwd="$(abbrev_home "$cwd")" \
+  -v host="$host" \
+  -v user="$user" \
+  -v session_id="$session_id" \
+  -v agent="$agent" \
+  -v tools="$tools" '
+  BEGIN {
+    keys = "journal_dir project cwd host user session_id agent time tools"
+    n = split(keys, key, " ")
+    value["journal_dir"] = journal_dir
+    value["project"] = project
+    value["cwd"] = cwd
+    value["host"] = host
+    value["user"] = user
+    value["session_id"] = session_id
+    value["agent"] = agent
+    value["time"] = ENVIRON["AGENT_JOURNAL_TIME"]
+    value["tools"] = tools
+
+    # In a gsub replacement `&` means the matched text and `\` escapes, so a
+    # value containing either would substitute itself back in mangled.
+    for (i = 1; i <= n; i++) gsub(/[\\&]/, "\\\\&", value[key[i]])
+  }
+
+  # The editing note the template carries for its human readers is not part of
+  # what the session is told.
+  NR == 1 && /^<!--/ { comment = 1 }
+  comment { if (/-->/) comment = 0; next }
+  # One block per variant, so the two share every line outside them. A block
+  # for the other variant is left out, markers and all.
+  /^<!-- with tools -->$/ { block = "with"; gap = 1; next }
+  /^<!-- without tools -->$/ { block = "without"; gap = 1; next }
+  /^<!-- end -->$/ { block = ""; gap = 1; next }
+  block == "with" && tools == "" { next }
+  block == "without" && tools != "" { next }
+  # The blank lines the comment left behind are not the start of the text.
+  !started && /^[ \t]*$/ { next }
+  # A marker can stand in a paragraph of its own, and the blank line on each
+  # side of it would then be two where the text has one.
+  gap && blank && /^[ \t]*$/ { next }
+
+  {
+    started = 1
+    gap = 0
+    blank = $0 ~ /^[ \t]*$/
+    line = $0
+    for (i = 1; i <= n; i++) {
+      placeholder = "__" toupper(key[i]) "__"
+      if (!index(line, placeholder)) continue
+      # A value the adapter could not supply takes its whole line with it,
+      # rather than leaving a label with nothing after it.
+      if (value[key[i]] == "") next
+      gsub(placeholder, value[key[i]], line)
+    }
+    print line
+  }
+' "$instructions"
+

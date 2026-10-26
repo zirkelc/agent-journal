@@ -174,9 +174,11 @@ jobs:
       - name: Check that shipped changes have a new version
         run: |
           # What an installed copy runs. An install copies only the plugin folder,
-          # and the Claude Code plugin's tests and README sit in it but are never
-          # loaded. The shared core at the root is listed too, for the CLI install.
-          shipped='bin claude-code codex lib templates'
+          # and the Claude Code plugin's tests and the READMEs sit in it but are
+          # never loaded. Pi, too, takes an update only when the npm version
+          # changes. The shared core at the root is listed too, for the CLI
+          # install.
+          shipped='bin claude-code codex lib pi templates'
           manifest=claude-code/.claude-plugin/plugin.json
           version_at() { git show "$1:$manifest" | jq -r .version; }
 
@@ -192,7 +194,7 @@ jobs:
           fi
 
           # shellcheck disable=SC2086
-          changed=$(git diff --name-only "$since" HEAD -- $shipped ':(exclude)claude-code/tests' ':(exclude)claude-code/*.md')
+          changed=$(git diff --name-only "$since" HEAD -- $shipped ':(exclude)claude-code/tests' ':(exclude)claude-code/*.md' ':(exclude)pi/*.md')
           [ -n "$changed" ] || exit 0
           if [ "$GITHUB_REF" != refs/heads/main ] && [ "$head" != "$base" ] &&
             [ "$(printf '%s\n%s\n' "$base" "$head" | sort -V | tail -1)" = "$head" ]; then
@@ -201,5 +203,5 @@ jobs:
           fi
           echo "These shipped files changed $what:"
           echo "$changed"
-          echo 'Raise the version in claude-code/.claude-plugin/plugin.json, codex/.codex-plugin/plugin.json and package.json.'
+          echo 'Raise the version in claude-code/.claude-plugin/plugin.json, codex/.codex-plugin/plugin.json, pi/package.json and package.json.'
           exit 1
