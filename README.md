@@ -46,15 +46,16 @@ Each journal entry is a new markdown file. The filename is the current UTC times
 
 The file starts with frontmatter, so a search across many files can match single fields. The body describes what happened:
 
+<!-- prettier-ignore -->
 ```markdown
 ---
 date: 2026-10-07T14:20:00Z
 project: acme-dashboard
-summary: 'Export timed out because the CSV was built on the main thread. Moved it to a worker.'
+summary: "Export timed out because the CSV was built on the main thread. Moved it to a worker."
 cwd: ~/Developer/acme-dashboard
-host: 'macbook'
-user: 'chris'
-agent: claude/opus-5-5
+host: "macbook"
+user: "chris"
+agent: "claude/opus-5-5"
 session_id: 743d02a3-22f3-4016-b13e-dd448ad58daf
 ---
 
