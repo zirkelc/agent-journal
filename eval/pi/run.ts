@@ -21,16 +21,18 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
-import { delimiter, dirname, join } from 'node:path';
+import { basename, delimiter, dirname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { type Case, fill, loadCases, materialize, type Placed } from '../dataset.ts';
-import { grade, type Session } from '../grade.ts';
+import { grade, ID, type Session } from '../grade.ts';
 
 /**
  * Time zones east of UTC, so that a local day starts on the UTC date before
@@ -284,10 +286,18 @@ async function runOne(test: Case, mode: Mode, repeat: number, model: string): Pr
     }
   }
 
+  const stray = strayEntries(run, toolCalls);
+  // A file outside the folder of the session would be found by the next session, so it moves in, as evidence.
+  for (const path of stray.filter((item) => !item.startsWith(`${run.base}/`))) {
+    mkdirSync(join(run.base, 'stray'), { recursive: true });
+    renameSync(path, join(run.base, 'stray', basename(path)));
+  }
+
   const modelId = model.split('/').at(-1)!;
   const session: Session = {
     answer,
     written,
+    stray,
     start,
     end,
     expected: {
@@ -316,8 +326,54 @@ async function runOne(test: Case, mode: Mode, repeat: number, model: string): Pr
     durationMs: end.getTime() - start.getTime(),
     ...(error ? { error } : {}),
   };
+  /**
+   * A session that passed every check needs no look later, and its folder
+   * holds a copy of the whole journal. A session with no scored check proves
+   * nothing, so it keeps its folder too.
+   */
+  const isClean = record.checks.every((check) => check.isPassed);
+  const isScored = record.checks.some((check) => check.isScored !== false);
+  if (!error && isClean && isScored) {
+    await rm(run.base, { recursive: true, force: true });
+    return record;
+  }
   writeFileSync(join(run.base, 'events.jsonl'), pi.events.map((event) => JSON.stringify(event)).join('\n'));
   return { ...record, ...({ workdir: run.base } as object) };
+}
+
+/**
+ * The entry files that a session wrote outside the journal folder. The files
+ * on disk show every such entry in the folder of the session, however it was
+ * written. A write or edit tool can also put one outside that folder, which
+ * only its path shows: the tools read `~` as the home of the session and drop
+ * a leading `@`.
+ */
+function strayEntries(
+  run: { base: string; home: string; cwd: string; journalDir: string },
+  toolCalls: Array<ToolCall>,
+) {
+  const found = new Set<string>();
+  const walk = (dir: string): void => {
+    for (const item of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, item.name);
+      if (item.isDirectory()) {
+        if (path !== run.journalDir) walk(path);
+      } else if (ID.test(item.name)) {
+        found.add(path);
+      }
+    }
+  };
+  walk(run.base);
+  for (const call of toolCalls) {
+    if (call.isError || !['write', 'edit'].includes(call.name)) continue;
+    const raw = (call.args as { path?: unknown } | undefined)?.path;
+    if (typeof raw !== 'string') continue;
+    const path = raw.replace(/^@/, '').replace(/^~(?=$|\/)/, run.home);
+    const absolute = resolve(run.cwd, path);
+    if (ID.test(basename(absolute)) && dirname(absolute) !== run.journalDir && existsSync(absolute))
+      found.add(absolute);
+  }
+  return [...found].sort();
 }
 
 /** Runs the jobs with at most `limit` at a time. */

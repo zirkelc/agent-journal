@@ -16,6 +16,8 @@ export type Session = {
   answer: string;
   /** The entry files that the session wrote: the file name and the text. */
   written: Array<{ name: string; text: string }>;
+  /** The paths of entry files that the session wrote outside the journal folder. */
+  stray: Array<string>;
   /** When the session started and ended. */
   start: Date;
   end: Date;
@@ -53,7 +55,8 @@ export function frontmatter(text: string): Record<string, string> {
   return fields;
 }
 
-const ID = /^(\d{4}-\d{2}-\d{2})T(\d{2})(\d{2})(\d{2})Z\.md$/;
+/** The file name of an entry: its UTC instant. */
+export const ID = /^(\d{4}-\d{2}-\d{2})T(\d{2})(\d{2})(\d{2})Z\.md$/;
 
 function recallChecks(test: Case, session: Session, placed: Array<Placed>): Array<Check> {
   const { answer } = session;
@@ -156,6 +159,17 @@ export function grade(test: Case, session: Session, placed: Array<Placed>): { sc
       detail: String(session.written.length),
     });
   }
+  /**
+   * An entry in another folder is lost to the journal. In a write case it is
+   * a failure, also where no entry is wanted. In a recall case it says nothing
+   * about the recall, so it has no score, as an entry in the journal has none.
+   */
+  checks.push({
+    name: 'writes entries only into the journal folder',
+    isPassed: session.stray.length === 0,
+    isScored: test.kind === 'write',
+    detail: session.stray.join(', '),
+  });
   const scored = checks.filter((check) => check.isScored !== false);
   const passed = scored.filter((check) => check.isPassed).length;
   return { score: scored.length === 0 ? 0 : passed / scored.length, checks };
