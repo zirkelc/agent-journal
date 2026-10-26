@@ -43,7 +43,7 @@ const BUILT_IN = ['read', 'bash', 'edit', 'write'];
  * tools are called as Pi calls them, and `exec` runs the real CLI of the
  * package, with the fixture's home, so nothing reads the machine's own config.
  */
-function pi(store: Fixture) {
+function pi(store: Fixture, options: { stopped?: (args: Array<string>) => boolean } = {}) {
   const handlers = new Map<string, Array<Handler>>();
   const tools = new Map<string, Tool>();
   let active = [...BUILT_IN];
@@ -59,15 +59,18 @@ function pi(store: Fixture) {
     setActiveTools: (names: Array<string>) => {
       active = [...names];
     },
-    exec: (command: string, args: Array<string>, options: { cwd?: string; timeout?: number } = {}) =>
+    exec: (command: string, args: Array<string>, execOptions: { cwd?: string; timeout?: number } = {}) =>
       new Promise<ExecResult>((done) => {
+        /** As Pi ends a run at its timeout: the signal leaves no exit code, and Pi reports code 0. */
+        if (options.stopped?.(args)) return done({ stdout: '', stderr: '', code: 0, killed: true });
         execFile(
           command,
           args,
-          { cwd: options.cwd, timeout: options.timeout, env: baseEnv(store, GIT_IDENTITY), encoding: 'utf8' },
+          { cwd: execOptions.cwd, timeout: execOptions.timeout, env: baseEnv(store, GIT_IDENTITY), encoding: 'utf8' },
           (error, stdout, stderr) => {
-            const code = error ? (typeof error.code === 'number' ? error.code : 1) : 0;
-            done({ stdout, stderr, code, killed: Boolean(error?.killed) });
+            const killed = Boolean(error?.killed);
+            const code = !error || killed ? 0 : typeof error.code === 'number' ? error.code : 1;
+            done({ stdout, stderr, code, killed });
           },
         );
       }),
@@ -96,7 +99,16 @@ function pi(store: Fixture) {
     return result.content.map((part: { text: string }) => part.text).join('');
   }
 
-  return { emit, call, ctx, setStatus, tools, active: () => active };
+  return {
+    emit,
+    call,
+    ctx,
+    setStatus,
+    tools,
+    active: () => active,
+    /** As `--tools` or another extension sets them before the session starts. */
+    setActive: (names: Array<string>) => api.setActiveTools(names),
+  };
 }
 
 /** The event of a run on Pi 1.0 and later, which builds the system prompt from sections. */
@@ -161,6 +173,19 @@ describe('the rules', () => {
     // Assert
     expect(result.systemPrompt.startsWith('base prompt\n\n')).toBe(true);
     expect(result.systemPrompt).toContain(`\`${TOOL_WRITE}\` tool`);
+  });
+
+  test(`should add the rules at the end of the system prompt when Pi gives no options at all`, async () => {
+    // Arrange
+    const store = fixture();
+    const host = pi(store);
+
+    // Act
+    await host.emit('session_start', { reason: 'startup' });
+    const result = await host.emit('before_agent_start', { systemPrompt: 'base prompt' });
+
+    // Assert
+    expect(result.systemPrompt.startsWith('base prompt\n\n')).toBe(true);
   });
 
   test(`should give no rules and no tools to a session without a UI, such as a subagent in print mode`, async () => {
@@ -297,6 +322,19 @@ describe('the tools', () => {
 
     // Assert
     expect(rows(answer).map((row) => row.id)).toEqual(['2026-10-10T090000Z']);
+  });
+
+  test(`should fail a list that the timeout stopped, rather than give its part as the answer`, async () => {
+    // Arrange
+    const store = fixture();
+    seed(store, [{ stem: '2026-10-10T090000Z', project: 'demo', summary: 'One.' }]);
+    const host = pi(store, { stopped: (args) => args[0] === 'list' });
+
+    // Act
+    const result = host.call(TOOL_LIST, {});
+
+    // Assert
+    await expect(result).rejects.toThrow();
   });
 
   test(`should refuse a term that the CLI would read as an option`, async () => {
@@ -452,6 +490,26 @@ describe('the tools', () => {
     expect([...answer.matchAll(/^summary: "(.+)"$/gm)].map((match) => match[1])).toEqual(['First.', 'Second.']);
   });
 
+  test(`should page back through a period with the offset that its note names`, async () => {
+    // Arrange
+    const store = fixture();
+    seed(store, [
+      { stem: '2026-10-10T120000Z', project: 'demo', summary: 'First.' },
+      { stem: '2026-10-11T120000Z', project: 'demo', summary: 'Second.' },
+    ]);
+    const host = pi(store);
+    const summaries = (answer: string) => [...answer.matchAll(/^summary: "(.+)"$/gm)].map((match) => match[1]);
+
+    // Act
+    const newest = await host.call(TOOL_READ, { which: ['2026-10'], limit: 1 });
+    const older = await host.call(TOOL_READ, { which: ['2026-10'], limit: 1, offset: 1 });
+
+    // Assert
+    expect(summaries(newest)).toEqual(['Second.']);
+    expect(newest).toContain('call again with offset 1 for older ones');
+    expect(summaries(older)).toEqual(['First.']);
+  });
+
   test(`should give the summaries of a period that is too long to read whole`, async () => {
     // Arrange
     const store = fixture();
@@ -541,6 +599,23 @@ describe('without the tools', () => {
     expect(rules).not.toContain(TOOL_WRITE);
   });
 
+  test(`should give the rules for files when the journal tools are not active, as with --tools read,bash`, async () => {
+    // Arrange
+    const store = fixture();
+    const host = pi(store);
+    host.setActive(['read', 'bash']);
+    const event = runStart();
+
+    // Act
+    await host.emit('session_start', { reason: 'startup' });
+    await host.emit('before_agent_start', event);
+
+    // Assert
+    const rules = event.systemPromptOptions.sections[SECTION]!;
+    expect(rules).toContain('date -u');
+    expect(rules).not.toContain(TOOL_WRITE);
+  });
+
   test(`should keep the tools for any other value`, () => {
     // Arrange
     vi.stubEnv(TOOLS_ENV, 'on');
@@ -619,6 +694,20 @@ describe('the end of the session', () => {
     const [key, text] = host.setStatus.mock.calls.at(-1)!;
     expect(key).toBe('agent-journal');
     expect(text).toMatch(/^journal sync failed: committed 2026-10-11T100000Z · push failed: .+$/);
+  });
+
+  test(`should show a sync that the timeout stopped in the footer`, async () => {
+    // Arrange
+    const store = fixture();
+    synced(store);
+    const host = pi(store, { stopped: (args) => args[0] === 'sync' });
+    await host.emit('session_start', { reason: 'startup' });
+
+    // Act
+    await host.emit('session_shutdown', { reason: 'quit' });
+
+    // Assert
+    expect(host.setStatus.mock.calls.at(-1)).toEqual(['agent-journal', 'journal sync failed: did not finish']);
   });
 
   test(`should not sync when sync is off`, async () => {

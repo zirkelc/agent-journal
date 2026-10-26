@@ -32,7 +32,7 @@ The model gives only the summary and the body. `journal_write` sets the other fi
 
 `journal_list` takes the same filters as [`aj list`](https://github.com/zirkelc/agent-journal/blob/main/docs/cli.md#aj-list): `date`, `since`, `until`, `project`, `limit` and `offset`. Each search term is an extended regex that ignores case, and an entry must match every term. `fixed` reads the terms as plain text. The tool gives 50 entries when the model does not set `limit`, and 200 at most. When the limit leaves older matches out, the last line says which `offset` gives them. With `by` (`project`, `date`, `host`, `user` or `agent`), it lists no entries but counts every match for each value of that field, with a total, as `aj list --by` does. It then takes no `limit` or `offset`.
 
-`journal_read` takes `latest`, IDs, or one period (`today`, `yesterday`, `2026`, `2026-10` or `2026-10-22`), as [`aj read`](https://github.com/zirkelc/agent-journal/blob/main/docs/cli.md#aj-read) does. For a period, it also takes `project` and `limit`. A tool result holds at most 40,000 characters. When the entries of a period are longer, `journal_read` gives their summaries instead, and the model reads the ones it needs by ID.
+`journal_read` takes `latest`, IDs, or one period (`today`, `yesterday`, `2026`, `2026-10` or `2026-10-22`), as [`aj read`](https://github.com/zirkelc/agent-journal/blob/main/docs/cli.md#aj-read) does. For a period, it also takes `project`, `limit` and `offset`, and the last line names the `offset` that gives the older entries. A tool result holds at most 40,000 characters. When the entries of a period are longer, `journal_read` gives their summaries instead, and the model reads the ones it needs by ID.
 
 A result longer than 40,000 characters is cut, with a note that tells the model to narrow the filters.
 
@@ -44,7 +44,7 @@ To give the model no journal tools, start Pi with `AGENT_JOURNAL_TOOLS=off` (`0`
 AGENT_JOURNAL_TOOLS=off pi
 ```
 
-The model then writes each entry as a file with its own `write` tool and reads the journal with `bash` and `read`, as in Claude Code and Codex. The rules for that way name the session ID and the agent, for the model to copy into the entry. The git sync at the end of the session is the same in both ways. The [eval](../eval/README.md) compares the two ways.
+The model then writes each entry as a file with its own `write` tool and reads the journal with `bash` and `read`, as in Claude Code and Codex. The rules for that way name the session ID and the agent, for the model to copy into the entry. A session in which the journal tools are not active, for example one started with `--tools read,bash`, gets the same rules, so the model is never told to use tools that it cannot call. The git sync at the end of the session is the same in both ways. The [eval](../eval/README.md) compares the two ways.
 
 ## Permissions
 

@@ -187,6 +187,9 @@ export default function agentJournal(pi: ExtensionAPI) {
   const cli = (args: Array<string>, cwd: string, timeout: number): Promise<ExecResult | null> =>
     pi.exec(CLI, args, { cwd, timeout }).catch(() => null);
 
+  /** Pi ends a run at its timeout with a signal, which leaves no exit code, and reports it as code 0. */
+  const isDone = (run: ExecResult | null): run is ExecResult => run !== null && !run.killed && run.code === 0;
+
   /** The agent and its model, as an entry records them. */
   const agentOf = (ctx: ExtensionContext): string => (ctx.model ? `pi/${ctx.model.id}` : 'pi');
 
@@ -197,6 +200,7 @@ export default function agentJournal(pi: ExtensionAPI) {
   async function runTool(args: Array<string>, ctx: ExtensionContext, allowed: Array<number> = []): Promise<ExecResult> {
     const run = await cli(args, ctx.cwd, READ_TIMEOUT_MS);
     if (!run) throw new Error('agent-journal did not run');
+    if (run.killed) throw new Error('agent-journal did not finish in time');
     if (run.code !== 0 && !allowed.includes(run.code)) {
       throw new Error(firstLine(run.stderr) || `agent-journal exited with ${run.code}`);
     }
@@ -205,7 +209,7 @@ export default function agentJournal(pi: ExtensionAPI) {
 
   function readConfig(cwd: string): Promise<JournalConfig> {
     config ??= cli(['config'], cwd, READ_TIMEOUT_MS).then((run) => {
-      if (!run || run.code !== 0) {
+      if (!isDone(run)) {
         /** Try again next time. */
         config = null;
         return { journalDir: null, isSyncOn: false };
@@ -221,7 +225,7 @@ export default function agentJournal(pi: ExtensionAPI) {
   /** Shows a failed sync in the footer, and removes it after a sync that did not fail. */
   function showSync(run: ExecResult | null): void {
     if (!ui) return;
-    if (run && run.code === 0) return ui.setStatus(STATUS_KEY, undefined);
+    if (run && !run.killed && run.code === 0) return ui.setStatus(STATUS_KEY, undefined);
     const reason = !run
       ? 'did not run'
       : run.killed
@@ -344,6 +348,12 @@ export default function agentJournal(pi: ExtensionAPI) {
               'For a period: only the most recent entries, this many. Without it, a period gives all its entries.',
           }),
         ),
+        offset: Type.Optional(
+          Type.Integer({
+            minimum: 0,
+            description: 'For a period: skip this many of the most recent entries first, for the next page.',
+          }),
+        ),
       }),
       annotations: { readOnlyHint: true, openWorldHint: false },
       async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -351,6 +361,7 @@ export default function agentJournal(pi: ExtensionAPI) {
         const project = params.project?.trim();
         if (project) args.push('--project', project);
         if (params.limit) args.push('--limit', String(params.limit));
+        if (params.offset) args.push('--offset', String(params.offset));
         /** Exit 1 means that nothing matches, which is an answer. */
         const run = await runTool(args, ctx, [1]);
         if (run.code === 1) return textResult(`No entries match. ${firstLine(run.stderr)}`.trim());
@@ -385,15 +396,18 @@ export default function agentJournal(pi: ExtensionAPI) {
       pi.setActiveTools(pi.getActiveTools().filter((name) => !name.startsWith(TOOL_PREFIX)));
       return;
     }
+    /** The rules for the tools only when the session can call them: `--tools` or another extension can leave them out. */
+    const active = pi.getActiveTools();
+    const canCall = hasTools && [TOOL_WRITE, TOOL_LIST, TOOL_READ].every((name) => active.includes(name));
     const args = ['context', '--cwd', ctx.cwd];
-    if (hasTools) args.push('--tools', TOOL_PREFIX);
+    if (canCall) args.push('--tools', TOOL_PREFIX);
     else {
       const sessionId = ctx.sessionManager.getSessionId();
       if (sessionId) args.push('--session-id', sessionId);
       args.push('--agent', agentOf(ctx));
     }
     const run = await cli(args, ctx.cwd, READ_TIMEOUT_MS);
-    const made = run && run.code === 0 ? run.stdout.trim() : '';
+    const made = isDone(run) ? run.stdout.trim() : '';
     rules = made === '' ? null : made;
   });
 
@@ -405,8 +419,8 @@ export default function agentJournal(pi: ExtensionAPI) {
   pi.on('before_agent_start', (event) => {
     if (!rules) return;
     const sections: Record<string, string> | undefined = (
-      event.systemPromptOptions as { sections?: Record<string, string> }
-    ).sections;
+      event.systemPromptOptions as { sections?: Record<string, string> } | undefined
+    )?.sections;
     if (sections) {
       sections[SECTION] = rules;
       return;
