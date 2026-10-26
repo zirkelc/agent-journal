@@ -36,8 +36,8 @@ import { grade, ID, type Session } from '../grade.ts';
 
 /**
  * Time zones east of UTC, so that a local day starts on the UTC date before
- * it. That is what the cases about yesterday test. Two entries of today are at
- * 01:10, and the last entry is 20 minutes before the run, so the run takes the
+ * it. That is what the cases about yesterday test. An entry of today is at
+ * 00:30, and the last entry is 20 minutes before the run, so the run takes the
  * first zone where it is now between 03:00 and 22:59. With three zones, that
  * is one at every hour of the day, and the eval can run at any time, also on CI.
  */

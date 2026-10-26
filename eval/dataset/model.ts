@@ -102,6 +102,7 @@ export function problems(slot: Slot, item: Content, at: string): Array<string> {
   const found: Array<string> = [];
   if (item.summary.includes('\n')) found.push(`${at}: the summary has more than one line.`);
   if (item.summary.length > 200) found.push(`${at}: the summary has ${item.summary.length} characters, more than 200.`);
+  if (item.summary.includes('"')) found.push(`${at}: the summary has a double quote; use single quotes instead.`);
   const sentences = sentenceCount(item.body);
   if (sentences < slot.sentences * 0.6 || sentences > slot.sentences * 1.6) {
     found.push(`${at}: the body has ${sentences} sentences, but the slot asks for about ${slot.sentences}.`);

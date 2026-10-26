@@ -88,7 +88,8 @@ const KEYS: Array<Entry> = [
   {
     key: 'TRAP',
     day: 0,
-    time: '01:10',
+    // Before 01:00, so it is on yesterday's UTC date in every zone of the runner, also at UTC+1 in winter.
+    time: '00:30',
     project: 'nebula',
     dir: 'Developer/nebula',
     agent: CLAUDE,
@@ -281,7 +282,7 @@ const OLD_KEYS: Array<Entry> = [
   // The login of acme-dashboard over three years.
   {
     key: 'A1',
-    day: -1010,
+    day: -1_010,
     time: '11:20',
     project: 'acme-dashboard',
     dir: 'Developer/acme-dashboard',
@@ -434,7 +435,7 @@ export const RULES: Array<Rule> = [
   {
     pattern: /\bjwt|json web token/i,
     words: 'JWT, JSON web tokens',
-    isAllowed: (slot) => slot.project === 'acme-dashboard' && slot.day >= -1010,
+    isAllowed: (slot) => slot.project === 'acme-dashboard' && slot.day >= -1_010,
     why: 'acme-dashboard switched to JWT on day -1010, and no project used JWT before.',
   },
   {
@@ -509,7 +510,7 @@ export const PROJECTS: Array<Project> = [
     name: 'nebula',
     dir: 'Developer/nebula',
     weight: 6,
-    from: -1095,
+    from: -1_095,
     to: -2,
     branches: ['ingest-batching', 'search-v2', 'audit-export', 'rate-limits', 'schema-registry', 'loader-retry'],
   },
@@ -518,18 +519,18 @@ export const PROJECTS: Array<Project> = [
     name: 'acme-dashboard',
     dir: 'Developer/acme-dashboard',
     weight: 3,
-    from: -1095,
+    from: -1_095,
     to: -2,
     branches: ['new-charts', 'table-v3', 'onboarding'],
   },
   { project: 'billing-api', name: 'billing-api', dir: 'Developer/billing-api', weight: 2, from: -900, to: -2 },
   { project: 'agent-journal', name: 'agent-journal', dir: 'Developer/agent-journal', weight: 2, from: -220, to: -2 },
   { project: 'spellbee', name: 'spellbee', dir: 'Developer/spellbee', weight: 2, from: -819, to: -151 },
-  { project: 'homelab', name: 'homelab', dir: 'homelab', weight: 1, from: -1050, to: -2 },
+  { project: 'homelab', name: 'homelab', dir: 'homelab', weight: 1, from: -1_050, to: -2 },
   { project: 'chunkdown', name: 'chunkdown', dir: 'Developer/oss/chunkdown', weight: 1, from: -520, to: -2 },
   { project: 'ai-retry', name: 'ai-retry', dir: 'Developer/oss/ai-retry', weight: 1, from: -330, to: -2 },
-  { project: 'blog', name: 'blog', dir: 'Developer/blog', weight: 1, from: -1095, to: -380 },
-  { name: 'dotfiles', dir: 'dotfiles', weight: 1, from: -1095, to: -2 },
+  { project: 'blog', name: 'blog', dir: 'Developer/blog', weight: 1, from: -1_095, to: -380 },
+  { name: 'dotfiles', dir: 'dotfiles', weight: 1, from: -1_095, to: -2 },
 ];
 
 /** Entries per work day, by how long ago the day is: the use of the journal grows. */
@@ -579,7 +580,7 @@ export function buildSlots(): Array<Slot> {
   }
 
   const made: Array<Slot> = [];
-  for (let day = -1095; day <= -2; day++) {
+  for (let day = -1_095; day <= -2; day++) {
     const isBusy = day === -21;
     /** About two days in seven have no work. */
     if (!isBusy && random() < 0.28) continue;
@@ -609,6 +610,14 @@ export function buildSlots(): Array<Slot> {
   }
   slots = made.sort(order);
   return slots;
+}
+
+// The day of an entry relative to today, also for one that has a day of a month instead.
+export function dayOf(entry: Entry, now: Date): number {
+  if (!entry.at) return entry.day;
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const date = new Date(now.getFullYear(), now.getMonth() + entry.at.month, entry.at.date);
+  return Math.round((date.getTime() - today.getTime()) / 86_400_000);
 }
 
 /** The entries that the cases ask about, written by hand. */
@@ -646,6 +655,10 @@ export function buildEntries(): Array<Entry> {
       const broken = brokenRules(own[index]!, `${summary}\n${body}`);
       if (broken.length > 0) {
         throw new Error(`content/${project.name}.jsonl line ${index + 1} names ${broken[0]!.words}: ${broken[0]!.why}`);
+      }
+      // The summary is written in double quotes, and the CLI refuses one inside it.
+      if (summary.includes('"')) {
+        throw new Error(`content/${project.name}.jsonl line ${index + 1} has a double quote in its summary`);
       }
       if (branch && !project.branches?.includes(branch)) {
         throw new Error(`content/${project.name}.jsonl line ${index + 1} has the unknown branch "${branch}"`);

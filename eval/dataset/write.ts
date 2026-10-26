@@ -16,7 +16,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
-import { buildSlots, keyEntries, PROJECTS, RULES, type Content, type Slot } from './generate.ts';
+import { buildSlots, dayOf, keyEntries, PROJECTS, RULES, type Content, type Slot } from './generate.ts';
 import { callPi, CONTENT, jsonArray, pool, problems, spent } from './model.ts';
 
 const { values: options } = parseArgs({
@@ -93,7 +93,11 @@ function prompt(
   feedback: Array<string>,
 ): string {
   const project = PROJECTS.find((item) => item.name === name)!;
-  const keys = keyEntries().filter((entry) => (entry.project ?? 'dotfiles') === name);
+  const now = new Date();
+  // A key entry with a day of a month has no day of its own, so each one gets the day it falls on today.
+  const keys = keyEntries()
+    .filter((entry) => (entry.project ?? 'dotfiles') === name)
+    .map((entry) => ({ ...entry, day: dayOf(entry, now) }));
   const from = batch[0]!.day;
   const to = batch.at(-1)!.day;
   const near = keys.filter((entry) => entry.day >= from - 14 && entry.day <= to + 14);

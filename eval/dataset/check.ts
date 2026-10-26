@@ -14,16 +14,7 @@
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
-import {
-  buildSlots,
-  keyEntries,
-  PROJECTS,
-  readContent,
-  RULES,
-  type Content,
-  type Entry,
-  type Slot,
-} from './generate.ts';
+import { buildSlots, dayOf, keyEntries, PROJECTS, readContent, RULES, type Content, type Slot } from './generate.ts';
 import { callPi, CONTENT, jsonArray, pool, problems, spent } from './model.ts';
 
 const { values: options } = parseArgs({
@@ -37,14 +28,6 @@ const { values: options } = parseArgs({
 
 const CHUNK = 40;
 const ATTEMPTS = 4;
-
-/** The day of a key entry relative to today, also for one that has a day of a month. */
-function dayOf(entry: Entry, now: Date): number {
-  if (!entry.at) return entry.day;
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const date = new Date(now.getFullYear(), now.getMonth() + entry.at.month, entry.at.date);
-  return Math.round((date.getTime() - today.getTime()) / 86_400_000);
-}
 
 type Key = { key: string; day: number; summary: string; body: string };
 type Item = { index: number; slot: Slot; content: Content };
