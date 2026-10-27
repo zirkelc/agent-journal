@@ -83,6 +83,8 @@ export const register: Register = (on) => {
   let waiter: ReturnType<typeof answerWaiter> | null = null;
   /** Commits and pushes the journal folder after writes, when the config turns sync on. */
   let sync: ReturnType<typeof syncer> | null = null;
+  /** Whether a draw has already asked for the load of a list that was never loaded. */
+  let isIdleLoadQueued = false;
 
   const load = (isFresh?: boolean) => loader?.load(isFresh) ?? Promise.resolve();
 
@@ -453,6 +455,18 @@ export const register: Register = (on) => {
       $.session.model().catch(() => ''),
     ]);
     paneRows = e.props.scroll.bodyRows;
+    /**
+     * A list that was never loaded, although the pane is open: after /clear the
+     * session's values start over while the pane stays, and no event says so.
+     * A draw cannot write, so the load starts just after it.
+     */
+    if (list.status === 'idle' && !isIdleLoadQueued) {
+      isIdleLoadQueued = true;
+      host.after(0, () => {
+        isIdleLoadQueued = false;
+        void load().catch(() => undefined);
+      });
+    }
     return paneView({ Box, Text, Button, Input, Markdown }, actionsOf(host, load), {
       scope,
       model,
