@@ -1,6 +1,13 @@
 # Agent Journal for Pi
 
-This folder is the [Pi](https://pi.dev) package of [Agent Journal](https://github.com/zirkelc/agent-journal). It is a Pi extension. It gives each session three tools that write and read the journal, and the rules for using them. It syncs the journal with git when you turn sync on.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/zirkelc/agent-journal/main/assets/pi-session-dark.gif" />
+  <img src="https://raw.githubusercontent.com/zirkelc/agent-journal/main/assets/pi-session-light.gif" alt="Pi changes a function and writes a journal entry with its journal_write tool. Then a new Pi session finds an older entry with journal_list and journal_read, and answers why an older decision was made" />
+</picture>
+
+[Agent Journal](https://github.com/zirkelc/agent-journal) is a journal that your agent writes itself: one small markdown file for each milestone, written while the work happens, in a format that is easy to read and to search with `grep`. This package is the extension for [Pi](https://pi.dev). It gives each session three tools that write and read the journal, and the rules for using them. It syncs the journal with git when you turn sync on.
+
+> **More information:** this page describes only the Pi extension. For the entry format, the configuration, git sync and the CLI, see the [main README](https://github.com/zirkelc/agent-journal#readme).
 
 ## Install
 
@@ -44,7 +51,7 @@ To give the model no journal tools, start Pi with `AGENT_JOURNAL_TOOLS=off` (`0`
 AGENT_JOURNAL_TOOLS=off pi
 ```
 
-The model then writes each entry as a file with its own `write` tool and reads the journal with `bash` and `read`, as in Claude Code and Codex. The rules for that way name the session ID and the agent, for the model to copy into the entry. A session in which the journal tools are not active, for example one started with `--tools read,bash`, gets the same rules, so the model is never told to use tools that it cannot call. The git sync at the end of the session is the same in both ways. The [eval](../eval/README.md) compares the two ways.
+The model then writes each entry as a file with its own `write` tool and reads the journal with `bash` and `read`, as in Claude Code and Codex. The rules for that way name the session ID and the agent, for the model to copy into the entry. A session in which the journal tools are not active, for example one started with `--tools read,bash`, gets the same rules, so the model is never told to use tools that it cannot call. The git sync at the end of the session is the same in both ways. The [eval](https://github.com/zirkelc/agent-journal/blob/main/eval/README.md) compares the two ways.
 
 ## Permissions
 
@@ -68,7 +75,7 @@ When a sync fails, the footer shows `journal sync failed:` and the reason. The n
 
 ## What the extension runs, reads and sends
 
-- **Programs:** The extension runs one program, its own [`scripts/agent-journal`](scripts/agent-journal). This is a readable POSIX shell script, not a compiled program. The extension finds it in its own package and never runs an `agent-journal` from your `PATH`. The extension runs the script with one of these subcommands:
+- **Programs:** The extension runs one program, its own [`scripts/agent-journal`](https://github.com/zirkelc/agent-journal/blob/main/pi/scripts/agent-journal). This is a readable POSIX shell script, not a compiled program. The extension finds it in its own package and never runs an `agent-journal` from your `PATH`. The extension runs the script with one of these subcommands:
   - `context` makes the journal rules for the session.
   - `config` reads the settings.
   - `write`, `list` and `read` do the work of the three tools.
