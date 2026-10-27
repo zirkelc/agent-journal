@@ -181,6 +181,11 @@ pi install npm:pi-agent-journal
 
 Then open a new session and ask Pi to write a journal entry. By default, it writes to the directory `~/agent-journal/`. In Pi, the model writes and reads the journal with three tools of its own (`journal_write`, `journal_list` and `journal_read`). Pi does not ask for approval before a tool call, so there is no permission step.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/pi-session-dark.gif" />
+  <img src="assets/pi-session-light.gif" alt="Pi changes a function and writes a journal entry with its journal_write tool. Then a new Pi session finds an older entry with journal_list and journal_read, and answers why an older decision was made" />
+</picture>
+
 For the tools, how the extension gives the rules to the session, and what it runs, reads and sends, see the [Pi package README](pi/README.md).
 
 ## CLI
