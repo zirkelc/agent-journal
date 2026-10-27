@@ -75,7 +75,7 @@ The last row of the list shows the journal directory. When git sync is on, it al
 
 ## Git sync
 
-When sync is on (see [Git sync](../README.md#git-sync) for the setup), the plugin runs a sync after the model writes an entry with the Write tool, and once more when the session ends if the exit leaves time for it. The sync runs in the background, so the turn does not wait for a push.
+When sync is on (see [Git sync](../README.md#git-sync) for the setup), the plugin runs a sync when the session starts, after the model writes an entry with the Write tool, and once more when the session ends if the exit leaves time for it. The sync at the start pulls the entries of your other machines, and the pane shows them when it is done. The sync runs in the background, so the session and the turn do not wait for the network.
 
 ## What the plugin runs, reads and sends
 

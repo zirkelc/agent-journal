@@ -42,6 +42,11 @@ journal_read_payload <<EOF
 $payload
 EOF
 
+# With sync on, what other machines pushed comes in as the session starts. The
+# sync runs detached, with none of this hook's streams, so the session does not
+# wait for the network; it does nothing when the config leaves sync off.
+( "$PLUGIN_ROOT/scripts/agent-journal" sync </dev/null >/dev/null 2>&1 & )
+
 # Without a cwd in the payload, the core falls back to the directory it runs in.
 out=$("$PLUGIN_ROOT/scripts/agent-journal" context \
   --cwd "$cwd" \

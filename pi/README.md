@@ -60,7 +60,7 @@ The tools read the config each time they run, so a new `journal_dir` takes effec
 
 ## Git sync
 
-When sync is on (see [Git sync](https://github.com/zirkelc/agent-journal#git-sync) for the setup), the extension runs a sync after each entry that `journal_write` makes. The sync runs in the background, so the turn does not wait for a push.
+When sync is on (see [Git sync](https://github.com/zirkelc/agent-journal#git-sync) for the setup), the extension runs a sync when the session starts and after each entry that `journal_write` makes. The sync at the start pulls the entries of your other machines. These syncs run in the background, so the session and the turn do not wait for the network. A session without a UI, for example a subagent in print mode, does not sync at the start.
 
 When the session ends, the extension runs one more sync, also for entries that were written another way, for example with `bash`. The exit waits for this sync for at most 5 seconds. A push that it stops is made by the next sync.
 

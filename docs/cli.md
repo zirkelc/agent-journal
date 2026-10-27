@@ -296,11 +296,11 @@ aj config unset host
 ## `aj sync`
 
 ```
-aj sync
+aj sync [--no-pull]
 aj sync init [URL]
 ```
 
-`sync` commits every file in the journal folder and pushes the current branch, when the branch has a remote. `sync init` makes the journal folder a git repository, adds `URL` as `origin`, sets `sync=git`, and makes the first commit. See [Git sync](../README.md#git-sync) for the details.
+`sync` commits every file in the journal folder. When the branch has a remote, it pulls the commits of the remote branch with a rebase, and pushes the current branch. With `--no-pull`, it pulls only when the push is rejected. The agents use it for the sync at the end of a session, because the next session pulls when it starts. `sync init` makes the journal folder a git repository, adds `URL` as `origin`, sets `sync=git`, and makes the first commit. See [Git sync](../README.md#git-sync) for the details.
 
 Examples:
 
@@ -313,8 +313,8 @@ aj sync init
 # git -C ~/agent-journal init && git -C ~/agent-journal remote add origin git@github.com:you/journal.git
 aj sync init git@github.com:you/journal.git
 
-# commit and push now, for example after Codex wrote entries
-# git -C ~/agent-journal add -A && git -C ~/agent-journal commit -m journal && git -C ~/agent-journal push
+# commit, pull and push now, for example after Codex wrote entries
+# git -C ~/agent-journal add -A && git -C ~/agent-journal commit -m journal && git -C ~/agent-journal pull --rebase && git -C ~/agent-journal push
 aj sync
 ```
 

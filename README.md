@@ -234,7 +234,7 @@ If you have the [CLI](#cli) installed, you can change the config with `agent-jou
 
 ## Git sync
 
-agent-journal can keep the journal in a git repository. It commits each new entry, and it pushes when the branch has a remote. Sync is off by default. To turn it on:
+agent-journal can keep the journal in a git repository. It commits each new entry. When the branch has a remote, it pulls the entries of your other machines and pushes its own. Sync is off by default. To turn it on:
 
 ```sh
 aj sync init                                  # commit only, on this machine
@@ -254,12 +254,13 @@ Use your own journal folder in `--source` if you changed `journal_dir`.
 
 When sync is on, `aj sync` runs:
 
-- in Claude Code, after each entry and when the session ends ([more](claude-code/README.md#git-sync)).
-- in Pi, after each entry and when the session ends ([more](pi/README.md#git-sync)).
+- in Claude Code, when the session starts, after each entry, and when the session ends ([more](claude-code/README.md#git-sync)).
+- in Pi, when the session starts, after each entry, and when the session ends ([more](pi/README.md#git-sync)).
+- in Codex, when the session starts.
 - after `aj write`.
 - when you run `aj sync` yourself, for example for entries that Codex wrote.
 
-Each sync commits every file in the journal folder. The commit names a single new entry by its ID and summary. Then it pushes the current branch. If the remote has commits that this machine does not have (another machine pushed first, or you created the repository with a README), it rebases onto them and pushes again; entries have unique file names, so this does not conflict. If the push fails (no network, no credentials), the commit stays, and the next sync pushes it. A sync commits nothing on a detached HEAD or while a merge, rebase or bisect is open.
+Each sync commits every file in the journal folder. The commit names a single new entry by its ID and summary. Then it pulls the commits that this machine does not have (from your other machines, or a README you created the repository with) and rebases onto them. It does this also when there is nothing to push, so a machine that only reads the journal also gets the new entries. The sync at the end of a session does not pull first (`aj sync --no-pull`), so the exit does not wait for it; the next session pulls when it starts. Entries have unique file names, so the rebase does not conflict. Then it pushes the current branch. If the pull or the push fails (no network, no credentials), the commit stays, and the next sync tries again. A sync commits nothing on a detached HEAD or while a merge, rebase or bisect is open.
 
 A sync never waits for input: git does not prompt for a password, ssh runs in batch mode (also with your own `core.sshCommand`), and the journal's commits are not signed, so no passphrase dialog opens.
 

@@ -14,8 +14,8 @@ import { Type } from 'typebox';
  * `/resume` or a `/fork`, and the extension does not need to find them in the
  * conversation.
  *
- * When git sync is on, it syncs the journal after each entry that the write
- * tool makes, and once more when the session ends.
+ * When git sync is on, it syncs the journal when the session starts, after
+ * each entry that the write tool makes, and once more when the session ends.
  *
  * It runs one program, the `agent-journal` script in this package, and never
  * an `agent-journal` from `PATH`.
@@ -55,8 +55,8 @@ const SYNC_TIMEOUT_MS = 60_000;
 /** How long the end of a session waits for its sync. A push that it stops is made by the next sync. */
 export const END_SYNC_TIMEOUT_MS = 5_000;
 
-/** The exit code of a `sync` that made the commit but could not push it. */
-const SYNC_PUSH_FAILED = 3;
+/** The exit code of a `sync` that made the commit, or had none to make, but could not pull or push. */
+const SYNC_REMOTE_FAILED = 3;
 
 /** How many entries a list gives when the model does not say, and the most it can ask for. */
 export const DEFAULT_LIMIT = 50;
@@ -183,6 +183,8 @@ export default function agentJournal(pi: ExtensionAPI) {
   let ui: ExtensionContext['ui'] | null = null;
   let running: Promise<void> | null = null;
   let isPending = false;
+  /** Whether the next sync pulls before it pushes. */
+  let isPull = true;
 
   const cli = (args: Array<string>, cwd: string, timeout: number): Promise<ExecResult | null> =>
     pi.exec(CLI, args, { cwd, timeout }).catch(() => null);
@@ -230,7 +232,7 @@ export default function agentJournal(pi: ExtensionAPI) {
       ? 'did not run'
       : run.killed
         ? 'did not finish'
-        : run.code === SYNC_PUSH_FAILED && firstLine(run.stdout) !== ''
+        : run.code === SYNC_REMOTE_FAILED && firstLine(run.stdout) !== ''
           ? firstLine(run.stdout)
           : firstLine(run.stderr) || `exited with ${run.code}`;
     ui.setStatus(STATUS_KEY, `journal sync failed: ${reason}`);
@@ -239,16 +241,20 @@ export default function agentJournal(pi: ExtensionAPI) {
   /**
    * One sync at a time. A sync that is requested while one runs starts when
    * that one ends, so the last write is always in a sync that started after it.
+   * Without `pull`, the sync pulls only when its push is rejected. A sync that
+   * waits pulls first when any of its callers asked for the pull.
    */
-  function sync(cwd: string, timeout = SYNC_TIMEOUT_MS): Promise<void> {
+  function sync(cwd: string, timeout = SYNC_TIMEOUT_MS, pull = true): Promise<void> {
     if (running) {
+      isPull = isPending ? isPull || pull : pull;
       isPending = true;
       return running;
     }
+    isPull = pull;
     running = (async () => {
       do {
         isPending = false;
-        showSync(await cli(['sync'], cwd, timeout));
+        showSync(await cli(isPull ? ['sync'] : ['sync', '--no-pull'], cwd, timeout));
       } while (isPending);
     })().finally(() => {
       running = null;
@@ -391,11 +397,13 @@ export default function agentJournal(pi: ExtensionAPI) {
   pi.on('session_start', async (_event, ctx) => {
     ui = ctx.hasUI ? ctx.ui : null;
     /** Read now, so the first write does not wait for it. */
-    void readConfig(ctx.cwd);
+    const read = readConfig(ctx.cwd);
     if (!ctx.hasUI) {
       pi.setActiveTools(pi.getActiveTools().filter((name) => !name.startsWith(TOOL_PREFIX)));
       return;
     }
+    /** Pulls the entries of the other machines. Not awaited, so the session does not wait for the network. */
+    void read.then(({ isSyncOn }) => (isSyncOn ? sync(ctx.cwd) : undefined));
     /** The rules for the tools only when the session can call them: `--tools` or another extension can leave them out. */
     const active = pi.getActiveTools();
     const canCall = hasTools && [TOOL_WRITE, TOOL_LIST, TOOL_READ].every((name) => active.includes(name));
@@ -431,6 +439,7 @@ export default function agentJournal(pi: ExtensionAPI) {
   /**
    * The last sync, also for entries that were written another way than the
    * write tool. The exit waits for it, but not longer than END_SYNC_TIMEOUT_MS.
+   * It does not pull first, because the next session's start pulls anyway.
    */
   pi.on('session_shutdown', async (_event, ctx) => {
     const { isSyncOn } = await readConfig(ctx.cwd);
@@ -439,7 +448,7 @@ export default function agentJournal(pi: ExtensionAPI) {
     const timeout = new Promise<void>((done) => {
       timer = setTimeout(done, END_SYNC_TIMEOUT_MS);
     });
-    await Promise.race([sync(ctx.cwd, END_SYNC_TIMEOUT_MS), timeout]);
+    await Promise.race([sync(ctx.cwd, END_SYNC_TIMEOUT_MS, false), timeout]);
     clearTimeout(timer);
   });
 }
