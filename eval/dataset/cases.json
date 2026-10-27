@@ -218,6 +218,66 @@
       "why": "Three changes of the database backup over a year and a half, each with its day, among about 100 entries about the restic file backups, some of which copy other databases. Only the bodies name WAL-G, and the reason of each change."
     },
     {
+      "id": "recall-first-of-many",
+      "kind": "recall",
+      "dir": "Developer/nebula",
+      "git": true,
+      "messages": ["When did we first add a rate limit to this project, and what did it limit?"],
+      "expect": {
+        "all": ["ingest endpoint|ingest api|per api key"],
+        "date_of": "R1"
+      },
+      "why": "About 300 later entries talk about rate limits, so the first one is far behind the newest matches. A search that stops at its first page of results misses it."
+    },
+    {
+      "id": "recall-count-failures",
+      "kind": "recall",
+      "dir": "Developer/acme-dashboard",
+      "git": true,
+      "messages": ["How many times did the nightly DHL tracking import fail in the last 12 months?"],
+      "expect": {
+        "all": ["\\b(6|six) (times|failures|failed|nights|runs)|fail(ed|ures)?\\D{0,20}\\b(6|six)\\b"]
+      },
+      "why": "Eleven entries are about the import. Six failures are in the last 12 months, two are older, and three entries are about the import without a failure. Not every failure says failed in its summary."
+    },
+    {
+      "id": "recall-latest-of-many-changes",
+      "kind": "recall",
+      "dir": "Developer/billing-api",
+      "git": true,
+      "messages": ["We changed the linter of this project a few times. Which one do we use now, and since when?"],
+      "expect": {
+        "all": ["oxlint"],
+        "date_of": "L4"
+      },
+      "why": "The linter changed three times. The summaries of the last two changes do not name the tools, so only the body of the last entry gives the answer."
+    },
+    {
+      "id": "recall-near-miss",
+      "kind": "recall",
+      "dir": "Developer/billing-api",
+      "git": true,
+      "messages": ["When did we move the reseller payouts of this project to Stripe Connect?"],
+      "expect": {
+        "negative": true,
+        "all": ["decided against|did not|didn't|never|not (move|moved|switch|adopt)"],
+        "date_of": "P1"
+      },
+      "why": "The question assumes a move that never happened. One entry looked at Stripe Connect and decided against it, among about 250 entries about Stripe."
+    },
+    {
+      "id": "recall-other-host",
+      "kind": "recall",
+      "dir": "Developer/nebula",
+      "git": true,
+      "messages": ["What did I do on the machine build-box in the last 7 days?"],
+      "expect": {
+        "all": ["perf|json parser", "benchmark|corpus", "runner|systemd"],
+        "none": ["idempotency|refund", "berkeley mono"]
+      },
+      "why": "Three entries of the last week ran on build-box, in three projects. Only their host field says so, and the other entries of that week ran on this machine."
+    },
+    {
       "id": "write-milestone",
       "kind": "write",
       "dir": "Developer/billing-api",
