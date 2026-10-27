@@ -12,17 +12,18 @@ import {
   TOOL_SEARCH,
   toolName,
 } from '../hooks/names.js';
-import { journal, line, PANE, RECALL, SESSION, textOf, world } from './world.js';
+import { journal, PANE, RECALL, SESSION, textOf, world } from './world.js';
 
 /**
- * The pane's questions: the search agent, its three tools and the Ask view.
- * They are off while IS_ASK_ON is false (its comment says why). The kit has
- * no skip, so the tests of the pane's questions are defined only while they
- * are on, and the tests of the pane without them only while they are off.
+ * The pane's questions: the search agent and the Ask view. They are off
+ * while IS_ASK_ON is false (its comment says why). The kit has no skip, so the
+ * tests of the pane's questions are defined only while they are on, and the
+ * tests of the pane without them only while they are off. The journal tools
+ * the agent reads with are registered either way, and tested with the rest.
  */
 if (IS_ASK_ON) {
   describe('ask', () => {
-    test('registers the three tools, the hidden agent and the command at session start', async ($, on) => {
+    test('registers the hidden agent beside the journal tools and the command at session start', async ($, on) => {
       // Arrange
       const kept = world(on);
 
@@ -30,7 +31,7 @@ if (IS_ASK_ON) {
       await $.session.start(SESSION);
 
       // Assert
-      expect(kept.registered.tools).toEqual(['list', 'search', 'read']);
+      expect(kept.registered.tools).toEqual(['list', 'search', 'read', 'write']);
       expect(kept.registered.commands).toEqual([COMMAND]);
       expect(kept.registered.agents.length).toBe(1);
       const agent = kept.registered.agents[0]!;
@@ -56,57 +57,6 @@ if (IS_ASK_ON) {
       // Assert
       expect(offer.isOffered).toBe(false);
       expect(tools.map((tool) => (tool as { isDeferred: boolean }).isDeferred)).toEqual([true, true, true]);
-    });
-
-    test('a list call runs the CLI in the session directory with the filters', async ($, on) => {
-      // Arrange
-      const kept = world(on, { list: line('2026-10-05T143000Z', 'repo', 'Did a thing') });
-      await $.session.start(SESSION);
-
-      // Act
-      const result = await $.tool.call({ tool: toolName(TOOL_LIST), since: '2026-09-28', project: '.' } as never);
-
-      // Assert
-      expect(kept.queries().length).toBe(1);
-      expect(kept.queries()[0]!.argv.slice(1)).toEqual([
-        'list',
-        '--since',
-        '2026-09-28',
-        '--project',
-        '.',
-        '--limit',
-        '50',
-      ]);
-      expect(kept.queries()[0]!.init?.cwd).toBe('/work');
-      expect(JSON.stringify(result)).toContain('Did a thing');
-    });
-
-    test('a search text that would read as a flag is refused before the CLI runs', async ($, on) => {
-      // Arrange
-      const kept = world(on);
-      await $.session.start(SESSION);
-
-      // Act
-      const result = await $.tool.call({ tool: toolName(TOOL_SEARCH), text: '--all' } as never);
-
-      // Assert
-      expect(kept.queries().length).toBe(0);
-      expect(JSON.stringify(result)).toContain('must not start with');
-    });
-
-    test('a read call takes only an entry id', async ($, on) => {
-      // Arrange
-      const kept = world(on);
-      await $.session.start(SESSION);
-
-      // Act
-      const results = await Promise.all(
-        ['../secrets', '2026-10-07'].map((id) => $.tool.call({ tool: toolName(TOOL_READ), id } as never)),
-      );
-
-      // Assert
-      expect(kept.queries().length).toBe(0);
-      for (const result of results) expect(JSON.stringify(result)).toContain('not an entry id');
     });
 
     test('/agent-journal with a question opens the pane and asks the agent with the recall text', async ($, on) => {
@@ -290,7 +240,7 @@ if (IS_ASK_ON) {
   });
 } else {
   describe('ask, off', () => {
-    test('while the pane answers no questions, the command alone is registered, to open the journal', async ($, on) => {
+    test('while the pane answers no questions, no agent is registered, only the command and the journal tools', async ($, on) => {
       // Arrange
       const kept = world(on);
 
@@ -299,7 +249,7 @@ if (IS_ASK_ON) {
 
       // Assert
       expect(kept.registered.commands).toEqual([COMMAND]);
-      expect(kept.registered.tools).toEqual([]);
+      expect(kept.registered.tools).toEqual(['list', 'search', 'read', 'write']);
       expect(kept.registered.agents.length).toBe(0);
       expect(COMMAND_DESCRIPTION).toBe('Open the journal');
     });

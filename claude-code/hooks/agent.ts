@@ -1,5 +1,5 @@
 import type { ToolSpec } from 'claude-code';
-import { TOOL_LIST, TOOL_READ, TOOL_SEARCH } from './names.js';
+import { TOOL_LIST, TOOL_READ, TOOL_SEARCH, TOOL_WRITE } from './names.js';
 
 /** How the agent's last line starts, the one that names the entries it used. */
 export const SOURCES_PREFIX = 'Sources:';
@@ -116,3 +116,29 @@ export const TOOL_SPECS: ReadonlyArray<ToolSpec> = [
     },
   },
 ];
+
+/**
+ * The tool the main conversation writes an entry with. It takes only what the
+ * model knows: the date, the project, the directory and the session come from
+ * the CLI and the session.
+ */
+export const WRITE_SPEC: ToolSpec = {
+  name: TOOL_WRITE,
+  description:
+    'Writes one new journal entry for this session and answers with its id. The date, project, directory, agent and session are filled in.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      summary: {
+        type: 'string',
+        description:
+          'One line, at most 200 characters, without double quotes: what happened and what it means, never a topic tag.',
+      },
+      body: {
+        type: 'string',
+        description: 'Markdown: what was decided, what was rejected and why, what is still open.',
+      },
+    },
+    required: ['summary', 'body'],
+  },
+};

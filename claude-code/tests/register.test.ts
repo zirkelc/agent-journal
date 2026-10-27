@@ -1,6 +1,17 @@
 import { describe, expect, test } from 'claude-code/testing';
 import { localDayTime } from '../hooks/format.js';
-import { COMMAND, PANE_ID, PLUGIN, RULES_MARK } from '../hooks/names.js';
+import {
+  COMMAND,
+  PANE_ID,
+  PLUGIN,
+  RULES_MARK,
+  TOOL_LIST,
+  TOOL_READ,
+  TOOL_PREFIX,
+  TOOL_SEARCH,
+  TOOL_WRITE,
+  toolName,
+} from '../hooks/names.js';
 import { journal, JOURNAL_DIR, line, PANE, SESSION, textOf, world } from './world.js';
 
 /** A turn of the wheel over the journal pane, before the hook decides where it goes. */
@@ -18,6 +29,35 @@ const SCROLL = {
 const typed = (text: string) => ({ text, wait: false, origin: { kind: 'composer' } }) as const;
 
 describe('register', () => {
+  test('registers the four journal tools and the command at session start', async ($, on) => {
+    // Arrange
+    const kept = world(on);
+
+    // Act
+    await $.session.start(SESSION);
+
+    // Assert
+    expect(kept.registered.tools).toEqual(['list', 'search', 'read', 'write']);
+    expect(kept.registered.commands).toEqual([COMMAND]);
+  });
+
+  test('the tools that read the journal are deferred, and the write tool is in the main model\u2019s prompt', async ($, on) => {
+    // Arrange
+    world(on);
+    on('tool.describe', ($, e) => ({ name: e.tool, description: '', isDeferred: false }) as never);
+    await $.session.start(SESSION);
+
+    // Act
+    const tools = await Promise.all(
+      [TOOL_LIST, TOOL_SEARCH, TOOL_READ, TOOL_WRITE].map((name) =>
+        $.tool.describe({ tool: toolName(name), description: 'Uses the journal.' } as never),
+      ),
+    );
+
+    // Assert
+    expect(tools.map((tool) => (tool as { isDeferred: boolean }).isDeferred)).toEqual([true, true, true, false]);
+  });
+
   test('the rules for writing the journal go to the main conversation as a marked row of their own, once', async ($, on) => {
     // Arrange
     const kept = world(on, { context: 'Standing rules.\n\n## Journal\n' });
@@ -44,6 +84,8 @@ describe('register', () => {
       'session-1',
       '--agent',
       'claude/opus-5-5',
+      '--tools',
+      TOOL_PREFIX,
     ]);
   });
 
@@ -279,6 +321,161 @@ describe('register', () => {
 
     // Assert
     expect(kept.notes).toEqual([`${RULES_MARK}\nStanding rules.`]);
+  });
+
+  test('a list call runs the CLI in the session directory with the filters', async ($, on) => {
+    // Arrange
+    const kept = world(on, { list: line('2026-10-05T143000Z', 'repo', 'Did a thing') });
+    await $.session.start(SESSION);
+
+    // Act
+    const result = await $.tool.call({ tool: toolName(TOOL_LIST), since: '2026-09-28', project: '.' } as never);
+
+    // Assert
+    expect(kept.queries().length).toBe(1);
+    expect(kept.queries()[0]!.argv.slice(1)).toEqual([
+      'list',
+      '--since',
+      '2026-09-28',
+      '--project',
+      '.',
+      '--limit',
+      '50',
+    ]);
+    expect(kept.queries()[0]!.init?.cwd).toBe('/work');
+    expect(JSON.stringify(result)).toContain('Did a thing');
+  });
+
+  test('a search text that would read as a flag is refused before the CLI runs', async ($, on) => {
+    // Arrange
+    const kept = world(on);
+    await $.session.start(SESSION);
+
+    // Act
+    const result = await $.tool.call({ tool: toolName(TOOL_SEARCH), text: '--all' } as never);
+
+    // Assert
+    expect(kept.queries().length).toBe(0);
+    expect(JSON.stringify(result)).toContain('must not start with');
+  });
+
+  test('a read call takes only an entry id', async ($, on) => {
+    // Arrange
+    const kept = world(on);
+    await $.session.start(SESSION);
+
+    // Act
+    const results = await Promise.all(
+      ['../secrets', '2026-10-07'].map((id) => $.tool.call({ tool: toolName(TOOL_READ), id } as never)),
+    );
+
+    // Assert
+    expect(kept.queries().length).toBe(0);
+    for (const result of results) expect(JSON.stringify(result)).toContain('not an entry id');
+  });
+
+  test('a write call runs the CLI for the session with the summary and the body, and answers with the id', async ($, on) => {
+    // Arrange
+    const kept = world(on, { write: `${JOURNAL_DIR}/2026-10-06T080000Z.md\n` });
+    await $.session.start(SESSION);
+
+    // Act
+    const result = await $.tool.call({
+      tool: toolName(TOOL_WRITE),
+      summary: 'Shipped the write tool.',
+      body: 'What was decided.',
+    } as never);
+
+    // Assert
+    const writes = kept.queries().filter((run) => run.argv[1] === 'write');
+    expect(writes.length).toBe(1);
+    expect(writes[0]!.argv.slice(1)).toEqual([
+      'write',
+      '--summary=Shipped the write tool.',
+      '--body=What was decided.',
+      '--cwd',
+      '/work',
+      '--session-id',
+      'session-1',
+      '--agent',
+      'claude/opus-5-5',
+      '--no-sync',
+    ]);
+    expect(writes[0]!.init?.cwd).toBe('/work');
+    expect((result as { result?: unknown }).result).toBe('2026-10-06T080000Z');
+  });
+
+  test('a write call with an empty summary is refused before the CLI runs', async ($, on) => {
+    // Arrange
+    const kept = world(on);
+    await $.session.start(SESSION);
+
+    // Act
+    const result = await $.tool.call({ tool: toolName(TOOL_WRITE), summary: '  ', body: 'A body.' } as never);
+
+    // Assert
+    expect(kept.queries().length).toBe(0);
+    expect((result as { deny?: string }).deny).toBe('summary is empty');
+  });
+
+  test('a write the CLI refuses answers with its reason', async ($, on) => {
+    // Arrange
+    world(on, { failing: 'write' });
+    await $.session.start(SESSION);
+
+    // Act
+    const result = await $.tool.call({ tool: toolName(TOOL_WRITE), summary: 'A summary.', body: '' } as never);
+
+    // Assert
+    expect((result as { deny?: string }).deny).toBe('write failed');
+  });
+
+  test('a write call from a subagent is refused before the CLI runs', async ($, on) => {
+    // Arrange
+    const kept = world(on, { write: `${JOURNAL_DIR}/2026-10-06T080000Z.md\n` });
+    await $.session.start(SESSION);
+
+    // Act
+    const result = await $.tool.call({
+      tool: toolName(TOOL_WRITE),
+      summary: 'From a subagent.',
+      body: '',
+      agentId: 'agent-1',
+    } as never);
+
+    // Assert
+    expect(kept.queries().length).toBe(0);
+    expect((result as { deny?: string }).deny).toBe('Only the main conversation writes journal entries.');
+  });
+
+  test('a write through the tool syncs once and adds the entry to the list once', async ($, on) => {
+    // Arrange
+    let lines = [line('2026-10-05T143000Z', 'repo', 'Newer')];
+    const kept = world(on, {
+      isSyncOn: true,
+      list: () => lines.join('\n'),
+      write: `${JOURNAL_DIR}/2026-10-06T080000Z.md\n`,
+      sync: 'committed 2026-10-06T080000Z · pushed to origin/main\n',
+    });
+    on('tool.call', { tool: 'Write' }, () => ({ result: 'written' }) as never);
+    await $.session.start(SESSION);
+    await $.command.run(journal());
+    await kept.clock.settle();
+    lines = [...lines, line('2026-10-06T080000Z', 'repo', 'Newest')];
+
+    // Act
+    await $.tool.call({ tool: toolName(TOOL_WRITE), summary: 'Newest', body: '' } as never);
+    await kept.clock.advance(1_000);
+    await kept.clock.settle();
+    const drawn = textOf(await $.ui.render(PANE as never));
+
+    // Assert
+    /** The refresh and the sync start together, so only how many of each ran is fixed, not their order. */
+    const runs = kept.queries().map((run) => run.argv[1]);
+    expect(runs.slice(0, 2)).toEqual(['list', 'write']);
+    expect(runs.slice(2).sort()).toEqual(['list', 'sync']);
+    expect(drawn).toContain('Newest');
+    expect(drawn).toContain('⇅ pushed to origin/main');
   });
 
   test('the project choice is stored, and a later session opens on it', async ($, on) => {
@@ -659,5 +856,20 @@ describe('register', () => {
     // Assert
     const listed = kept.queries().find((run) => run.argv[1] === 'list');
     expect(listed?.argv[0]).toBe('/repo/bin/agent-journal');
+  });
+
+  test('the permission checks of the journal tools are left to the user\u2019s own rules', async ($, on) => {
+    // Arrange
+    world(on);
+    on('tool.check', () => ({ decision: 'ask', reason: 'the engine decides' }));
+    await $.session.start(SESSION);
+
+    // Act
+    const verdicts = await Promise.all(
+      [TOOL_LIST, TOOL_SEARCH, TOOL_READ, TOOL_WRITE].map((name) => $.tool.check({ tool: toolName(name), input: {} })),
+    );
+
+    // Assert
+    expect(verdicts.map((verdict) => verdict.decision)).toEqual(['ask', 'ask', 'ask', 'ask']);
   });
 });

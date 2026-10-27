@@ -3,8 +3,18 @@
 /* @jsxFrag Fragment */
 import type { Register, Timer } from 'claude-code';
 import { atom, read, update } from 'claude-code';
-import { AGENT_PROMPT, scopeOf, searchModelOf, TOOL_SPECS } from './agent.js';
-import { capped, entriesOf, InputError, listArgs, readArgs, searchArgs, type Filters } from './cli.js';
+import { AGENT_PROMPT, scopeOf, searchModelOf, TOOL_SPECS, WRITE_SPEC } from './agent.js';
+import {
+  capped,
+  entriesOf,
+  InputError,
+  listArgs,
+  readArgs,
+  searchArgs,
+  writeArgs,
+  writtenIdOf,
+  type Filters,
+} from './cli.js';
 import { ALL_DATES, entryOfText } from './format.js';
 import type { Host } from './host.js';
 import {
@@ -20,6 +30,7 @@ import {
   rulesKeeper,
   endSyncTimeoutOf,
   runCli,
+  sessionOf,
   stepOf,
   syncer,
 } from './journal.js';
@@ -36,6 +47,7 @@ import {
   TOOL_LIST,
   TOOL_READ,
   TOOL_SEARCH,
+  TOOL_WRITE,
   toolName,
 } from './names.js';
 import type { JournalView } from '../types';
@@ -85,6 +97,28 @@ export const register: Register = (on) => {
   let sync: ReturnType<typeof syncer> | null = null;
 
   const load = (isFresh?: boolean) => loader?.load(isFresh) ?? Promise.resolve();
+
+  /**
+   * A new entry shows in the list without a reload by hand, and is committed
+   * and pushed when sync is on. Several writes in a row do this once, after
+   * the last. The sync runs on its own, so a push never holds up the turn.
+   */
+  function journalWritten(bound: Host, list: ReturnType<typeof listLoader>, syncing: ReturnType<typeof syncer>): void {
+    void list
+      .config()
+      .then(({ isSyncOn }) => {
+        refresh?.cancel();
+        refresh = bound.after(REFRESH_DEBOUNCE_MS, () => {
+          /** A list nobody has opened is left for the pane to load when it opens. */
+          void bound.list
+            .read()
+            .then((shown) => (shown.status === 'idle' ? undefined : list.refresh()))
+            .catch(() => undefined);
+          if (isSyncOn) void syncing.request().catch(() => undefined);
+        });
+      })
+      .catch(() => undefined);
+  }
 
   /** While a question is open, the pane redraws each second, so its elapsed time counts up. */
   function tick(bound: Host): void {
@@ -183,9 +217,10 @@ export const register: Register = (on) => {
     /** Made now, so the first message does not wait for the CLI. */
     void keeper.prepare().catch(() => undefined);
     currentProject = projectOf(await $.session.repo().catch(() => null));
-    /** The tools and the agent that answer the pane's questions, while it answers any (see IS_ASK_ON). */
+    /** The journal's tools, for the main conversation, and the search agent's too while the pane answers questions. */
+    for (const spec of [...TOOL_SPECS, WRITE_SPEC]) await $.tool.register(spec);
+    /** The agent that answers the pane's questions, while it answers any (see IS_ASK_ON). */
     if (IS_ASK_ON) {
-      for (const spec of TOOL_SPECS) await $.tool.register(spec);
       /**
        * The agent type. It runs on the session's model unless a question names
        * another, so the model can change between questions. Its permission mode
@@ -259,51 +294,84 @@ export const register: Register = (on) => {
     return next(e);
   });
 
-  /** The search agent and its tools, while the pane answers questions (see IS_ASK_ON). */
-  if (IS_ASK_ON) {
-    /** The search agent is this mod's own: the main model never sees it. */
-    on('agent.offer', { agent: 'agent-journal:search' }, () => ({ isOffered: false }));
+  /** The search agent is this mod's own: the main model never sees it. It exists only while the pane answers questions (see IS_ASK_ON). */
+  if (IS_ASK_ON) on('agent.offer', { agent: 'agent-journal:search' }, () => ({ isOffered: false }));
 
-    /** The main model may find the journal tools, but they take no room in its prompt. */
-    on('tool.describe', { tool: /^mcp__agent-journal__(list|search|read)$/ }, async ($, e, next) => ({
-      ...(await next(e)),
-      isDeferred: true,
-    }));
+  /**
+   * The main model may find the tools that read the journal, but they take no
+   * room in its prompt: the rules name them, so it loads them by name when it
+   * is asked about past work. Writing is what every session does, so that
+   * tool's schema stays in the prompt.
+   */
+  on('tool.describe', { tool: /^mcp__agent-journal__(list|search|read|write)$/ }, async ($, e, next) => ({
+    ...(await next(e)),
+    isDeferred: e.tool !== toolName(TOOL_WRITE),
+  }));
 
-    on('tool.call', { tool: /^mcp__agent-journal__(list|search|read)$/ }, async ($, e, next) => {
-      if (!host) return next(e);
-      const input = e as unknown as Record<string, unknown>;
-      const filters: Filters = {
-        since: typeof input.since === 'string' ? input.since : undefined,
-        until: typeof input.until === 'string' ? input.until : undefined,
-        project: typeof input.project === 'string' ? input.project : undefined,
-        limit: typeof input.limit === 'number' ? input.limit : undefined,
-      };
-      let args: Array<string>;
-      try {
-        if (e.tool === toolName(TOOL_LIST)) args = listArgs(filters);
-        else if (e.tool === toolName(TOOL_SEARCH)) args = searchArgs(String(input.text ?? ''), filters);
-        else if (e.tool === toolName(TOOL_READ)) args = readArgs(String(input.id ?? ''));
-        else return { deny: `unknown journal tool ${e.tool}` };
-      } catch (error) {
-        if (error instanceof InputError) return { deny: error.message };
-        throw error;
-      }
-      const ran = await runCli(host, args);
-      const agentId = e.agentId;
-      if (agentId) {
-        const found =
-          ran.exitCode !== 0 ? [] : e.tool === toolName(TOOL_READ) ? entryOfText(ran.stdout) : entriesOf(ran.stdout);
-        await update($, chatAtom, (chat) => {
-          const seen = chat.flatMap((turn) => turn.seen);
-          const step = stepOf(e.tool, input, { isOk: ran.exitCode === 0, entries: found }, seen);
-          return recorded(chat, agentId, step, found);
-        }).catch(() => undefined);
-      }
-      if (ran.exitCode !== 0) return { deny: failureOf(ran) };
-      return { result: capped(ran.stdout) || 'No entries match.' };
-    });
-  }
+  /**
+   * One new entry, for the session as it is now. Only the main conversation
+   * writes the journal, so a subagent's call is refused before the CLI runs.
+   *
+   * The hook answers the call itself, so no permission check runs: only a deny
+   * rule for the tool stops it. Workaround for anthropics/claude-code#104217,
+   * tracked in zirkelc/issues#22. Remove both when the fix is adopted.
+   */
+  on('tool.call', { tool: /^mcp__agent-journal__write$/ }, async ($, e, next) => {
+    if (e.agentId) return { deny: 'Only the main conversation writes journal entries.' };
+    const [bound, list, syncing] = [host, loader, sync];
+    if (!bound || !list || !syncing) return next(e);
+    const input = e as unknown as Record<string, unknown>;
+    const session = await sessionOf(bound);
+    let args: Array<string>;
+    try {
+      const summary = typeof input.summary === 'string' ? input.summary : '';
+      const body = typeof input.body === 'string' ? input.body : '';
+      args = writeArgs(summary, body, session.cwd, session.sessionId, session.agent);
+    } catch (error) {
+      if (error instanceof InputError) return { deny: error.message };
+      throw error;
+    }
+    const ran = await runCli(bound, args);
+    const id = ran.exitCode === 0 ? writtenIdOf(ran.stdout) : undefined;
+    if (!id) return { deny: failureOf(ran) };
+    journalWritten(bound, list, syncing);
+    return { result: id };
+  });
+
+  /** Answered here too, with no permission check: see anthropics/claude-code#104217, tracked in zirkelc/issues#22. */
+  on('tool.call', { tool: /^mcp__agent-journal__(list|search|read)$/ }, async ($, e, next) => {
+    if (!host) return next(e);
+    const input = e as unknown as Record<string, unknown>;
+    const filters: Filters = {
+      since: typeof input.since === 'string' ? input.since : undefined,
+      until: typeof input.until === 'string' ? input.until : undefined,
+      project: typeof input.project === 'string' ? input.project : undefined,
+      limit: typeof input.limit === 'number' ? input.limit : undefined,
+    };
+    let args: Array<string>;
+    try {
+      if (e.tool === toolName(TOOL_LIST)) args = listArgs(filters);
+      else if (e.tool === toolName(TOOL_SEARCH)) args = searchArgs(String(input.text ?? ''), filters);
+      else if (e.tool === toolName(TOOL_READ)) args = readArgs(String(input.id ?? ''));
+      else return { deny: `unknown journal tool ${e.tool}` };
+    } catch (error) {
+      if (error instanceof InputError) return { deny: error.message };
+      throw error;
+    }
+    const ran = await runCli(host, args);
+    const agentId = e.agentId;
+    if (agentId) {
+      const found =
+        ran.exitCode !== 0 ? [] : e.tool === toolName(TOOL_READ) ? entryOfText(ran.stdout) : entriesOf(ran.stdout);
+      await update($, chatAtom, (chat) => {
+        const seen = chat.flatMap((turn) => turn.seen);
+        const step = stepOf(e.tool, input, { isOk: ran.exitCode === 0, entries: found }, seen);
+        return recorded(chat, agentId, step, found);
+      }).catch(() => undefined);
+    }
+    if (ran.exitCode !== 0) return { deny: failureOf(ran) };
+    return { result: capped(ran.stdout) || 'No entries match.' };
+  });
 
   on('command.run', { command: 'agent-journal' }, async ($, e, next) => {
     if (!host) return next(e);
@@ -335,11 +403,7 @@ export const register: Register = (on) => {
     });
   }
 
-  /**
-   * A new entry shows in the list without a reload by hand, and is committed
-   * and pushed when sync is on. The sync runs on its own, so a push never holds
-   * up the turn.
-   */
+  /** An entry written as a file, as the person may still ask for, counts as a write to the journal too. */
   on('tool.call', { tool: 'Write' }, async ($, e, next) => {
     const result = await next(e);
     const isRefused = 'deny' in result && Boolean(result.deny);
@@ -348,27 +412,18 @@ export const register: Register = (on) => {
     const path = String(e.file_path);
     void list
       .config()
-      .then(({ journalDir, isSyncOn }) => {
-        if (!journalDir || !path.startsWith(`${journalDir}/`)) return;
-        refresh?.cancel();
-        refresh = bound.after(REFRESH_DEBOUNCE_MS, () => {
-          /** A list nobody has opened is left for the pane to load when it opens. */
-          void bound.list
-            .read()
-            .then((shown) => (shown.status === 'idle' ? undefined : list.refresh()))
-            .catch(() => undefined);
-          if (isSyncOn) void syncing.request().catch(() => undefined);
-        });
+      .then(({ journalDir }) => {
+        if (journalDir && path.startsWith(`${journalDir}/`)) journalWritten(bound, list, syncing);
       })
       .catch(() => undefined);
     return result;
   });
 
   /**
-   * The last chance to commit what was written another way than the Write
-   * tool, or in the moment before the exit. The engine bounds the whole exit,
-   * so the sync gets what is left of that bound; a push it cuts short is made
-   * by the next sync.
+   * The last chance to commit what was written another way than the journal's
+   * tool or the Write tool, or in the moment before the exit. The engine
+   * bounds the whole exit, so the sync gets what is left of that bound; a push
+   * it cuts short is made by the next sync.
    */
   on('session.end', async ($, e, next) => {
     const timeoutMs = sync && loader?.isSyncOn() ? endSyncTimeoutOf(next.budget.remainingMs, sync.isRunning()) : null;

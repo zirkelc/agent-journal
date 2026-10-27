@@ -17,7 +17,7 @@ import {
   type Filters,
 } from './cli.js';
 import type { Host } from './host.js';
-import { CLI_IN_CHECKOUT, RULES_MARK } from './names.js';
+import { CLI_IN_CHECKOUT, RULES_MARK, TOOL_PREFIX } from './names.js';
 import type { PaneActions } from './pane-view.js';
 
 /**
@@ -70,7 +70,8 @@ export function rulesKeeper(host: Host) {
   async function rules(): Promise<string> {
     const { key, session } = await keyOf();
     if (made?.key !== key) {
-      const ran = runCli(host, contextArgs(session.cwd, session.sessionId, session.agent));
+      /** The variant that writes and reads through this mod's tools, rather than files and a shell. */
+      const ran = runCli(host, contextArgs(session.cwd, session.sessionId, session.agent, TOOL_PREFIX));
       const making = { key, rules: ran.then((run) => (run.exitCode === 0 ? run.stdout.trim() : '')) };
       made = making;
       void making.rules.then((text) => {

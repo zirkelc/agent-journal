@@ -15,6 +15,8 @@ export type Script = {
   search?: string;
   read?: string;
   context?: string;
+  /** What `write` prints: the new entry's path. */
+  write?: string;
   /** Whether the config turns sync on, as `config` prints it. */
   isSyncOn?: boolean;
   /** What `sync` prints; off when not given. */

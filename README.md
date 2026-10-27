@@ -25,7 +25,7 @@ Agent Journal makes the model record its work along the way: one small markdown 
 Nothing leaves your machine unless you turn on git sync.
 
 - **No server, no account, no API requests.** The plugin runs locally and makes no network requests of its own.
-- **No hidden tool calls.** Entries are written by the model's own file-writing tool, in your session, in front of you. Nothing runs between sessions.
+- **No hidden tool calls.** In Claude Code, entries are written by the plugin's own `write` tool, which runs the plugin's own `agent-journal` CLI. In Codex, they are written by the model's own file-writing tool. Either way, the call is in your session, in front of you. Nothing runs between sessions.
 - **A read-only hook.** At session start, a hook (a shell script in [`codex/`](codex/) for Codex, a hooks module for Claude Code) reads `~/.config/agent-journal/config` and runs `git rev-parse` to name the project. It writes no files.
 - **Your own files.** Entries are plain markdown in a directory you choose. Delete one and it is gone.
 - **Sync only when you turn it on.** [Git sync](#git-sync) is off by default. When you turn it on, the entries go to the git remote that you choose, and nowhere else.
@@ -37,6 +37,8 @@ Everything stays between you and your model.
 At the start of a session, the plugin injects [`INSTRUCTIONS.md`](templates/INSTRUCTIONS.md) into the context. It contains the journalling rules and the resolved values for your current project, working directory and session.
 
 The model then records each important event in a new markdown file in `~/agent-journal/`. It does this without being asked and without interrupting you.
+
+In Claude Code, the model writes an entry with the plugin's `write` tool. It gives only the summary and the body, and the CLI sets the date, the project, the working directory, the agent and the session. To recall past work, it uses the plugin's `list`, `search` and `read` tools. In Codex, the model writes the file with its own file-writing tool, reads the clock with `date`, and recalls with `ls` and `grep`.
 
 ## Format
 
@@ -116,9 +118,10 @@ The rules for writing the journal reach the main conversation as a hidden messag
 
 The Claude Code plugin is a hooks module in [`claude-code/`](claude-code/). It does this:
 
-- **Programs.** It runs one program, the plugin's own [`bin/agent-journal`](bin/agent-journal), which is a readable POSIX shell script and not a compiled program. It never runs an `agent-journal` from your `PATH`. The script makes the journal rules for the session, lists and reads entries for the pane, and runs git sync. It uses standard shell tools (such as `awk`, `grep` and `ls`) and `git`. It runs `git rev-parse` to name the project of a directory. When git sync is on, it also commits the journal folder and pushes it (`git add`, `git commit`, `git pull --rebase`, `git push`). A push to an SSH remote makes git start `ssh` in batch mode, so it never asks for a password.
+- **Programs.** It runs one program, the plugin's own [`bin/agent-journal`](bin/agent-journal), which is a readable POSIX shell script and not a compiled program. It never runs an `agent-journal` from your `PATH`. The script makes the journal rules for the session, writes the entries that the model gives it, lists, searches and reads entries for the pane and for the model, and runs git sync. It uses standard shell tools (such as `awk`, `grep` and `ls`) and `git`. It runs `git rev-parse` to name the project of a directory. When git sync is on, it also commits the journal folder and pushes it (`git add`, `git commit`, `git pull --rebase`, `git push`). A push to an SSH remote makes git start `ssh` in batch mode, so it never asks for a password.
 - **What it reads.** It reads the conversation only to find out whether the journal rules are already in it. It looks for the rules' mark and reads nothing else from the messages. Through the script, it reads `~/.config/agent-journal/config` and the journal folder. It checks where the plugin's own folder is, to find the script.
 - **What it sends.** It sends no text from the conversation anywhere. The rules go into your own session, as a hidden message or as context of your prompt. Entries leave your machine only through git sync, to the remote that you set.
+- **Tools.** It gives the model four tools, which all run the script: `write` adds one entry with the summary and the body that the model gives, and `list`, `search` and `read` only read the journal. A subagent cannot use `write`. Each tool asks for your permission unless you allow it (see [Permissions](#permissions)).
 - **Hooks.** It adds the rules to a prompt's context when the conversation does not hold them. It watches calls of the Write tool that write into the journal folder, to refresh the pane and to sync, and it does not change those calls.
 - **Agents.** It starts no agent. The code for a search agent is in the plugin, but it is turned off in this version. If it were on, the agent would get only your question and three tools that list, search and read the journal entries.
 
@@ -130,15 +133,22 @@ The pane keeps your project choice for the next session.
 
 #### Permissions
 
-Depending on your permission mode, Claude will ask for permission to write a journal entry. To allow journal entries in general, add this to `~/.claude/settings.json`:
+Depending on your permission mode, Claude will ask for permission to use the plugin's tools: `write`, which adds one entry to the journal, and `list`, `search` and `read`, which only read it. To allow them in general, add this to `~/.claude/settings.json`:
 
 ```json
 {
   "permissions": {
-    "allow": ["Edit(~/agent-journal/**)"]
+    "allow": [
+      "mcp__agent-journal__write",
+      "mcp__agent-journal__list",
+      "mcp__agent-journal__search",
+      "mcp__agent-journal__read"
+    ]
   }
 }
 ```
+
+Claude does not write the entry file itself, so it does not need the `Edit(~/agent-journal/**)` rule that earlier versions asked you to add. You can remove that rule.
 
 ### Codex
 

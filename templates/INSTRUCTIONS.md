@@ -7,6 +7,8 @@ The opening paragraph is framing rather than instruction: `additionalContext` an
 
 Headings start at H2 on purpose. This text is injected standalone into one agent and appended into a larger instructions file for another, and an H1 arriving in the middle of someone else's document competes with that document's own title.
 
+The text comes in two variants, marked by lines that are an HTML comment on their own: `without tools` opens a block printed only by plain `context`, which writes and reads entries as files, and `with tools` opens a block printed only by `context --tools PREFIX`, for an agent that has the journal's own tools. `end` closes either block. (The markers cannot be quoted whole here, since this comment would end at the first one.) Everything outside a block is shared by both, so what an entry is for and when to write one is said once. `__TOOLS__` is the PREFIX: the tool names are the agent's to give, never this file's.
+
 Keep it agent-neutral: no product names, and no tool names beyond the file writing one, which every agent has.
 -->
 
@@ -33,6 +35,14 @@ Some sessions contain nothing worth remembering: greetings, a question answered 
 Never write an entry about the entry: "Created the required journal entry for this session" and "Session opened, no task has been requested yet" tell a future reader only that a session happened. If a summary would mean nothing to someone reading it in a year, there is nothing to write yet.
 
 ### Writing an entry
+
+<!-- with tools -->
+
+Write each entry with the `__TOOLS__write` tool. It takes two things, `summary` and `body`, and sets everything else itself: the date from the clock, the project and the directory from where this session works, the agent and the session id. It answers with the new entry's id. One call is one entry. Never create an entry file any other way, and never edit a past one unless explicitly asked.
+
+The `summary` is one line, 200 characters at most, without double quotes. This is what makes a directory of entries scannable, so it has to stand on its own: what happened and what it means, never a topic tag. "Fixed the auth bug" is a tag. "Token refresh raced the retry and logged users out, so it is serialized behind a mutex now" is a summary.
+<!-- end -->
+<!-- without tools -->
 
 `__JOURNAL_DIR__/YYYY-MM-DDTHHMMSSZ.md`
 
@@ -78,6 +88,7 @@ Exactly these fields, in this order, on every entry:
 Copy those verbatim. They are already resolved, so do not derive them again. If the work happened in a different repository than the one above, or in one when no `project` is listed at all, name that repository by its main checkout, never by a worktree's own directory.
 
 Double-quote any value containing a colon, otherwise the frontmatter parses wrong and does so silently.
+<!-- end -->
 
 The body is the detail the summary had to leave out: what was decided, what was rejected and why, what is still open. As long as the session earned, no longer. If the material is large, write it into the project as a proper document and keep the entry to its summary plus a pointer.
 
@@ -87,8 +98,21 @@ Never record a secret, token, key or credential in an entry. The journal is a pl
 
 Read the journal when the user asks about past work. Not otherwise, and never at session start.
 
+<!-- with tools -->
+
+Read it with the journal's own tools, never with a shell or a file read of the journal folder:
+
+- `__TOOLS__list` lists entries by date and project, one line each with the id, the project and the summary
+- `__TOOLS__search` finds a text in the summaries and bodies, one line each in the same form
+- `__TOOLS__read` returns one entry in full, by its id
+
+Load them by these names first if they are not loaded yet. `project` `.` is the current project. The date filters take days in the user's time zone (`2026-01-11`, `today`, `7d`), so a day the user names goes in as it is. Narrow with the summaries first and read whole entries only once they point somewhere.
+<!-- end -->
+<!-- without tools -->
+
     grep '^summary:' __JOURNAL_DIR__/2026-01-*.md     # one dated line per entry, for a month
     ls __JOURNAL_DIR__ | tail -20                     # the most recent entries
     grep -rl '^project: nebula$' __JOURNAL_DIR__      # every entry for one project
 
 Filenames are UTC timestamps, so a glob is a range of UTC dates and `ls` is already chronological. A day the user names is a day in their time zone, which can start on the UTC date before it or end on the UTC date after it, so take the neighbouring date into the glob and judge by the times in the names. `grep` prefixes each match with the filename, which is the date. Narrow with the summaries first and open whole entries only once they point somewhere.
+<!-- end -->

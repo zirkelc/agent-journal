@@ -93,7 +93,7 @@ export function readArgs(id: string): Array<string> {
   return ['read', value];
 }
 
-/** The flags that name a session to `context`: where it works, its id, and the agent and model in it. */
+/** The flags that name a session to `context` and `write`: where it works, its id, and the agent and model in it. */
 function sessionArgs(cwd: string, sessionId: string | undefined, agent: string | undefined): Array<string> {
   const args = ['--cwd', cwd];
   if (sessionId) args.push('--session-id', sessionId);
@@ -101,11 +101,42 @@ function sessionArgs(cwd: string, sessionId: string | undefined, agent: string |
   return args;
 }
 
-/** `context`, the rules for writing the journal, for the session they are given to. */
-export const contextArgs = (cwd: string, sessionId: string | undefined, agent: string | undefined): Array<string> => [
-  'context',
-  ...sessionArgs(cwd, sessionId, agent),
-];
+/**
+ * `context`, the rules for writing the journal, for the session they are given
+ * to. With a tool prefix, the variant that writes and reads through the tools
+ * of that name instead of files.
+ */
+export const contextArgs = (
+  cwd: string,
+  sessionId: string | undefined,
+  agent: string | undefined,
+  toolPrefix?: string,
+): Array<string> => ['context', ...sessionArgs(cwd, sessionId, agent), ...(toolPrefix ? ['--tools', toolPrefix] : [])];
+
+/**
+ * `write` of one entry from its summary and body, for the session that writes
+ * it. The CLI sets the date, the id and the project of the directory itself.
+ * It does not sync: the caller does that on its own, so a push never holds up
+ * the write.
+ */
+export function writeArgs(
+  summary: string,
+  body: string,
+  cwd: string,
+  sessionId: string | undefined,
+  agent: string | undefined,
+): Array<string> {
+  const line = summary.trim();
+  if (line === '') throw new InputError('summary is empty');
+  return ['write', `--summary=${line}`, `--body=${body.trim()}`, ...sessionArgs(cwd, sessionId, agent), '--no-sync'];
+}
+
+/** The id of the entry `write` made, from the path it prints. */
+export function writtenIdOf(stdout: string): string | undefined {
+  const name = stdout.trim().split('\n').at(-1)?.split('/').pop() ?? '';
+  const id = name.replace(/\.md$/, '');
+  return ID.test(id) ? id : undefined;
+}
 
 /** `context --recall`, the text a reader of the journal is given, for the session the question comes from. */
 export const recallArgs = (cwd: string, sessionId: string | undefined, agent: string | undefined): Array<string> => [

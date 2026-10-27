@@ -8,13 +8,16 @@
 #   agent-journal write   [-m SUMMARY]
 #   agent-journal config  [set|unset <key> [value]]
 #   agent-journal sync    [init [URL]]
-#   agent-journal context [--cwd DIR] [--session-id ID] [--agent A] [--recall]
+#   agent-journal context [--cwd DIR] [--session-id ID] [--agent A] [--recall | --tools PREFIX]
 #
 # `context` is left out of the help, since only the agent hooks and the journal
 # pane call it. It prints the text a session should be given: templates/INSTRUCTIONS.md,
 # resolved against the settings and against where the session is. With --recall
 # it prints templates/RECALL.md instead, the text for a model that only reads the
-# journal, with the clock and the calendar.
+# journal, with the clock and the calendar. With --tools it prints the variant
+# of the rules for an agent that has the journal's own tools, named PREFIX
+# followed by write, list, search and read, instead of a file to write and
+# commands to read with.
 # It prints plain text and knows nothing about any agent, which is the seam that
 # lets one adapter per agent wrap it in whatever that agent reads.
 #
@@ -67,7 +70,8 @@ help_text() {
 usage: agent-journal list   [filters]
        agent-journal search TEXT [filters]
        agent-journal read   latest | 2026-01-11T143000Z | 2026-01-11
-       agent-journal write  [--summary S] [--body B] [--project P] [--cwd DIR] [--agent A]
+       agent-journal write  [--summary S] [--body B] [--project P] [--cwd DIR]
+                            [--agent A] [--session-id ID] [--no-sync]
        agent-journal config [set|unset journal_dir <path> | sync git]
        agent-journal sync   [init [URL]]
        agent-journal install [claude|codex] [--all] [--dry-run]
@@ -81,7 +85,9 @@ write takes the summary and the body as flags, and anything piped in is the
 body. Without a summary it opens $EDITOR on a template, carrying any body it
 already has. The project and the directory come from where you are unless the
 flags say otherwise. --project . names the repository of --cwd, and fails
-outside one.
+outside one. --agent and --session-id record which agent and session wrote it.
+It prints the new entry's path, whose name without .md is its id. --no-sync
+leaves the sync to the caller.
 
 filters: --date D      one local year, month or day: 2026, 2026-01, 2026-01-11
          --since D     from this local day or time on: YYYY-MM-DD, today, 7d,
@@ -790,6 +796,8 @@ body_set=0
 all_set=0
 dry_run=0
 recall=0
+tools=
+no_sync=0
 
 arg1=
 arg2=
@@ -829,6 +837,14 @@ while [ $# -gt 0 ]; do
     # For `context`: the text for a reader of the journal instead of the rules
     # for writing it.
     --recall) recall=1; shift ;;
+    # For `context`: the rules for an agent that writes and reads the journal
+    # through tools of its own, which the value names: each tool is this prefix
+    # followed by write, list, search or read.
+    --tools) [ $# -ge 2 ] || usage; tools=$2; shift 2 ;;
+    --tools=*) tools=${1#--tools=}; shift ;;
+    # For `write`: the caller syncs on its own, after the write has returned, so
+    # a slow push does not hold up the one who wrote.
+    --no-sync) no_sync=1; shift ;;
     # One flag per field, rather than one flag for "the message". An entry is a
     # summary and a body, and a single `-m` cannot say which it meant. Spelled
     # out like every other flag here, none of which has a short form.
@@ -1948,7 +1964,7 @@ EOF
   printf '%s\n' "$entry"
   # The entry is written whatever the sync makes of it, so its line goes to
   # stderr and its failure does not fail the write.
-  [ "$cfg_sync" != git ] || sync_journal >&2 || :
+  [ "$no_sync" = 1 ] || [ "$cfg_sync" != git ] || sync_journal >&2 || :
   exit 0
 fi
 
@@ -1972,9 +1988,10 @@ fi
 
 # ---------------------------------------------------------------- context
 
-# Without --recall, the rules a session is given for writing entries. With it,
-# RECALL.md: what a model that only reads the journal is told, which carries the
-# clock and the calendar, so that model never works out a date itself.
+# Without --recall, the rules a session is given for writing entries, in the
+# variant --tools picks. With it, RECALL.md: what a model that only reads the
+# journal is told, which carries the clock and the calendar, so that model never
+# works out a date itself.
 instructions=$root/templates/INSTRUCTIONS.md
 [ "$recall" = 0 ] || instructions=$root/templates/RECALL.md
 
@@ -2002,9 +2019,10 @@ AGENT_JOURNAL_TIME=$time awk \
   -v project="$project" \
   -v cwd="$(abbrev_home "$cwd")" \
   -v session_id="$session_id" \
-  -v agent="$agent" '
+  -v agent="$agent" \
+  -v tools="$tools" '
   BEGIN {
-    keys = "journal_dir project cwd session_id agent time"
+    keys = "journal_dir project cwd session_id agent time tools"
     n = split(keys, key, " ")
     value["journal_dir"] = journal_dir
     value["project"] = project
@@ -2012,6 +2030,7 @@ AGENT_JOURNAL_TIME=$time awk \
     value["session_id"] = session_id
     value["agent"] = agent
     value["time"] = ENVIRON["AGENT_JOURNAL_TIME"]
+    value["tools"] = tools
 
     # In a gsub replacement `&` means the matched text and `\` escapes, so a
     # value containing either would substitute itself back in mangled.
@@ -2022,11 +2041,23 @@ AGENT_JOURNAL_TIME=$time awk \
   # what the session is told.
   NR == 1 && /^<!--/ { comment = 1 }
   comment { if (/-->/) comment = 0; next }
+  # One block per variant, so the two share every line outside them. A block
+  # for the other variant is left out, markers and all.
+  /^<!-- with tools -->$/ { block = "with"; gap = 1; next }
+  /^<!-- without tools -->$/ { block = "without"; gap = 1; next }
+  /^<!-- end -->$/ { block = ""; gap = 1; next }
+  block == "with" && tools == "" { next }
+  block == "without" && tools != "" { next }
   # The blank lines the comment left behind are not the start of the text.
   !started && /^[ \t]*$/ { next }
+  # A marker can stand in a paragraph of its own, and the blank line on each
+  # side of it would then be two where the text has one.
+  gap && blank && /^[ \t]*$/ { next }
 
   {
     started = 1
+    gap = 0
+    blank = $0 ~ /^[ \t]*$/
     line = $0
     for (i = 1; i <= n; i++) {
       placeholder = "__" toupper(key[i]) "__"
