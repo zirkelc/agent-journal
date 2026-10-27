@@ -129,6 +129,18 @@ describe('sync', () => {
     expect(settings(store).sync).toBe(`git`);
   });
 
+  test(`should name a summary with a backslash in the commit as it reads`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, [{ ...ENTRY, summary: 'Moved C:\\\\temp away.' }]);
+
+    // Act
+    sync(store, ['init']);
+
+    // Assert
+    expect(subjects(store.journalDir)).toEqual([`journal: 2026-10-11T090000Z Moved C:\\temp away.`]);
+  });
+
   test(`should commit every file in the folder, not only entries`, () => {
     // Arrange
     const store = fixture();

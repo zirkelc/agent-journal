@@ -50,13 +50,13 @@ The file starts with frontmatter, so a search across many files can match single
 ```markdown
 ---
 date: 2026-10-07T14:20:00Z
-project: acme-dashboard
+project: "acme-dashboard"
 summary: "Export timed out because the CSV was built on the main thread. Moved it to a worker."
-cwd: ~/Developer/acme-dashboard
+cwd: "~/Developer/acme-dashboard"
 host: "macbook"
 user: "chris"
 agent: "claude/claude-opus-5-5"
-session_id: 743d02a3-22f3-4016-b13e-dd448ad58daf
+session_id: "743d02a3-22f3-4016-b13e-dd448ad58daf"
 ---
 
 Exports of 50,000 rows now finish in 1.2 s instead of timing out after 10 s.

@@ -1227,6 +1227,35 @@ layout_for() {
   esac
 }
 
+# The awk function that reads the value of a frontmatter line, shared by the
+# programs that read entries. Kept in a variable, since awk has no include.
+unquote_awk='
+  # The value of a frontmatter line from column `n` on, without the space in
+  # front. A value in double quotes loses them, and its escaped backslashes and
+  # quotes are read back as one character. A backslash before anything else is
+  # kept, as an older entry wrote it. A bare value, as older entries wrote the
+  # project and the directory, is taken as it is.
+  function unquote(line, n,   out, i, c) {
+    line = substr(line, n)
+    sub(/^[ \t]*/, "", line)
+    if (substr(line, 1, 1) != "\"") return line
+    line = substr(line, 2)
+    if (substr(line, length(line), 1) == "\"") line = substr(line, 1, length(line) - 1)
+    out = ""
+    while ((i = index(line, "\\")) > 0) {
+      c = substr(line, i + 1, 1)
+      if (c == "\\" || c == "\"") {
+        out = out substr(line, 1, i - 1) c
+        line = substr(line, i + 2)
+      } else {
+        out = out substr(line, 1, i)
+        line = substr(line, i + 1)
+      }
+    }
+    return out line
+  }
+'
+
 # One line per entry, out of the files it is given, with the matching line as
 # a fourth column when there are terms. `read` borrows it to show what an
 # ambiguous id matched, so the format is defined once. With `full` set it prints
@@ -1267,7 +1296,7 @@ render() {
     -v offset="$offset" \
     -v tty="$tty" \
     -v color="$color" \
-    -v cols="$cols" '
+    -v cols="$cols" "$unquote_awk"'
     # Whether an entry passes the filters that its frontmatter decides. An
     # agent is recorded as `name/model`, and a filter without a slash is the
     # name or the model, so `claude` and `claude-opus-*` both work.
@@ -1304,16 +1333,6 @@ render() {
         else re = re c
       }
       return re (dir ? "(/|$)" : "$")
-    }
-
-    # The value of a frontmatter line from column `n` on, without the space in
-    # front and without the quotes around it.
-    function unquote(line, n) {
-      line = substr(line, n)
-      sub(/^[ \t]*/, "", line)
-      if (substr(line, 1, 1) == "\"") line = substr(line, 2)
-      if (substr(line, length(line), 1) == "\"") line = substr(line, 1, length(line) - 1)
-      return line
     }
 
     # Looks for the terms not found yet in `text`, which is lower case, and is
@@ -1402,11 +1421,9 @@ render() {
             continue
           }
           if (substr(line, 1, 8) == "project:") {
-            proj = substr(line, 9)
-            sub(/^[ \t]*/, "", proj)
+            proj = unquote(line, 9)
           } else if (substr(line, 1, 4) == "cwd:") {
-            dir = substr(line, 5)
-            sub(/^[ \t]*/, "", dir)
+            dir = unquote(line, 5)
           } else if (substr(line, 1, 5) == "host:") {
             h = unquote(line, 6)
           } else if (substr(line, 1, 5) == "user:") {
@@ -1414,7 +1431,6 @@ render() {
           } else if (substr(line, 1, 6) == "agent:") {
             ag = unquote(line, 7)
           } else if (substr(line, 1, 8) == "summary:") {
-            # The one quoted field, and the quotes are punctuation rather than value.
             summary = unquote(line, 9)
           }
           continue
@@ -2239,8 +2255,8 @@ sync_message() {
   sync_count=$(printf '%s\n' "$sync_files" | awk 'NF { n++ } END { print n + 0 }')
   sync_added=$(sync_git diff --cached --name-only --diff-filter=A)
   if [ "$sync_count" = 1 ] && [ "$sync_added" = "$sync_files" ] && is_entry "$journal_dir/$sync_files"; then
-    sync_summary=$(awk '
-      fm == 1 && sub(/^summary:[ \t]*/, "") { gsub(/^"|"$/, ""); print; exit }
+    sync_summary=$(awk "$unquote_awk"'
+      fm == 1 && /^summary:/ { print unquote($0, 9); exit }
       $0 == "---" { if (fm) exit; fm = 1 }
     ' "$journal_dir/$sync_files")
     sync_id=${sync_files%.md}
@@ -2472,11 +2488,13 @@ if [ "$cmd" = write ]; then
     sleep 1
   done
 
-  # A value that would end its field early or split the line is refused rather
-  # than escaped. The summary and the agent are quoted, so only a quote or a
-  # newline can break them; the others are bare, where a colon ends the key as
-  # well. The agent is quoted because a model id can have a colon, as in
-  # `llama3:8b`, and it is kept as the provider writes it.
+  # A newline in a value would split its line, so it is refused. A quote is
+  # refused too, although the writer could escape it, because the rules tell an
+  # agent that writes its entry file itself to leave quotes out, and the entries
+  # of both ways should hold the same values. The project and the session id
+  # still refuse a colon, as they did when they were written bare. The agent
+  # takes one, because a model id can have it, as in `llama3:8b`, and it is
+  # kept as the provider writes it.
   refuse_if_unquotable() {
     case $2 in
       *'"'* | *"$newline"*)
@@ -2549,18 +2567,26 @@ if [ "$cmd" = write ]; then
   # the path stays unguessable. A shared /tmp is somebody else's to write in too.
   draft_dir=$(mktemp -d "${TMPDIR:-/tmp}/agent-journal-XXXXXX") || exit 1
   draft=$draft_dir/entry.md
+  # Every value but the date is a string in double quotes, so that a YAML
+  # reader gets back what was written: a name such as `null`, `yes` or `12345`
+  # stays a name, and a colon or a ` #` in a directory does not end the value.
+  # A backslash or a quote in it is escaped, since YAML reads a backslash in
+  # double quotes as the start of an escape. The date stays bare, so it reads as
+  # a timestamp.
+  field() {
+    [ -z "$2" ] || printf '%s: "%s"\n' "$1" "$(printf '%s' "$2" | sed 's/[\\"]/\\&/g')"
+  }
   {
     printf -- '---\n'
     printf 'date: %s\n' "$now"
-    [ -z "$project" ] || printf 'project: %s\n' "$project"
-    printf 'summary: "%s"\n' "$summary"
-    printf 'cwd: %s\n' "$(abbrev_home "$cwd")"
-    # Quoted, so a name such as `null`, `yes` or `12345` stays a name for a
-    # YAML reader.
-    [ -z "$host" ] || printf 'host: "%s"\n' "$host"
-    [ -z "$user" ] || printf 'user: "%s"\n' "$user"
-    [ -z "$agent" ] || printf 'agent: "%s"\n' "$agent"
-    [ -z "$session_id" ] || printf 'session_id: %s\n' "$session_id"
+    field project "$project"
+    # Written even when empty, so the editor has the quotes to fill in.
+    if [ -n "$summary" ]; then field summary "$summary"; else printf 'summary: ""\n'; fi
+    field cwd "$(abbrev_home "$cwd")"
+    field host "$host"
+    field user "$user"
+    field agent "$agent"
+    field session_id "$session_id"
     printf -- '---\n\n'
   } > "$draft" || exit 1
 
@@ -2632,6 +2658,9 @@ EOF
 
   inner=${summary_line#\"}
   inner=${inner%\"}
+  # A summary given as a flag is measured as it was given, not with the
+  # backslashes its escapes add.
+  [ "$summary_set" = 0 ] || inner=$summary
 
   [ -n "$inner" ] || reject 'the summary is empty'
   [ "${#inner}" -le 200 ] ||

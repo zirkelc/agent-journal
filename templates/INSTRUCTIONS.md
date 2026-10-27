@@ -61,13 +61,13 @@ Use the `Write` tool to create the file, rather than a shell redirect. Writing a
 ```markdown
 ---
 date: 2026-01-11T14:30:00Z
-project: my-lib
+project: "my-lib"
 summary: "Shipped the v1.2 sync path on prepared statements, with rollback when a batch fails. Not deployed, waiting on Monday's validation."
-cwd: ~/Developer/oss/my-lib
+cwd: "~/Developer/oss/my-lib"
 host: "my-laptop"
 user: "me"
 agent: "my-agent/my-model"
-session_id: 4eb89b17-6f7f-4264-95d4-ea5313ef277e
+session_id: "4eb89b17-6f7f-4264-95d4-ea5313ef277e"
 ---
 
 Replaced the string-interpolated SQL in the sync path with prepare(). Added a rollback so a failed batch leaves nothing half-written, which is what caused Thursday's partial state.
@@ -78,13 +78,13 @@ Considered doing the same to the reporting queries and decided against it for no
 Exactly these fields, in this order, on every entry:
 
 - `date`: the same instant as the filename, full ISO 8601 with colons. Leave it unquoted, so it parses as a timestamp rather than as a string.
-- `project`: the repository the work belongs to, named after its main checkout so that every worktree of it files under one name. Omit the field when no `project` is listed under Current session below, which means the session is not in a repository at all. Never make one up from the directory name: a bare directory is not a project, and `cwd` still records where the work happened.
-- `summary`: one line, always double-quoted, about 150 characters and never more than 200, so one sentence. This is what makes a directory of entries scannable, so it has to stand on its own: what happened and what it means, never a topic tag. "Fixed the auth bug" is a tag. "Token refresh raced the retry and logged users out, so it is serialized behind a mutex now" is a summary.
-- `cwd`: the directory the session is working in, written with `~` for home. This is the only place a worktree is recorded, since `project` deliberately collapses them.
+- `project`: the repository the work belongs to, always double-quoted, named after its main checkout so that every worktree of it files under one name. Omit the field when no `project` is listed under Current session below, which means the session is not in a repository at all. Never make one up from the directory name: a bare directory is not a project, and `cwd` still records where the work happened.
+- `summary`: one line, always double-quoted and without double quotes inside, about 150 characters and never more than 200, so one sentence. This is what makes a directory of entries scannable, so it has to stand on its own: what happened and what it means, never a topic tag. "Fixed the auth bug" is a tag. "Token refresh raced the retry and logged users out, so it is serialized behind a mutex now" is a summary.
+- `cwd`: the directory the session is working in, always double-quoted, written with `~` for home. This is the only place a worktree is recorded, since `project` deliberately collapses them.
 - `host`: the machine the session runs on, always double-quoted. A journal can collect entries from several machines, and a session can be resumed only on the machine that has its transcript. Omit the field if none is given below.
 - `user`: the account the session runs as on that machine, always double-quoted. Omit the field if none is given below.
 - `agent`: which agent wrote the entry, and which model it was running as, always double-quoted, since a model id can contain a colon. Together with `session_id` this is what says where the work can be picked back up, since a session id is only meaningful to the tool that issued it. Omit the field if none is given below.
-- `session_id`: the session this entry came from, which is what joins it back to the full transcript. Omit the field if no id is given below.
+- `session_id`: the session this entry came from, always double-quoted, which is what joins it back to the full transcript. Omit the field if no id is given below.
 
 ### Current session
 
@@ -97,7 +97,7 @@ Exactly these fields, in this order, on every entry:
 
 Copy those verbatim. They are already resolved, so do not derive them again. If the work happened in a different repository than the one above, or in one when no `project` is listed at all, name that repository by its main checkout, never by a worktree's own directory.
 
-Double-quote any value containing a colon, otherwise the frontmatter parses wrong and does so silently.
+Double-quote every value except `date`, so that the frontmatter parses as written. Inside the quotes, write each backslash twice (`\\`), because YAML reads a single one as the start of an escape.
 <!-- end -->
 
 The body is the detail the summary had to leave out: what was decided, what was rejected and why, what is still open. As long as the session earned, no longer. If the material is large, write it into the project as a proper document and keep the entry to its summary plus a pointer.
@@ -140,11 +140,11 @@ Some commands that work, all from inside the folder:
 
     cd __JOURNAL_DIR__
     ls | awk '$0 >= "2026-01-10T230000Z" && $0 < "2026-01-11T230000Z"'     # one local day, here UTC+01:00
-    ls | awk '$0 >= "2026-01-04T230000Z"' | xargs grep -l '^project: my-lib$' | xargs grep -H '^summary:'
+    ls | awk '$0 >= "2026-01-04T230000Z"' | xargs grep -lE '^project: "?my-lib"?$' | xargs grep -H '^summary:'
                                                                              # the summaries of one project since a day
-    grep -l '^project: my-lib$' *.md | head -1                               # the first entry of a project
+    grep -lE '^project: "?my-lib"?$' *.md | head -1                          # the first entry of a project
     grep -il -E 'deploy|release' *.md | xargs grep -H '^summary:'            # entries with either word, with their summaries
-    ls | awk '$0 >= "2026-01-04T230000Z"' | xargs grep -h '^project:' | sort | uniq -c   # entries per project since a day
+    ls | awk '$0 >= "2026-01-04T230000Z"' | xargs grep -h '^project:' | tr -d '"' | sort | uniq -c   # entries per project since a day
 
 How to find what the user asks for:
 
