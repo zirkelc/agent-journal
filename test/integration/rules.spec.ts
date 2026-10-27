@@ -36,7 +36,7 @@ function claude(setup: Setup, prompt: string, options: { resume?: string; tools?
     '--model',
     'haiku',
     '--plugin-dir',
-    ROOT,
+    join(ROOT, 'claude-code'),
     '--debug-file',
     debugFile,
     ...ISOLATED_ARGS,

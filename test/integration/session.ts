@@ -1,8 +1,7 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { GIT_IDENTITY, ROOT } from '../helpers.ts';
+import { GIT_IDENTITY, ROOT, tempDir } from '../helpers.ts';
 
 /** How long one session may take, a compaction included. */
 export const SESSION_TIMEOUT_MS = 240_000;
@@ -30,7 +29,7 @@ export type Setup = { home: string; work: string; journal: string; env: NodeJS.P
  * identity on to the CLI that commits.
  */
 export function setup(): Setup {
-  const home = realpathSync(mkdtempSync(join(tmpdir(), 'agent-journal-it-')));
+  const home = tempDir('it-');
   leftovers.add(home);
   const work = join(home, 'work');
   const journal = join(home, 'journal');

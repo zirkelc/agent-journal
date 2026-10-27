@@ -368,6 +368,27 @@ describe('pane-view', () => {
     }
   });
 
+  test('an opened entry shows its host and user after its directory', async ($, on) => {
+    // Arrange
+    const set = drawsWith(on);
+    set({
+      ...MODEL,
+      opened: {
+        id: '2026-10-06T143000Z',
+        status: 'ready',
+        text: '---\ndate: 2026-10-06T14:30:00Z\nsummary: "Shipped it"\ncwd: ~/work\nhost: cookiebox\nuser: agent\nagent: claude/opus\n---\n',
+      },
+    });
+
+    // Act
+    const text = JSON.stringify(await $.ui.render({ ...VIEW, surface: 'terminal' } as never));
+
+    // Assert
+    const order = ['Directory', 'Host', 'cookiebox', 'User', 'agent', 'Agent'].map((word) => text.indexOf(`"${word}`));
+    expect(order.every((at) => at >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+  });
+
   test('an answered turn shows its answer without the Sources line, its sources as dim buttons, and a status line', async ($, on) => {
     // Arrange
     const chat: Array<JournalTurn> = [

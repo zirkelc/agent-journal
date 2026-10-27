@@ -1,6 +1,6 @@
 {
   "name": "agent-journal",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "A journal written by your agent, autonomously. One small markdown file per milestone, written as the work happens, in a format built to be scanned with grep and ls.",
   "author": {
     "name": "Chris Cook",
@@ -9,13 +9,7 @@
   "homepage": "https://github.com/zirkelc/agent-journal",
   "repository": "https://github.com/zirkelc/agent-journal",
   "license": "MIT",
-  "keywords": [
-    "journal",
-    "diary",
-    "memory",
-    "context",
-    "recall",
-    "sessions"
-  ],
-  "hooks": "./codex/hooks.json"
+  "keywords": ["journal", "diary", "memory", "context", "recall", "sessions"],
+  "hooks": "./hooks.json",
+  "types": "./types/index.d.ts"
 }

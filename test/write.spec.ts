@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { chmodSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
-import { type Fixture, fails, fixture, frontmatter, rows, run, tilde, worktree } from './helpers.js';
+import { configure, type Fixture, fails, fixture, frontmatter, rows, run, tilde, worktree } from './helpers.js';
 
 /**
  * A stand-in for `$EDITOR`: it fills the summary in and appends a body, the way
@@ -44,6 +44,17 @@ describe('write', () => {
     // Assert
     const entry = written(store);
     expect(frontmatter(entry.text).summary).toBe('Added the write command.');
+  });
+
+  test(`should leave no draft folder behind in the temp folder`, () => {
+    // Arrange
+    const store = fixture();
+
+    // Act
+    run(store, ['write', '--summary', 'Added the write command.'], { at: store.repo });
+
+    // Assert
+    expect(readdirSync(join(store.home, 'tmp'))).toEqual([]);
   });
 
   test(`should take the body from stdin`, () => {
@@ -266,7 +277,7 @@ describe('write', () => {
         '--cwd',
         store.repo,
         '--agent',
-        'claude/opus-5-5',
+        'pi/test-model',
         '--session-id',
         'abc-123',
       ],
@@ -276,15 +287,13 @@ describe('write', () => {
     // Assert
     const entry = written(store);
     expect(out).toBe(`${join(store.journalDir, entry.name)}\n`);
-    const { date, ...fields } = frontmatter(entry.text);
-    expect(`${date.replaceAll(':', '')}.md`).toBe(entry.name);
-    expect(fields).toEqual({
-      project: 'repo',
-      summary: 'Written through a tool.',
-      cwd: tilde(store, store.repo),
-      agent: 'claude/opus-5-5',
-      session_id: 'abc-123',
-    });
+    const fields = frontmatter(entry.text);
+    expect(`${fields.date.replaceAll(':', '')}.md`).toBe(entry.name);
+    expect(fields.project).toBe('repo');
+    expect(fields.summary).toBe('Written through a tool.');
+    expect(fields.cwd).toBe(tilde(store, store.repo));
+    expect(fields.agent).toBe('pi/test-model');
+    expect(fields.session_id).toBe('abc-123');
     expect(entry.text.endsWith('---\n\nThe body.\n')).toBe(true);
   });
 
@@ -418,15 +427,103 @@ describe('the agent it records', () => {
     expect(frontmatter(written(store).text).agent).toBeUndefined();
   });
 
+  test(`should record a model id with a colon in quotes, as the provider writes it`, () => {
+    // Arrange
+    const store = fixture();
+
+    // Act
+    run(store, ['write', '--summary', 'From a local model.', '--agent', 'pi/llama3:8b'], { at: store.repo });
+
+    // Assert
+    const { text } = written(store);
+    expect(text).toContain('\nagent: "pi/llama3:8b"\n');
+    expect(frontmatter(text).agent).toBe('pi/llama3:8b');
+  });
+
+  test(`should count and filter an agent with a colon by its whole value`, () => {
+    // Arrange
+    const store = fixture();
+    run(store, ['write', '--summary', 'From a local model.', '--agent', 'pi/llama3:8b'], { at: store.repo });
+
+    // Act
+    const counted = run(store, ['list', '--by', 'agent']);
+    const filtered = run(store, ['list', '--agent', 'pi/llama3:8b']);
+
+    // Assert
+    expect(counted).toBe('1\tpi/llama3:8b\ntotal\t1\n');
+    expect(rows(filtered).map((row) => row.summary)).toEqual(['From a local model.']);
+  });
+
   test(`should refuse an agent that would break the frontmatter`, () => {
     // Arrange
     const store = fixture();
 
     // Act
-    const result = fails(store, ['write', '--summary', 'Fine.', '--agent', 'a: b'], { at: store.repo });
+    const result = fails(store, ['write', '--summary', 'Fine.', '--agent', 'a"b'], { at: store.repo });
 
     // Assert
     expect(result.status).toBe(2);
-    expect(result.stderr).toContain('colon');
+    expect(result.stderr).toContain('quote');
+  });
+
+  test(`should refuse an agent with a tab, which would add a column to a count`, () => {
+    // Arrange
+    const store = fixture();
+
+    // Act
+    const result = fails(store, ['write', '--summary', 'Fine.', '--agent', 'pi/a:\tb'], { at: store.repo });
+
+    // Assert
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('tab');
+  });
+});
+
+describe('the machine and the account it records', () => {
+  test(`should record the host and the user after the directory`, () => {
+    // Arrange
+    const store = fixture();
+    configure(store, ['set', 'host', 'macbook']);
+    configure(store, ['set', 'user', 'chris']);
+
+    // Act
+    run(store, ['write', '--summary', 'On the laptop.', '--agent', 'claude/opus'], { at: store.repo });
+
+    // Assert
+    const keys = Object.keys(frontmatter(written(store).text));
+    expect(keys).toEqual(['date', 'project', 'summary', 'cwd', 'host', 'user', 'agent']);
+    expect(frontmatter(written(store).text).host).toBe('macbook');
+    expect(frontmatter(written(store).text).user).toBe('chris');
+  });
+
+  // A YAML reader takes a bare `null` or `12345` as another type, not as a name.
+  test(`should quote the host and the user`, () => {
+    // Arrange
+    const store = fixture();
+    configure(store, ['set', 'host', '12345']);
+    configure(store, ['set', 'user', 'null']);
+
+    // Act
+    run(store, ['write', '--summary', 'Quoted.'], { at: store.repo });
+
+    // Assert
+    const text = written(store).text;
+    expect(text).toContain('\nhost: "12345"\n');
+    expect(text).toContain('\nuser: "null"\n');
+  });
+
+  test(`should leave the host and the user out when they are set to none`, () => {
+    // Arrange
+    const store = fixture();
+    configure(store, ['set', 'host', '']);
+    configure(store, ['set', 'user', '']);
+
+    // Act
+    run(store, ['write', '--summary', 'Anonymous.'], { at: store.repo });
+
+    // Assert
+    const result = frontmatter(written(store).text);
+    expect(result.host).toBeUndefined();
+    expect(result.user).toBeUndefined();
   });
 });

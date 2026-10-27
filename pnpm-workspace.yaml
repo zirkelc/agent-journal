@@ -1,0 +1,7 @@
+# Dependencies whose install scripts may run. esbuild does not need its script,
+# because it takes its binary from an optional dependency. The others come with
+# Pi, which the repository needs only for its types.
+allowBuilds:
+  '@google/genai': false
+  esbuild: false
+  protobufjs: false

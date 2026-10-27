@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${PLUGIN_ROOT}/codex/session-start.sh",
+            "command": "${PLUGIN_ROOT}/session-start.sh",
             "statusMessage": "Reading the journal instruction",
             "timeout": 10
           }

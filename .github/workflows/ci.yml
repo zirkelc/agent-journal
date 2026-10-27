@@ -84,11 +84,11 @@ jobs:
           curl -fsSL https://claude.ai/install.sh | bash
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Validate the plugin
-        run: claude plugin validate .
+        run: claude plugin validate claude-code
       # The journal pane's tests run in Claude Code's own kit, the environment
       # its hooks run in, not under vitest: every *.test.ts under the plugin.
       - name: Test the journal pane
-        run: claude plugin test .
+        run: claude plugin test claude-code
 
   # Real Claude Code sessions with this checkout as their plugin: the journal
   # rules reach the model once, come back after a compaction, and an entry the
@@ -156,48 +156,24 @@ jobs:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           AGENT_JOURNAL_EXPECT_GUARD: ${{ matrix.guard }}
 
-  # Claude Code takes an update only when the version in the manifest changes,
-  # however many commits are pushed after it. So a change to what the plugin
-  # ships, made after the last version change, reaches nobody who has it
-  # installed. This fails until the version is raised, so such changes cannot
-  # sit unreleased without anyone noticing.
-  #
-  # On main, the check compares with the last version change. On any other
-  # branch, it compares with main, so one raise covers a whole pull request.
+  # Release Please keeps a release PR open on main. It raises the version in
+  # package.json and in each plugin manifest (see release-please-config.json),
+  # because Claude Code, Codex and Pi take an update only when that version
+  # changes. Merging the PR tags the release and publishes a GitHub Release,
+  # which starts release.yml for the npm package of Pi.
   release:
     name: Release
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [test, shell, plugin]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      # https://github.com/googleapis/release-please-action
+      - name: Release Please
+        uses: googleapis/release-please-action@v4
         with:
-          fetch-depth: 0
-      - name: Check that shipped changes have a new version
-        run: |
-          # What an installed copy runs. Tests, the README and CI are not in it,
-          # and the Claude Code plugin's tests sit under claude-code/ but are never loaded.
-          shipped='bin claude-code codex lib templates .claude-plugin .codex-plugin'
-          version_at() { git show "$1:.claude-plugin/plugin.json" | jq -r .version; }
-
-          if [ "$GITHUB_REF" = refs/heads/main ]; then
-            since=$(git log -1 --format=%H -G'"version"' -- .claude-plugin/plugin.json)
-            [ -n "$since" ] || { echo 'found no version change in .claude-plugin/plugin.json'; exit 1; }
-            what="after the version was last raised in $(git log -1 --format='%h (%s)' "$since")"
-          else
-            since=$(git merge-base origin/main HEAD)
-            what='on this branch'
-            base=$(version_at "$since")
-            head=$(version_at HEAD)
-          fi
-
-          # shellcheck disable=SC2086
-          changed=$(git diff --name-only "$since" HEAD -- $shipped ':(exclude)claude-code/tests')
-          [ -n "$changed" ] || exit 0
-          if [ "$GITHUB_REF" != refs/heads/main ] && [ "$head" != "$base" ] &&
-            [ "$(printf '%s\n%s\n' "$base" "$head" | sort -V | tail -1)" = "$head" ]; then
-            echo "Shipped files changed on this branch, and the version goes from $base to $head."
-            exit 0
-          fi
-          echo "These shipped files changed $what:"
-          echo "$changed"
-          echo 'Raise the version in .claude-plugin/plugin.json, .codex-plugin/plugin.json and package.json.'
-          exit 1
+          # A release made with the default GITHUB_TOKEN starts no other
+          # workflow, so release.yml would never run.
+          # https://github.com/googleapis/release-please-action?tab=readme-ov-file#github-credentials
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json

@@ -4,11 +4,13 @@
  * through here.
  */
 
-/** One line of `list` or `search` down a pipe. */
+/** One line of `list` down a pipe. */
 export type Entry = {
   id: string;
   project: string;
   summary: string;
+  /** The part of the body line a search matched on, only when there was a text to look for, and empty when the summary matched. */
+  line?: string;
 };
 
 /** The filters the CLI's query commands take, as the tools and the pane give them. */
@@ -75,9 +77,13 @@ export const listArgs = (filters: Filters, maxLimit = MAX_LIMIT): Array<string> 
   ...filterArgs(filters, maxLimit),
 ];
 
-/** `search` for one text with the filters. */
+/**
+ * `list` for one text with the filters. `--fixed`, because the tool looks for
+ * the text as it is, and the CLI otherwise reads it as a regex.
+ */
 export const searchArgs = (text: string, filters: Filters): Array<string> => [
-  'search',
+  'list',
+  '--fixed',
   plain('text', text),
   ...filterArgs(filters),
 ];
@@ -166,13 +172,16 @@ export function journalDirOf(stdout: string): string | undefined {
 /** Whether `config`'s lines turn sync on. */
 export const isSyncOnOf = (stdout: string): boolean => /^sync=git$/m.test(stdout);
 
-/** The entries of `list` or `search` down a pipe: id, project and summary, one tab apart. */
+/**
+ * The entries of `list` down a pipe: id, project and summary, one tab apart,
+ * and the matching line as a fourth column when there was a text to look for.
+ */
 export function entriesOf(stdout: string): Array<Entry> {
   const entries: Array<Entry> = [];
-  for (const line of stdout.split('\n')) {
-    const [id = '', project = '', ...rest] = line.split('\t');
+  for (const text of stdout.split('\n')) {
+    const [id = '', project = '', summary = '', line] = text.split('\t');
     if (!ID.test(id)) continue;
-    entries.push({ id, project, summary: rest.join(' ') });
+    entries.push({ id, project, summary, ...(line !== undefined ? { line } : {}) });
   }
   return entries;
 }

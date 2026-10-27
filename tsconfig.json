@@ -6,7 +6,8 @@
     "allowImportingTsExtensions": true,
     "strict": true,
     "noEmit": true,
+    "skipLibCheck": true,
     "types": ["node", "vitest/globals"]
   },
-  "include": ["test"]
+  "include": ["test", "pi/extensions", "eval"]
 }

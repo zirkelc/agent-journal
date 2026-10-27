@@ -51,7 +51,7 @@ export const AGENT_TOOLS: ReadonlyArray<string> = [toolName(TOOL_LIST), toolName
 export const DENIED_TOOLS: ReadonlyArray<string> = ['Write', 'Edit', 'NotebookEdit', 'Bash'];
 
 /** The CLI the plugin ships, relative to its root. */
-export const CLI_IN_CHECKOUT = 'bin/agent-journal';
+export const CLI_IN_CHECKOUT = 'scripts/agent-journal';
 
 /**
  * The mark the rules' row opens with, which says the conversation holds them.

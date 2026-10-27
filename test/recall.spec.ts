@@ -1,7 +1,20 @@
-import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
-import { type Entry, type Fixture, fails, fixture, output, rows, run, seed, terminal, worktree } from './helpers.js';
+import {
+  type Entry,
+  type Fixture,
+  fails,
+  fixture,
+  merged,
+  output,
+  rows,
+  run,
+  seed,
+  terminal,
+  worktree,
+} from './helpers.js';
 
 /**
  * A week of entries across three projects, with one written outside a
@@ -150,7 +163,7 @@ describe('list', () => {
 
     // Act
     const listed = rows(run(store, ['list', '--project', 'nebula']));
-    const found = rows(run(store, ['search', 'crlf body']));
+    const found = rows(run(store, ['list', 'crlf body']));
 
     // Assert
     expect(listed.map((row) => row.summary)).toEqual([
@@ -209,10 +222,12 @@ describe('list', () => {
 
     // Act
     const listed = rows(run(store, ['list', '--cwd', '~/Developer/checkout-api']));
+    const worktrees = rows(run(store, ['list', '--cwd', '~/Developer/checkout-api*']));
 
     // Assert
-    expect(listed.length).toBe(2);
-    expect(listed[1].summary).toBe('Split the checkout form into two steps.');
+    expect(listed.length).toBe(1);
+    expect(worktrees.length).toBe(2);
+    expect(worktrees[1].summary).toBe('Split the checkout form into two steps.');
   });
 
   test(`should read a relative day, on whichever date implementation is here`, () => {
@@ -305,14 +320,14 @@ describe('list', () => {
   });
 });
 
-describe('search', () => {
+describe('list with terms', () => {
   test(`should match a summary`, () => {
     // Arrange
     const store = fixture();
     seed(store, ENTRIES);
 
     // Act
-    const listed = rows(run(store, ['search', 'jitter']));
+    const listed = rows(run(store, ['list', 'jitter']));
 
     // Assert
     expect(listed.length).toBe(1);
@@ -325,7 +340,7 @@ describe('search', () => {
     seed(store, ENTRIES);
 
     // Act
-    const listed = rows(run(store, ['search', 'address field']));
+    const listed = rows(run(store, ['list', 'address field']));
 
     // Assert
     expect(listed.length).toBe(1);
@@ -338,7 +353,7 @@ describe('search', () => {
     seed(store, ENTRIES);
 
     // Act
-    const listed = rows(run(store, ['search', 'JITTER']));
+    const listed = rows(run(store, ['list', 'JITTER']));
 
     // Assert
     expect(listed.length).toBe(1);
@@ -350,7 +365,7 @@ describe('search', () => {
     seed(store, ENTRIES);
 
     // Act
-    const listed = rows(run(store, ['search', 'the', '--project', 'checkout-api']));
+    const listed = rows(run(store, ['list', 'the', '--project', 'checkout-api']));
 
     // Assert
     expect(listed.length).toBe(2);
@@ -389,24 +404,11 @@ describe('read', () => {
     seed(store, ENTRIES);
 
     // Act
-    const result = fails(store, ['read', '2026-08']);
+    const result = fails(store, ['read', '2026-08-0']);
 
     // Assert
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('matches 4 entries');
-  });
-
-  test(`should list every match of an ambiguous prefix, whatever offset was given`, () => {
-    // Arrange
-    const store = fixture();
-    seed(store, ENTRIES);
-
-    // Act
-    const result = fails(store, ['read', '2026-08', '--offset', '2']);
-
-    // Assert
-    expect(result.stderr).toContain('matches 4 entries');
-    expect(result.stderr.match(/\d{4}-\d{2}-\d{2}T\d{6}Z/g)?.length).toBe(4);
   });
 
   test(`should show ids that tell apart two matches from the same minute`, () => {
@@ -431,7 +433,7 @@ describe('read', () => {
     seed(store, ENTRIES);
 
     // Act
-    const result = output(store, ['read', '2026-08']);
+    const result = output(store, ['read', '2026-08-0']);
 
     // Assert
     expect(result.status).toBe(1);
@@ -444,7 +446,7 @@ describe('read', () => {
     seed(store, ENTRIES);
 
     // Act
-    const shown = terminal(store, ['read', '2026-08'], { stdoutTo: '/dev/null', env: { NO_COLOR: '1' } });
+    const shown = terminal(store, ['read', '2026-08-0'], { stdoutTo: '/dev/null', env: { NO_COLOR: '1' } });
 
     // Assert
     expect(shown.split('\n')[1]).toBe(
@@ -460,7 +462,7 @@ describe('read', () => {
     writeFileSync(join(store.journalDir, '2026-08-03T130000Z.md'), '---\nproject: nebula\nsummary: "Later."\n---\n');
 
     // Act
-    const result = fails(store, ['read', '2026-08-03']);
+    const result = fails(store, ['read', '2026-08-03T']);
 
     // Assert
     expect(result.stderr).toContain('matches 2 entries');
@@ -510,6 +512,36 @@ describe('read', () => {
 
     // Assert
     expect(entry).toContain('Saved on Windows.');
+  });
+
+  test.each([
+    [['read', '2026-08-05T140000Z', '--date', '2025']],
+    [['read', '2026-08-0', '--project', 'nope']],
+    [['read', 'latest', '--limit', '1']],
+    [['read', 'latest', '--host', 'macbook']],
+  ])(`should refuse filters with ids: %j`, (args) => {
+    // Arrange
+    const store = fixture();
+    seed(store, ENTRIES);
+
+    // Act
+    const result = fails(store, args);
+
+    // Assert
+    expect(result.status).toBe(2);
+  });
+
+  test(`should refuse to guess an entry when none is named`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ENTRIES);
+
+    // Act
+    const result = fails(store, ['read']);
+
+    // Assert
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('usage: agent-journal');
   });
 
   test(`should fail when nothing matches`, () => {
@@ -602,14 +634,14 @@ describe('the current project', () => {
     expect(listed.map((row) => row.summary)).toEqual(['From the main checkout.', 'From a worktree.']);
   });
 
-  test(`should resolve the same project for search`, () => {
+  test(`should resolve the same project for a search`, () => {
     // Arrange
     const store = fixture();
     const tree = worktree(store, 'wt-feature');
     seed(store, REPO_ENTRIES);
 
     // Act
-    const listed = rows(run(store, ['search', 'from', '--project', '.'], { at: tree }));
+    const listed = rows(run(store, ['list', 'from', '--project', '.'], { at: tree }));
 
     // Assert
     expect(listed.map((row) => row.summary)).toEqual(['From the main checkout.', 'From a worktree.']);
@@ -625,6 +657,22 @@ describe('the current project', () => {
 
     // Assert
     expect(listed.map((row) => row.summary)).toEqual(['From a worktree.']);
+  });
+
+  test(`should resolve the same project for read with a period`, () => {
+    // Arrange
+    const store = fixture();
+    const tree = worktree(store, 'wt-feature');
+    seed(store, REPO_ENTRIES);
+
+    // Act
+    const shown = run(store, ['read', '2026-08', '--project', '.'], { at: tree });
+
+    // Assert
+    expect(shown.match(/^summary: .*$/gm)).toEqual([
+      'summary: "From the main checkout."',
+      'summary: "From a worktree."',
+    ]);
   });
 
   test(`should fail outside a repository rather than list everything`, () => {
@@ -754,13 +802,13 @@ describe('the exact output', () => {
     seed(store, ENTRIES);
 
     // Act
-    const listed = run(store, ['search', 'the', '--limit', '2']);
+    const listed = run(store, ['list', 'the', '--limit', '2']);
 
     // Assert
     expect(listed).toBe(
       [
-        '2026-08-07T081000Z\t\tSummarised an episode into the required JSON shape.',
-        '2026-08-09T173000Z\tcheckout-api\tSplit the checkout form into two steps.',
+        '2026-08-07T081000Z\t\tSummarised an episode into the required JSON shape.\t',
+        '2026-08-09T173000Z\tcheckout-api\tSplit the checkout form into two steps.\t',
         '',
       ].join('\n'),
     );
@@ -834,6 +882,7 @@ describe('the exact output', () => {
         '2026-08-05T140000Z  checkout-api  Made full jitter the default on the retry backoff.',
         '2026-08-07T081000Z                Summarised an episode into the required JSON shape.',
         '2026-08-09T173000Z  checkout-api  Split the checkout form into two steps.',
+        'matches 1 to 3, counted from the newest; --offset 3 for older ones',
         '',
       ].join('\n'),
     );
@@ -861,6 +910,24 @@ describe('files that are not entries it can read', () => {
     expect(result.stderr).toContain(folder);
   });
 
+  test(`should list the rest when the oldest name is a directory`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ENTRIES);
+    const folder = join(store.journalDir, '2026-08-01T000000Z.md');
+    mkdirSync(folder);
+
+    // Act
+    const listed = output(store, ['list']);
+    const period = output(store, ['read', '2026-08', '--limit', '1']);
+
+    // Assert
+    expect(rows(listed.stdout).length).toBe(4);
+    expect(listed.stderr).toContain(folder);
+    expect(period.status).toBe(0);
+    expect(summariesOf(period.stdout)).toEqual(['summary: "Split the checkout form into two steps."']);
+  });
+
   /** Root reads any file whatever its mode, so the case cannot be made there. */
   test.skipIf(process.getuid?.() === 0)(`should warn about an entry it cannot read and list the rest`, () => {
     // Arrange
@@ -880,7 +947,7 @@ describe('files that are not entries it can read', () => {
     expect(result.stderr).toContain('2026-08-04T000000Z.md');
   });
 
-  test(`should match a search across line breaks in the body`, () => {
+  test(`should match plain text across line breaks in the body with --fixed`, () => {
     // Arrange
     const store = fixture();
     seed(store, [
@@ -889,7 +956,7 @@ describe('files that are not entries it can read', () => {
     ]);
 
     // Act
-    const listed = rows(run(store, ['search', 'one two three four']));
+    const listed = rows(run(store, ['list', '--fixed', 'one two three four']));
 
     // Assert
     expect(listed.map((row) => row.summary)).toEqual(['Short lines.']);
@@ -1201,5 +1268,958 @@ describe('local days', () => {
 
     // Assert
     expect(listed).toEqual(['The 8th, first second.']);
+  });
+});
+
+/**
+ * Entries with every field a session records, for the filters on them and for
+ * the searches that need more than one term.
+ */
+const TAGGED: Array<Entry> = [
+  {
+    stem: '2026-08-03T091500Z',
+    project: 'nebula',
+    summary: 'Reverted the cache key change.',
+    cwd: '~/Developer/nebula',
+    host: 'chris-macbook',
+    user: 'chris',
+    agent: 'claude/opus-5-5',
+    sessionId: 'aaaa-1111',
+    body: 'The key included the turn number, so codex never hit the cache.',
+  },
+  {
+    stem: '2026-08-03T150000Z',
+    project: 'nebula',
+    summary: 'Tried a vhs tape for the demo.',
+    cwd: '~/Developer/nebula',
+    host: 'cookiebox',
+    user: 'agent',
+    agent: 'codex/gpt-5',
+    sessionId: 'bbbb-2222',
+    body: 'Trust prompts broke the recording.',
+  },
+  {
+    stem: '2026-08-04T100000Z',
+    project: 'checkout-api',
+    summary: 'Recorded the README GIF.',
+    cwd: '~/Developer/checkout-api',
+    host: 'chris-macbook',
+    user: 'chris',
+    agent: 'claude/sonnet-5-5',
+    sessionId: 'cccc-3333',
+    body: 'Codex asked for hook trust first.',
+  },
+  {
+    stem: '2026-08-05T120000Z',
+    summary: 'Answered a question outside any repository.',
+    cwd: '~/Downloads',
+    body: 'No project here.',
+  },
+];
+
+/** Whether the awk here reads an escape in a regex, which POSIX leaves open. */
+function awkKnows(escape: string): boolean {
+  const probe = spawnSync('awk', ['BEGIN { exit !match("a", ENVIRON["RE"]) }'], {
+    env: { ...process.env, RE: escape },
+  });
+  return probe.status === 0;
+}
+
+/** The text of an entry on disk, as `read` prints it. */
+function entryText(store: Fixture, stem: string): string {
+  return readFileSync(join(store.journalDir, `${stem}.md`), 'utf8');
+}
+
+/** The summary lines of the entries `read` printed, in the order printed. */
+function summariesOf(shown: string): Array<string> {
+  return shown.match(/^summary: .*$/gm) ?? [];
+}
+
+describe('read with a period', () => {
+  test(`should print every entry of a day in full, oldest first, with one blank line between`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, TAGGED);
+
+    // Act
+    const shown = run(store, ['read', '2026-08-03']);
+
+    // Assert
+    expect(shown).toBe(`${entryText(store, '2026-08-03T091500Z')}\n${entryText(store, '2026-08-03T150000Z')}`);
+  });
+
+  test(`should print every entry of a month and of a year`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, TAGGED);
+
+    // Act
+    const month = run(store, ['read', '2026-08']);
+    const year = run(store, ['read', '2026']);
+
+    // Assert
+    expect(summariesOf(month).length).toBe(4);
+    expect(summariesOf(year).length).toBe(4);
+  });
+
+  test(`should read today and yesterday from the local clock`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, TAGGED);
+    const now = { AGENT_JOURNAL_NOW: String(Date.parse('2026-08-04T12:00:00Z') / 1_000) };
+
+    // Act
+    const today = run(store, ['read', 'today'], { env: now });
+    const yesterday = run(store, ['read', 'yesterday'], { env: now });
+
+    // Assert
+    expect(summariesOf(today)).toEqual(['summary: "Recorded the README GIF."']);
+    expect(summariesOf(yesterday)).toEqual([
+      'summary: "Reverted the cache key change."',
+      'summary: "Tried a vhs tape for the demo."',
+    ]);
+  });
+
+  test(`should take the period as a local day`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, [
+      { stem: '2026-08-04T215959Z', summary: 'The 4th, last second.' },
+      { stem: '2026-08-04T220000Z', summary: 'The 5th, first second.' },
+      { stem: '2026-08-05T215959Z', summary: 'The 5th, last second.' },
+      { stem: '2026-08-05T220000Z', summary: 'The 6th, first second.' },
+    ]);
+
+    // Act
+    const shown = run(store, ['read', '2026-08-05'], { env: { TZ: 'Europe/Berlin' } });
+
+    // Assert
+    expect(summariesOf(shown)).toEqual(['summary: "The 5th, first second."', 'summary: "The 5th, last second."']);
+  });
+
+  test(`should print every entry of the period without a limit`, () => {
+    // Arrange
+    const store = fixture();
+    seed(
+      store,
+      Array.from({ length: 24 }, (_, i) => ({
+        stem: `2026-08-03T${String(i).padStart(2, '0')}0000Z`,
+        summary: `Entry ${i}.`,
+      })),
+    );
+
+    // Act
+    const shown = run(store, ['read', '2026-08-03']);
+
+    // Assert
+    expect(summariesOf(shown).length).toBe(24);
+  });
+
+  test(`should keep the most recent with a limit, and skip the most recent with an offset`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, TAGGED);
+
+    // Act
+    const limited = run(store, ['read', '2026-08', '--limit', '1']);
+    const paged = run(store, ['read', '2026-08', '--limit', '1', '--offset', '1']);
+
+    // Assert
+    expect(summariesOf(limited)).toEqual(['summary: "Answered a question outside any repository."']);
+    expect(summariesOf(paged)).toEqual(['summary: "Recorded the README GIF."']);
+  });
+
+  test(`should apply the filters of list`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, TAGGED);
+
+    // Act
+    const project = run(store, ['read', '2026-08', '--project', 'checkout-api']);
+    const host = run(store, ['read', '2026-08-03', '--host', 'cookiebox']);
+
+    // Assert
+    expect(summariesOf(project)).toEqual(['summary: "Recorded the README GIF."']);
+    expect(summariesOf(host)).toEqual(['summary: "Tried a vhs tape for the demo."']);
+  });
+
+  test(`should fail when no entry is in the period`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, TAGGED);
+
+    // Act
+    const result = output(store, ['read', '2026-08-06']);
+
+    // Assert
+    expect(result.status).toBe(1);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toContain('no entry matches');
+  });
+
+  test(`should refuse a period given twice`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, TAGGED);
+
+    // Act
+    const result = fails(store, ['read', '2026-08', '--date', '2026-08-03']);
+
+    // Assert
+    expect(result.status).toBe(2);
+  });
+
+  test(`should still list the matches of a prefix that is not a period`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, TAGGED);
+
+    // Act
+    const result = fails(store, ['read', '2026-08-03T']);
+
+    // Assert
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('2026-08-03T matches 2 entries:');
+  });
+});
+
+describe('list with several terms', () => {
+  test(`should keep an entry that has every term, anywhere in it`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, TAGGED);
+
+    // Act
+    const listed = rows(run(store, ['list', 'codex', 'trust']));
+
+    // Assert
+    expect(listed.map((row) => row.id)).toEqual(['2026-08-04T100000Z']);
+  });
+
+  test(`should read each term as an extended regex, ignoring case`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, TAGGED);
+
+    // Act
+    const listed = rows(run(store, ['list', 'GIF|vhs']));
+
+    // Assert
+    expect(listed.map((row) => row.id)).toEqual(['2026-08-03T150000Z', '2026-08-04T100000Z']);
+  });
+
+  test(`should keep a backslash in a regex`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, TAGGED);
+
+    // Act
+    const escaped = rows(run(store, ['list', 'readme\\.']));
+    const plain = rows(run(store, ['list', 'readme.']));
+
+    // Assert
+    expect(escaped.length).toBe(0);
+    expect(plain.map((row) => row.id)).toEqual(['2026-08-04T100000Z']);
+  });
+
+  test(`should take the characters of a term literally with --fixed`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, [
+      { stem: '2026-08-03T091500Z', summary: 'Built the c++ addon.' },
+      { stem: '2026-08-04T091500Z', summary: 'Built the c addon.' },
+    ]);
+
+    // Act
+    const listed = rows(run(store, ['list', '--fixed', 'c++']));
+    const regex = rows(run(store, ['list', '--fixed', 'gif|vhs']));
+
+    // Assert
+    expect(listed.map((row) => row.id)).toEqual(['2026-08-03T091500Z']);
+    expect(regex.length).toBe(0);
+  });
+
+  test(`should refuse a regex it cannot read and point to --fixed`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, TAGGED);
+
+    // Act
+    const result = output(store, ['list', 'c++(']);
+
+    // Assert
+    expect(result.status).toBe(2);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toContain('--fixed');
+  });
+
+  /** An escape such as `\\S` is an extension of some awks, and only there can it be lowered by mistake. */
+  test.skipIf(!awkKnows('\\S'))(`should keep the case of an escape in a regex`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, [{ stem: '2026-08-03T091500Z', summary: 'Done.', body: 'ok' }]);
+
+    // Act
+    const listed = rows(run(store, ['list', '\\S']));
+
+    // Assert
+    expect(listed.map((row) => row.id)).toEqual(['2026-08-03T091500Z']);
+  });
+
+  test(`should be the usage error for search, which list replaces`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, TAGGED);
+
+    // Act
+    const result = fails(store, ['search', 'codex']);
+
+    // Assert
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('usage: agent-journal');
+  });
+});
+
+describe('list with the matching line', () => {
+  test(`should add the first matching line as a fourth column when there are terms`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, TAGGED);
+
+    // Act
+    const out = run(store, ['list', 'trust']);
+
+    // Assert
+    expect(out).toBe(
+      [
+        '2026-08-03T150000Z\tnebula\tTried a vhs tape for the demo.\tTrust prompts broke the recording.',
+        '2026-08-04T100000Z\tcheckout-api\tRecorded the README GIF.\tCodex asked for hook trust first.',
+        '',
+      ].join('\n'),
+    );
+  });
+
+  test(`should leave the line empty when the summary matched, since the summary is shown`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, TAGGED);
+
+    // Act
+    const out = run(store, ['list', 'reverted']);
+
+    // Assert
+    expect(out).toBe('2026-08-03T091500Z\tnebula\tReverted the cache key change.\t\n');
+  });
+
+  test(`should give the body line of a term that matched only there`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, TAGGED);
+
+    // Act
+    const out = run(store, ['list', 'reverted', 'turn number']);
+
+    // Assert
+    expect(out).toBe(
+      '2026-08-03T091500Z\tnebula\tReverted the cache key change.\tThe key included the turn number, so codex never hit the cache.\n',
+    );
+  });
+
+  test(`should cut a long line to the part around the match`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, [
+      { stem: '2026-08-03T091500Z', summary: 'Long.', body: `${'a '.repeat(150)}needle ${'b '.repeat(150)}` },
+    ]);
+
+    // Act
+    const line = run(store, ['list', 'needle']).trimEnd().split('\t')[3];
+
+    // Assert
+    expect(line).toBe(`…${'a '.repeat(30)}needle ${'b '.repeat(46)}b…`);
+  });
+
+  test(`should print the line under the entry in a terminal`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, TAGGED);
+
+    // Act
+    const shown = terminal(store, ['list', 'trust'], { env: { NO_COLOR: '1' } }).split('\n');
+
+    // Assert
+    expect(shown.slice(0, 4)).toEqual([
+      '2026-08-03T150000Z  nebula        Tried a vhs tape for the demo.',
+      '    Trust prompts broke the recording.',
+      '2026-08-04T100000Z  checkout-api  Recorded the README GIF.',
+      '    Codex asked for hook trust first.',
+    ]);
+  });
+
+  test(`should keep three columns without terms`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, TAGGED);
+
+    // Act
+    const out = run(store, ['list', '--project', 'nebula']);
+
+    // Assert
+    expect(out).toBe(
+      [
+        '2026-08-03T091500Z\tnebula\tReverted the cache key change.',
+        '2026-08-03T150000Z\tnebula\tTried a vhs tape for the demo.',
+        '',
+      ].join('\n'),
+    );
+  });
+});
+
+describe('filters on the recorded fields', () => {
+  test(`should filter by host`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, TAGGED);
+
+    // Act
+    const listed = rows(run(store, ['list', '--host', 'chris-macbook']));
+
+    // Assert
+    expect(listed.map((row) => row.id)).toEqual(['2026-08-03T091500Z', '2026-08-04T100000Z']);
+  });
+
+  test(`should filter by user`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, TAGGED);
+
+    // Act
+    const listed = rows(run(store, ['list', '--user', 'agent']));
+
+    // Assert
+    expect(listed.map((row) => row.id)).toEqual(['2026-08-03T150000Z']);
+  });
+
+  test(`should filter by the agent name, by the model, or by both`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, TAGGED);
+
+    // Act
+    const name = rows(run(store, ['list', '--agent', 'claude']));
+    const model = rows(run(store, ['list', '--agent', 'opus-*']));
+    const both = rows(run(store, ['list', '--agent', 'claude/sonnet-5-5']));
+    const neither = rows(run(store, ['list', '--agent', 'claude/gpt-*']));
+
+    // Assert
+    expect(name.map((row) => row.id)).toEqual(['2026-08-03T091500Z', '2026-08-04T100000Z']);
+    expect(model.map((row) => row.id)).toEqual(['2026-08-03T091500Z']);
+    expect(both.map((row) => row.id)).toEqual(['2026-08-04T100000Z']);
+    expect(neither.length).toBe(0);
+  });
+
+  test(`should take a star and a question mark in the project, the host and the user`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, TAGGED);
+
+    // Act
+    const project = rows(run(store, ['list', '--project', 'neb*']));
+    const host = rows(run(store, ['list', '--host', '*box']));
+    const user = rows(run(store, ['list', '--user', 'ch?is']));
+
+    // Assert
+    expect(project.map((row) => row.id)).toEqual(['2026-08-03T091500Z', '2026-08-03T150000Z']);
+    expect(host.map((row) => row.id)).toEqual(['2026-08-03T150000Z']);
+    expect(user.map((row) => row.id)).toEqual(['2026-08-03T091500Z', '2026-08-04T100000Z']);
+  });
+
+  test(`should match the whole value, with the other characters as they are`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, [
+      { stem: '2026-08-03T090000Z', project: 'a.b', summary: 'A dot.' },
+      { stem: '2026-08-03T100000Z', project: 'axb', summary: 'Any character.' },
+      { stem: '2026-08-03T110000Z', project: 'a.b-docs', summary: 'A longer name.' },
+    ]);
+
+    // Act
+    const listed = rows(run(store, ['list', '--project', 'a.b']));
+
+    // Assert
+    expect(listed.map((row) => row.summary)).toEqual(['A dot.']);
+  });
+
+  test(`should keep a backslash in a filter value`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, [
+      { stem: '2026-08-03T091500Z', summary: 'From the domain.', user: 'CORP\\nina' },
+      { stem: '2026-08-04T091500Z', summary: 'From another.', user: 'nina' },
+    ]);
+
+    // Act
+    const listed = rows(run(store, ['list', '--user', 'CORP\\nina']));
+
+    // Assert
+    expect(listed.map((row) => row.summary)).toEqual(['From the domain.']);
+  });
+
+  test(`should combine a filter with a search`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, TAGGED);
+
+    // Act
+    const listed = rows(run(store, ['list', 'codex', '--host', 'cookiebox']));
+
+    // Assert
+    expect(listed.length).toBe(0);
+  });
+
+  test(`should apply the same filters to read with a period`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, TAGGED);
+
+    // Act
+    const shown = run(store, ['read', '2026-08', '--host', 'cookiebox', '--user', 'agent']);
+
+    // Assert
+    expect(summariesOf(shown)).toEqual(['summary: "Tried a vhs tape for the demo."']);
+  });
+});
+
+describe('--cwd with wildcards', () => {
+  const PLACES: Array<Entry> = [
+    { stem: '2026-08-03T090000Z', summary: 'In the checkout.', cwd: '~/Developer/nebula' },
+    { stem: '2026-08-03T100000Z', summary: 'In a package.', cwd: '~/Developer/nebula/packages/core' },
+    { stem: '2026-08-03T110000Z', summary: 'In a worktree.', cwd: '~/Developer/worktrees/nebula/fix-cache' },
+    { stem: '2026-08-03T120000Z', summary: 'In another worktree.', cwd: '~/Developer/worktrees/checkout-api/gif' },
+    { stem: '2026-08-03T130000Z', summary: 'In a longer name.', cwd: '~/Developer/nebula-docs' },
+  ];
+
+  function summaries(store: Fixture, cwd: string): Array<string> {
+    return rows(run(store, ['list', '--cwd', cwd])).map((row) => row.summary);
+  }
+
+  test(`should match a directory and the directories under it, not a longer name`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, PLACES);
+
+    // Act
+    const listed = summaries(store, '~/Developer/nebula');
+
+    // Assert
+    expect(listed).toEqual(['In the checkout.', 'In a package.']);
+  });
+
+  test(`should match one part of a path for a star`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, PLACES);
+
+    // Act
+    const worktrees = summaries(store, '~/Developer/worktrees/*/fix-*');
+    const named = summaries(store, '~/Developer/nebula*');
+
+    // Assert
+    expect(worktrees).toEqual(['In a worktree.']);
+    expect(named).toEqual(['In the checkout.', 'In a package.', 'In a longer name.']);
+  });
+
+  test(`should match one character for a question mark`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, PLACES);
+
+    // Act
+    const listed = summaries(store, '~/Developer/worktrees/checkout-ap?');
+
+    // Assert
+    expect(listed).toEqual(['In another worktree.']);
+  });
+
+  test(`should take the other characters of a pattern as they are`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, [
+      { stem: '2026-08-03T090000Z', summary: 'A dot.', cwd: '~/Developer/a.b' },
+      { stem: '2026-08-03T100000Z', summary: 'Any character.', cwd: '~/Developer/axb' },
+    ]);
+
+    // Act
+    const listed = summaries(store, '~/Developer/a.b');
+
+    // Assert
+    expect(listed).toEqual(['A dot.']);
+  });
+});
+
+describe('options that list no longer takes', () => {
+  test.each([
+    [['list', 'cache', '--summary-only']],
+    [['list', '--count', 'project']],
+    [['list', '--session', 'aaaa']],
+    [['list', '--date', 'last-week']],
+  ])(`should refuse %j`, (args) => {
+    // Arrange
+    const store = fixture();
+    seed(store, TAGGED);
+
+    // Act
+    const result = fails(store, args);
+
+    // Assert
+    expect(result.status).toBe(2);
+  });
+});
+
+describe('--date with a relative day', () => {
+  test(`should take today and yesterday`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, TAGGED);
+    const now = { AGENT_JOURNAL_NOW: String(Date.parse('2026-08-04T12:00:00Z') / 1_000) };
+
+    // Act
+    const today = rows(run(store, ['list', '--date', 'today'], { env: now }));
+    const yesterday = rows(run(store, ['list', '--date', 'yesterday'], { env: now }));
+
+    // Assert
+    expect(today.map((row) => row.id)).toEqual(['2026-08-04T100000Z']);
+    expect(yesterday.map((row) => row.id)).toEqual(['2026-08-03T091500Z', '2026-08-03T150000Z']);
+  });
+});
+
+describe('a list that is cut', () => {
+  test(`should say on stderr how many matched and how to get the older ones`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, TAGGED);
+
+    // Act
+    const first = output(store, ['list', '--limit', '2']);
+    const second = output(store, ['list', '--limit', '1', '--offset', '2']);
+
+    // Assert
+    expect(rows(first.stdout).length).toBe(2);
+    expect(first.stderr).toBe('matches 1 to 2, counted from the newest; --offset 2 for older ones\n');
+    expect(second.stderr).toBe('matches 3 to 3, counted from the newest; --offset 3 for older ones\n');
+  });
+
+  test(`should come after the entries when both streams go to one place`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, TAGGED);
+
+    // Act
+    const both = merged(store, ['list', '--limit', '1']).trim();
+
+    // Assert
+    expect(both.split('\n').at(-1)).toBe('matches 1 to 1, counted from the newest; --offset 1 for older ones');
+  });
+
+  test(`should say nothing when no older match is left`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, TAGGED);
+
+    // Act
+    const all = output(store, ['list']);
+    const last = output(store, ['list', '--limit', '2', '--offset', '2']);
+
+    // Assert
+    expect(all.stderr).toBe('');
+    expect(last.stderr).toBe('');
+  });
+
+  test(`should count the matches of a search, not the entries`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, TAGGED);
+
+    // Act
+    const result = output(store, ['list', 'gif|vhs', '--limit', '1']);
+
+    // Assert
+    expect(result.stderr).toBe('matches 1 to 1, counted from the newest; --offset 1 for older ones\n');
+  });
+
+  test(`should come after the entries for read with a period`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, TAGGED);
+
+    // Act
+    const both = merged(store, ['read', '2026-08', '--limit', '1']).trim();
+
+    // Assert
+    expect(both.split('\n').at(0)).toBe('---');
+    expect(both.split('\n').at(-1)).toBe('matches 1 to 1, counted from the newest; --offset 1 for older ones');
+  });
+
+  test(`should stop reading once it has one match more than it shows`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, TAGGED);
+    const broken = join(store.journalDir, '2026-08-01T000000Z.md');
+    writeFileSync(broken, '---\nsummary: "Locked."\n---\n');
+    chmodSync(broken, 0o000);
+
+    // Act
+    const result = output(store, ['list', '--limit', '2']);
+
+    // Assert
+    expect(result.stderr).toBe('matches 1 to 2, counted from the newest; --offset 2 for older ones\n');
+  });
+
+  test(`should say so for read with a period and a limit`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, TAGGED);
+
+    // Act
+    const result = output(store, ['read', '2026-08', '--limit', '1']);
+
+    // Assert
+    expect(result.stderr).toBe('matches 1 to 1, counted from the newest; --offset 1 for older ones\n');
+  });
+});
+
+describe('read with several ids', () => {
+  test(`should print each entry in full, in the order given, with one blank line between`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, TAGGED);
+
+    // Act
+    const shown = run(store, ['read', '2026-08-04T100000Z', '2026-08-03T091500Z']);
+
+    // Assert
+    expect(shown).toBe(`${entryText(store, '2026-08-04T100000Z')}\n${entryText(store, '2026-08-03T091500Z')}`);
+  });
+
+  test(`should take latest and a unique prefix among them`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, TAGGED);
+
+    // Act
+    const shown = run(store, ['read', 'latest', '2026-08-04T10']);
+
+    // Assert
+    expect(summariesOf(shown)).toEqual([
+      'summary: "Answered a question outside any repository."',
+      'summary: "Recorded the README GIF."',
+    ]);
+  });
+
+  test(`should print nothing and name each id that failed`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, TAGGED);
+
+    // Act
+    const result = output(store, ['read', '2026-08-04T100000Z', '2019-01-01T000000Z', '2026-08-03T']);
+
+    // Assert
+    expect(result.status).toBe(1);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toContain('no entry matches 2019-01-01T000000Z');
+    expect(result.stderr).toContain('2026-08-03T matches 2 entries:');
+  });
+
+  test(`should refuse a period among several ids`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, TAGGED);
+
+    // Act
+    const result = fails(store, ['read', '2026-08-04T100000Z', 'today']);
+
+    // Assert
+    expect(result.status).toBe(2);
+  });
+});
+
+describe('a journal with more names than one command line holds', () => {
+  /**
+   * The names of all entries together are longer than the arguments that one
+   * program can get (1 MB on macOS, 2 MB on most Linux systems), as they are in
+   * a journal of a few years in a deep directory.
+   */
+  function large(): { store: Fixture; newest: string; oldest: string } {
+    const store = fixture();
+    /** A path of about 800 characters, near the limit of a path on macOS, so that fewer files are enough. */
+    const dir = join(store.home, ...Array.from({ length: 3 }, () => 'a'.repeat(240)), 'journal');
+    mkdirSync(dir, { recursive: true });
+    const stems = Array.from({ length: 3_000 }, (_, index) => {
+      const date = new Date(Date.UTC(2020, 0, 1) + index * 3_600_000);
+      return date
+        .toISOString()
+        .replace(/\.\d{3}Z$/, 'Z')
+        .replaceAll(':', '');
+    });
+    for (const stem of stems) {
+      writeFileSync(
+        join(dir, `${stem}.md`),
+        `---\ndate: ${stem}\nproject: big\nsummary: "Entry ${stem}"\n---\n\nBody.\n`,
+      );
+    }
+    run(store, ['config', 'set', 'journal_dir', dir]);
+    return { store, newest: stems.at(-1)!, oldest: stems[0]! };
+  }
+
+  test(`should list and read its entries`, { timeout: 30_000 }, () => {
+    // Arrange
+    const { store, newest, oldest } = large();
+
+    // Act
+    const listed = output(store, ['list', '--limit', '1']);
+    const searched = output(store, ['list', `Entry ${oldest}`, '--fixed']);
+    const read = output(store, ['read', newest.slice(0, 10)]);
+
+    // Assert
+    expect(rows(listed.stdout).map((row) => row.id)).toEqual([newest]);
+    expect(rows(searched.stdout).map((row) => row.id)).toEqual([oldest]);
+    expect(read.status).toBe(0);
+    expect(read.stdout).toContain(`summary: "Entry ${newest}"`);
+  });
+});
+
+describe('list --by', () => {
+  test(`should count the entries per project, the largest count first`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ENTRIES);
+
+    // Act
+    const counted = run(store, ['list', '--by', 'project']);
+
+    // Assert
+    expect(counted).toBe('2\tcheckout-api\n1\t(none)\n1\tnebula\ntotal\t4\n');
+  });
+
+  test(`should count every match, also past the default limit, with no note`, () => {
+    // Arrange
+    const store = fixture();
+    const many: Array<Entry> = Array.from({ length: 25 }, (_, i) => ({
+      stem: `2026-08-${String(i + 1).padStart(2, '0')}T120000Z`,
+      project: 'nebula',
+      summary: `Entry ${i + 1}.`,
+      cwd: '~/Developer/nebula',
+      body: 'Body.',
+    }));
+    seed(store, many);
+
+    // Act
+    const result = output(store, ['list', '--by', 'project']);
+
+    // Assert
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('25\tnebula\ntotal\t25\n');
+    expect(result.stderr).toBe('');
+  });
+
+  test(`should count only the entries that the filters and the terms keep`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ENTRIES);
+
+    // Act
+    const since = run(store, ['list', '--by', 'project', '--since', '2026-08-05']);
+    const term = run(store, ['list', 'jitter', '--by', 'project']);
+
+    // Assert
+    expect(since).toBe('2\tcheckout-api\n1\t(none)\ntotal\t3\n');
+    expect(term).toBe('1\tcheckout-api\ntotal\t1\n');
+  });
+
+  test(`should count per local day, the oldest day first`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, [
+      { stem: '2026-08-03T091500Z', project: 'nebula', summary: 'Morning.', cwd: '~/Developer/nebula', body: 'B.' },
+      /** A quarter past midnight in Berlin, so the next local day. */
+      { stem: '2026-08-03T221500Z', project: 'nebula', summary: 'Late.', cwd: '~/Developer/nebula', body: 'B.' },
+      { stem: '2026-08-04T100000Z', project: 'nebula', summary: 'Next.', cwd: '~/Developer/nebula', body: 'B.' },
+      { stem: '2026-08-04T110000Z', project: 'nebula', summary: 'Again.', cwd: '~/Developer/nebula', body: 'B.' },
+      { stem: '2026-08-09T110000Z', project: 'nebula', summary: 'Later.', cwd: '~/Developer/nebula', body: 'B.' },
+    ]);
+
+    // Act
+    const berlin = run(store, ['list', '--by', 'date'], { env: { TZ: 'Europe/Berlin' } });
+    const utc = run(store, ['list', '--by', 'date']);
+
+    // Assert
+    expect(berlin).toBe('1\t2026-08-03\n3\t2026-08-04\n1\t2026-08-09\ntotal\t5\n');
+    expect(utc).toBe('2\t2026-08-03\n2\t2026-08-04\n1\t2026-08-09\ntotal\t5\n');
+  });
+
+  test(`should keep the whole of a local day on which the clocks change`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, [
+      /** Twenty past midnight in Berlin, still in summer time. */
+      { stem: '2026-10-24T222000Z', project: 'nebula', summary: 'First.', cwd: '~/Developer/nebula', body: 'B.' },
+      /** A minute before midnight in Berlin, in winter time. */
+      { stem: '2026-10-25T225900Z', project: 'nebula', summary: 'Last.', cwd: '~/Developer/nebula', body: 'B.' },
+      { stem: '2026-10-25T230000Z', project: 'nebula', summary: 'Next.', cwd: '~/Developer/nebula', body: 'B.' },
+    ]);
+
+    // Act
+    const counted = run(store, ['list', '--by', 'date'], { env: { TZ: 'Europe/Berlin' } });
+
+    // Assert
+    expect(counted).toBe('2\t2026-10-25\n1\t2026-10-26\ntotal\t3\n');
+  });
+
+  test(`should count per host, per user and per agent`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, TAGGED);
+
+    // Act
+    const host = run(store, ['list', '--by', 'host']);
+    const user = run(store, ['list', '--by', 'user']);
+    const agent = run(store, ['list', '--by', 'agent']);
+
+    // Assert
+    expect(host).toBe('2\tchris-macbook\n1\t(none)\n1\tcookiebox\ntotal\t4\n');
+    expect(user).toBe('2\tchris\n1\t(none)\n1\tagent\ntotal\t4\n');
+    expect(agent).toBe('1\t(none)\n1\tclaude/opus-5-5\n1\tclaude/sonnet-5-5\n1\tcodex/gpt-5\ntotal\t4\n');
+  });
+
+  test(`should give a total of 0 when nothing matches`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ENTRIES);
+
+    // Act
+    const result = output(store, ['list', '--by', 'project', '--date', '2019']);
+
+    // Assert
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('total\t0\n');
+  });
+
+  test.each([
+    [['list', '--by', 'project', '--limit', '5']],
+    [['list', '--by', 'project', '--offset', '5']],
+    [['list', '--by', 'summary']],
+    [['list', '--by']],
+    [['read', '2026-08', '--by', 'project']],
+  ])(`should refuse %j`, (args) => {
+    // Arrange
+    const store = fixture();
+    seed(store, ENTRIES);
+
+    // Act
+    const result = fails(store, args);
+
+    // Assert
+    expect(result.status).toBe(2);
   });
 });

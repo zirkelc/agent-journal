@@ -99,7 +99,7 @@ export const TOOL_SPECS: ReadonlyArray<ToolSpec> = [
   {
     name: TOOL_SEARCH,
     description:
-      'Finds journal entries whose summary or body contains a text, ignoring case. One line each with id, project and summary.',
+      'Finds journal entries whose summary or body contains a text, ignoring case. One line each with id, project, summary and the part of the body that matched (empty when the summary matched), separated by tabs.',
     inputSchema: {
       type: 'object',
       properties: { text: { type: 'string', description: 'The text to look for.' }, ...FILTERS },

@@ -41,7 +41,7 @@ describe('the rules', () => {
     // Assert
     expect(result).not.toMatch(/__[A-Z][A-Z_]*__/);
     expect(result).toContain(`${store.journalDir}/YYYY-MM-DDTHHMMSSZ.md`);
-    expect(result).toContain(`grep '^summary:' ${store.journalDir}/2026-01-*.md`);
+    expect(result).toContain(`    cd ${store.journalDir}\n`);
   });
 
   test(`should name the configured directory rather than the default`, () => {
@@ -68,6 +68,94 @@ describe('the rules', () => {
 
     // Assert
     expect(result).toBe(``);
+  });
+});
+
+describe('the variant with tools', () => {
+  test(`should name the tools with the prefix, and leave out the file and the commands`, () => {
+    // Arrange
+    const store = fixture();
+
+    // Act
+    const rules = context(store, { sessionId: 'abc-123', extra: ['--tools', 'journal_'] });
+
+    // Assert
+    expect(rules).toContain('`journal_write` tool');
+    expect(rules).toContain('- `journal_list` lists entries');
+    expect(rules).not.toContain('date -u');
+    expect(rules).not.toContain('grep');
+    expect(rules).not.toContain('### Current session');
+    expect(rules).not.toContain('<!--');
+    expect(rules).not.toContain('__TOOLS__');
+  });
+
+  test(`should leave the tools out of the plain variant`, () => {
+    // Arrange
+    const store = fixture();
+
+    // Act
+    const rules = context(store);
+
+    // Assert
+    expect(rules).not.toContain('__TOOLS__');
+    expect(rules).not.toContain('write` tool. It takes');
+    expect(rules).not.toContain('<!--');
+    expect(rules).toContain('date -u +%Y-%m-%dT%H:%M:%SZ');
+  });
+
+  /**
+   * Entry names are UTC, and a day the user names is local, so a model that
+   * reads the files needs the UTC bounds of the local days. The tools work
+   * them out themselves.
+   */
+  test(`should give the clock to the plain variant and not to the one with tools`, () => {
+    // Arrange
+    const store = fixture();
+    const env = { AGENT_JOURNAL_NOW: String(Date.parse('2026-10-06T14:15:27Z') / 1_000), TZ: 'Europe/Berlin' };
+
+    // Act
+    const plain = context(store, { env });
+    const tools = context(store, { env, extra: ['--tools', 'journal_'] });
+
+    // Assert
+    expect(plain).toContain(`utc_yesterday_since=2026-10-04T22:00:00Z\nutc_yesterday_until=2026-10-05T21:59:59Z\n`);
+    expect(tools).not.toContain('utc_yesterday_since');
+  });
+
+  test(`should keep the rules both variants share`, () => {
+    // Arrange
+    const store = fixture();
+
+    // Act
+    const plain = context(store, { sessionId: 'abc-123' });
+    const tools = context(store, { sessionId: 'abc-123', extra: ['--tools', 'journal_'] });
+
+    // Assert
+    for (const shared of [
+      'The following is a standing instruction',
+      '### When to write',
+      '### When NOT to write',
+      'Never write an entry about the entry',
+      'The body is the detail the summary had to leave out',
+      'Never record a secret',
+      'Read the journal when the user asks about past work',
+    ]) {
+      expect(plain).toContain(shared);
+      expect(tools).toContain(shared);
+    }
+  });
+
+  test(`should not leave two blank lines in a row where a block was`, () => {
+    // Arrange
+    const store = fixture();
+
+    // Act
+    const plain = context(store);
+    const tools = context(store, { extra: ['--tools', 'journal_'] });
+
+    // Assert
+    expect(plain.includes('\n\n\n')).toBe(false);
+    expect(tools.includes('\n\n\n')).toBe(false);
   });
 });
 
@@ -207,5 +295,37 @@ describe('the agent', () => {
     /** A label with nothing after it would read as a field the model must invent. */
     expect(fields(rendered).agent).toBe(undefined);
     expect(rendered).not.toContain('- `agent`: `');
+  });
+});
+
+describe('the machine and the account', () => {
+  test(`should give the host and the user that are set`, () => {
+    // Arrange
+    const store = fixture();
+    configure(store, ['set', 'host', 'cookiebox']);
+    configure(store, ['set', 'user', 'agent']);
+
+    // Act
+    const result = fields(context(store));
+
+    // Assert
+    expect(result.host).toBe('cookiebox');
+    expect(result.user).toBe('agent');
+  });
+
+  test(`should take the whole line out when a name is set to none`, () => {
+    // Arrange
+    const store = fixture();
+    configure(store, ['set', 'host', '']);
+    configure(store, ['set', 'user', '']);
+
+    // Act
+    const rendered = context(store);
+
+    // Assert
+    expect(fields(rendered).host).toBe(undefined);
+    expect(fields(rendered).user).toBe(undefined);
+    expect(rendered).not.toContain('- `host`: `');
+    expect(rendered).not.toContain('- `user`: `');
   });
 });

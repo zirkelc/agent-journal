@@ -12,6 +12,7 @@ export default defineConfig({
       {
         test: {
           name: 'unit',
+          globalSetup: ['test/setup.ts'],
           include: ['test/**/*.spec.ts'],
           exclude: ['test/integration/**'],
         },
@@ -25,6 +26,7 @@ export default defineConfig({
         esbuild: { tsconfigRaw: '{}' },
         test: {
           name: 'integration',
+          globalSetup: ['test/setup.ts'],
           include: ['test/integration/**/*.spec.ts'],
         },
       },

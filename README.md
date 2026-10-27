@@ -3,9 +3,8 @@
   <p align="center">A journal written by your agent. Autonomously.</p>
 
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/session-dark.png" />
-    <source media="(prefers-color-scheme: light)" srcset="assets/session-light.png" />
-    <img src="assets/session-light.png" alt="A session where the agent writes a journal entry on its own" />
+    <source media="(prefers-color-scheme: dark)" srcset="assets/session-dark.gif" />
+    <img src="assets/session-light.gif" alt="Claude Code changes a function and writes a journal entry on its own. In the shell, ls, grep and cat show the entry as a plain markdown file. A new Claude session then answers why an older decision was made, from the journal" />
   </picture>
 </div>
 
@@ -22,45 +21,47 @@ Agent Journal makes the model record its work along the way: one small markdown 
 
 ## Privacy-first
 
-Nothing leaves your machine unless you turn on git sync.
+Nothing leaves your machine.
 
 - **No server, no account, no API requests.** The plugin runs locally and makes no network requests of its own.
-- **No hidden tool calls.** In Claude Code, entries are written by the plugin's own `write` tool, which runs the plugin's own `agent-journal` CLI. In Codex, they are written by the model's own file-writing tool. Either way, the call is in your session, in front of you. Nothing runs between sessions.
-- **A read-only hook.** At session start, a hook (a shell script in [`codex/`](codex/) for Codex, a hooks module for Claude Code) reads `~/.config/agent-journal/config` and runs `git rev-parse` to name the project. It writes no files.
+- **No hidden tool calls.** Entries are written by the model's own file-writing tool, in your session, in front of you.
+- **A read-only hook.** At session start, a hook reads the config and resolves the dynamic values (project, agent, session, etc.).
 - **Your own files.** Entries are plain markdown in a directory you choose. Delete one and it is gone.
-- **Sync only when you turn it on.** [Git sync](#git-sync) is off by default. When you turn it on, the entries go to the git remote that you choose, and nowhere else.
 
 Everything stays between you and your model.
 
 ## How
 
-At the start of a session, the plugin injects [`INSTRUCTIONS.md`](templates/INSTRUCTIONS.md) into the context. It contains the journalling rules and the resolved values for your current project, working directory and session.
+At the start of a session, the plugin injects [`INSTRUCTIONS.md`](templates/INSTRUCTIONS.md) into the context. It contains the journalling rules and the resolved values for your current project, working directory, agent and session.
 
-The model then records each important event in a new markdown file in `~/agent-journal/`. It does this without being asked and without interrupting you.
-
-In Claude Code, the model writes an entry with the plugin's `write` tool. It gives only the summary and the body, and the CLI sets the date, the project, the working directory, the agent and the session. To recall past work, it uses the plugin's `list`, `search` and `read` tools. In Codex, the model writes the file with its own file-writing tool, reads the clock with `date`, and recalls with `ls` and `grep`.
+The model then records each important event in a new markdown file. It does this without being asked and without interrupting you.
 
 ## Format
 
 Each journal entry is a new markdown file. The filename is the current UTC timestamp in `YYYY-MM-DDTHHMMSSZ` format:
 
 ```
-~/agent-journal/2026-01-11T143000Z.md
+~/agent-journal/2026-10-07T142000Z.md
 ```
 
 The file starts with frontmatter, so a search across many files can match single fields. The body describes what happened:
 
+<!-- prettier-ignore -->
 ```markdown
 ---
-date: 2026-01-11T14:30:00Z
-project: my-awesome-lib
-summary: "Shipped the v1.2 sync path on prepared statements, with rollback when a batch fails."
-cwd: ~/Developer/my-awesome-lib
-agent: claude/opus-5
-session_id: 4eb89b17-6f7f-4264-95d4-ea5313ef277e
+date: 2026-10-07T14:20:00Z
+project: acme-dashboard
+summary: "Export timed out because the CSV was built on the main thread. Moved it to a worker."
+cwd: ~/Developer/acme-dashboard
+host: "macbook"
+user: "chris"
+agent: "claude/opus-5-5"
+session_id: 743d02a3-22f3-4016-b13e-dd448ad58daf
 ---
 
-Replaced the string-interpolated SQL in the sync path with prepare(). Added a rollback so a failed batch leaves nothing half-written, which is what caused Thursday's partial state.
+Exports of 50,000 rows now finish in 1.2 s instead of timing out after 10 s.
+
+Considered building the CSV on the server instead. Rejected for now: the filters run in the browser, so the server would need a second copy of the filter code.
 ```
 
 ## Recall
@@ -75,19 +76,24 @@ ls ~/agent-journal | tail -5
 ls ~/agent-journal/2026-*.md | wc -l
 
 # one dated line per entry, for a day or a month
-grep -h '^summary:' ~/agent-journal/2026-01-11*.md
+grep -h '^summary:' ~/agent-journal/2026-10-*.md
 
 # every entry for one project
-grep -rl '^project: foo$' ~/agent-journal
+grep -rl '^project: acme-dashboard$' ~/agent-journal
 
 # anywhere in an entry, body included
-grep -rl 'rate limit' ~/agent-journal | tail -3
+grep -rli 'filter code' ~/agent-journal | tail -3
 
 # one entry in full
-cat ~/agent-journal/2026-01-11T143000Z.md
+cat ~/agent-journal/2026-10-07T142000Z.md
 ```
 
-The agent can also recall entries on its own. To try it, ask "What did we work on last week?".
+The agent can also recall entries on its own. To try it, ask "What was that CSV export bug again?".
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/recall-dark.gif" />
+  <img src="assets/recall-light.gif" alt="Claude Code is asked about a CSV export bug in another project, searches the journal, and answers from the entry with the bug, the fix, the option that was turned down, and the session to resume" />
+</picture>
 
 ## Install
 
@@ -112,43 +118,32 @@ The plugin needs Claude Code 2.1.287 or later, because it is a [mod](https://cod
 
 Then open a new session and ask Claude to write a journal entry. By default, it writes to the directory `~/agent-journal/`.
 
-The rules for writing the journal reach the main conversation as a hidden message when the session starts, and again after `/clear` or a compaction. On a Team or Enterprise plan, or on a machine with managed settings, Claude Code loads a [built-in guard](https://code.claude.com/docs/en/plugins/mods/admin#know-what-happens-by-default) that keeps plugins out of the session's start-up context. There, the rules come with your first prompt instead, and with the first prompt after `/clear` or a compaction. A prompt that you send while a compaction runs can miss them. The prompt after it brings them again.
+#### Update
 
-#### What the plugin runs and reads
+Get the latest marketplace catalog, then update the plugin:
 
-The Claude Code plugin is a hooks module in [`claude-code/`](claude-code/). It does this:
+```sh
+claude plugin marketplace update zirkelc
+claude plugin update agent-journal@zirkelc
+```
 
-- **Programs.** It runs one program, the plugin's own [`bin/agent-journal`](bin/agent-journal), which is a readable POSIX shell script and not a compiled program. It never runs an `agent-journal` from your `PATH`. The script makes the journal rules for the session, writes the entries that the model gives it, lists, searches and reads entries for the pane and for the model, and runs git sync. It uses standard shell tools (such as `awk`, `grep` and `ls`) and `git`. It runs `git rev-parse` to name the project of a directory. When git sync is on, it also commits the journal folder and pushes it (`git add`, `git commit`, `git pull --rebase`, `git push`). A push to an SSH remote makes git start `ssh` in batch mode, so it never asks for a password.
-- **What it reads.** It reads the conversation only to find out whether the journal rules are already in it. It looks for the rules' mark and reads nothing else from the messages. Through the script, it reads `~/.config/agent-journal/config` and the journal folder. It checks where the plugin's own folder is, to find the script.
-- **What it sends.** It sends no text from the conversation anywhere. The rules go into your own session, as a hidden message or as context of your prompt. Entries leave your machine only through git sync, to the remote that you set.
-- **Tools.** It gives the model four tools, which all run the script: `write` adds one entry with the summary and the body that the model gives, and `list`, `search` and `read` only read the journal. A subagent cannot use `write`. Each tool asks for your permission unless you allow it (see [Permissions](#permissions)).
-- **Hooks.** It adds the rules to a prompt's context when the conversation does not hold them. It watches calls of the Write tool that write into the journal folder, to refresh the pane and to sync, and it does not change those calls.
-- **Agents.** It starts no agent. The code for a search agent is in the plugin, but it is turned off in this version. If it were on, the agent would get only your question and three tools that list, search and read the journal entries.
-
-#### The journal pane
-
-`/agent-journal` opens a pane beside the conversation. It lists the entries of the current project, or of all projects, grouped by day, and narrows them to a year, a month or a day. Press an entry to read it, or send it to the prompt.
-
-The pane keeps your project choice for the next session.
+Then restart Claude Code or run `/reload-plugins` to load the new version.
 
 #### Permissions
 
-Depending on your permission mode, Claude will ask for permission to use the plugin's tools: `write`, which adds one entry to the journal, and `list`, `search` and `read`, which only read it. To allow them in general, add this to `~/.claude/settings.json`:
+Depending on your permission mode, Claude asks for permission to write a journal entry. To allow all journal entries, add this to `~/.claude/settings.json`:
 
 ```json
 {
   "permissions": {
-    "allow": [
-      "mcp__agent-journal__write",
-      "mcp__agent-journal__list",
-      "mcp__agent-journal__search",
-      "mcp__agent-journal__read"
-    ]
+    "allow": ["Edit(~/agent-journal/**)"]
   }
 }
 ```
 
-Claude does not write the entry file itself, so it does not need the `Edit(~/agent-journal/**)` rule that earlier versions asked you to add. You can remove that rule.
+If you changed `journal_dir`, use that directory in the rule.
+
+For the journal pane, how the hooks give the rules to the session, and what the plugin runs, reads and sends, see the [Claude Code plugin README](claude-code/README.md).
 
 ### Codex
 
@@ -176,48 +171,36 @@ writable_roots = ["/Users/you/agent-journal"]
 
 Use the full path rather than `~`. `writable_roots` only applies in `workspace-write` mode; in `read-only` every entry stops to ask, and in `danger-full-access` nothing is restricted and this is unnecessary.
 
-### CLI
+### Pi
+
+Install the package from npm:
+
+```sh
+pi install npm:pi-agent-journal
+```
+
+Then open a new session and ask Pi to write a journal entry. By default, it writes to the directory `~/agent-journal/`. In Pi, the model writes and reads the journal with three tools of its own (`journal_write`, `journal_list` and `journal_read`). Pi does not ask for approval before a tool call, so there is no permission step.
+
+For the tools, how the extension gives the rules to the session, and what it runs, reads and sends, see the [Pi package README](pi/README.md).
+
+## CLI
 
 > [!NOTE]
 > You need to run the [shell installation](#shell) to make the CLI available.
 
-The CLI is optional. You need it only to work with the journal from your shell. It is a thin layer over `ls` and `grep` for common commands:
+The CLI is optional. You need it only to work with the journal from your shell. It is installed as `agent-journal` and as the short name `aj`, and it is a thin layer over `ls`, `grep` and `cat`.
 
-| command | same as | description |
-| --- | --- | --- |
-| `aj list` | `ls ~/agent-journal \| tail -20` | the most recent entries, one line each |
-| `aj search TEXT` | `grep -rli 'rate limit' ~/agent-journal` | summaries and bodies, ignoring case |
-| `aj read ID` | `cat "$(ls ~/agent-journal/*.md \| tail -1)"` | one entry in full |
-| `aj write` | `$EDITOR ~/agent-journal/$(date -u +%Y-%m-%dT%H%M%SZ).md` | add an entry yourself |
-| `aj config` | `cat ~/.config/agent-journal/config` | read and change the settings |
-| `aj sync` | `git add -A && git commit && git push` | commit the journal folder and push it, see [Git sync](#git-sync) |
-| `aj install` | | which agents are on this machine, and how to wire each one up |
-| `aj help` | | every command and option |
+| command                                | description                                                      |
+| -------------------------------------- | ---------------------------------------------------------------- |
+| [`aj list`](docs/cli.md#aj-list)       | list entries, search or count them                               |
+| [`aj read`](docs/cli.md#aj-read)       | print entries in full, by ID or by period                        |
+| [`aj write`](docs/cli.md#aj-write)     | add an entry yourself                                            |
+| [`aj config`](docs/cli.md#aj-config)   | read and change the settings                                     |
+| [`aj sync`](docs/cli.md#aj-sync)       | commit the journal folder and push it, see [Git sync](#git-sync) |
+| [`aj install`](docs/cli.md#aj-install) | find the agents on this machine and wire each one up             |
+| `aj help`                              | the usage help                                                   |
 
-`list` is the default command, so `aj` and `aj list` are the same.
-
-Entries are listed oldest first, so the newest is nearest the prompt. Each line starts with the entry ID, which `aj read` takes as it is. In a terminal the columns are aligned. Down a pipe they are separated by one tab each (ID, project, summary), so `aj list | cut -f1` gives the IDs, and an entry with no project has an empty field.
-
-`list` and `search` take the same filters:
-
-| filter | value | description |
-| --- | --- | --- |
-| `--date` | `2026`, `2026-01`, `2026-01-11` | one year, month or day |
-| `--since` | `2026-01-11`, `today`, `7d`, `2026-01-11T14:30:00+01:00` | from this day or time on |
-| `--until` | same forms | up to and including this day or time |
-| `--project` | a project name, or `.` for here | entries filed under one project, across all its worktrees. `.` names the repository of the current directory the same way the session-start hook does, and fails outside a repository |
-| `--cwd` | a directory, or `.` for here | one directory and everything under it |
-| `--limit` | a number, default `20` | how many of the most recent to print |
-| `--offset` | a number, default `0` | skip this many of the most recent first, to page back through older entries |
-| `--all` | | no limit |
-
-Days are local days, in the time zone of the machine. The IDs stay UTC, so an entry written just after local midnight can carry the date before: in Berlin in winter, `--date 2026-01-11` includes `2026-01-10T231500Z`. A time takes an offset (`+01:00`) or `Z`, and without one it is local time. `--until` with a time includes an entry written in that second. For one exact entry, use `aj read` with its ID.
-
-`aj write` also takes `--project .`. There it names the repository of `--cwd`, the directory the entry records, and also fails outside a repository.
-
-`aj install` with no agent named lists the ones found on this machine, with the command to wire up each. Naming one (`aj install codex`) runs that agent's own plugin commands for you. It writes nothing into any agent's configuration.
-
-Run `aj help` for the usage help.
+The [CLI reference](docs/cli.md) has every option, with examples and the same command without the CLI.
 
 ## Configuration
 
@@ -228,14 +211,26 @@ The config lives in `~/.config/agent-journal/config` and you can edit the file d
 
 # journal_dir=<directory>
 journal_dir=~/agent-journal
+
+# sync=git
+sync=git
+
+# host=<machine name>, or empty to record none
+host=macbook
+
+# user=<account name>, or empty to record none
+user=chris
 ```
 
 If you have the [CLI](#cli) installed, you can change the config with `agent-journal config set <key> <value>`:
 
-| key | default | description |
-| --- | --- | --- |
-| `journal_dir` | `~/agent-journal` | default directory for journal entries |
-| `sync` | off | `git` to commit and push the journal folder after each write, see [Git sync](#git-sync) |
+- `journal_dir`: the directory for journal entries. Default: `~/agent-journal`.
+- `sync`: set it to `git` to commit and push the journal folder after each write, see [Git sync](#git-sync). Default: off.
+- `host`: the machine name each entry records. If not set, the local host name on macOS, else the host name without its domain. If set to empty (`host=`), entries record no host.
+- `user`: the account name each entry records. If not set, the login name. If set to empty (`user=`), entries record no user.
+
+> [!TIP]
+> With git sync, one journal can hold entries from several machines. `host` and `user` tell you where an entry was written, and so where you can resume its session. Set a stable name if the system's name changes or tells more than you want to share, for example `aj config set host macbook`. `aj config unset host` gives the system's name back.
 
 ## Git sync
 
@@ -259,7 +254,8 @@ Use your own journal folder in `--source` if you changed `journal_dir`.
 
 When sync is on, `aj sync` runs:
 
-- in Claude Code, after the model writes an entry, and once more when the session ends if the exit leaves time for it. It runs in the background, so the turn does not wait for a push. In the pane, the status line under the list shows the journal folder and, for a synced journal, `⇅` with the result of the last sync: green after a push, red with the reason after a failure.
+- in Claude Code, after each entry and when the session ends ([more](claude-code/README.md#git-sync)).
+- in Pi, after each entry and when the session ends ([more](pi/README.md#git-sync)).
 - after `aj write`.
 - when you run `aj sync` yourself, for example for entries that Codex wrote.
 
