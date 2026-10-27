@@ -13,8 +13,8 @@
  * So the folder is in the real home, and the rules give the model the working
  * directory as a path from `~`, as a user's rules do.
  *
- * Without the tools, a deny rule removes them, which is how a person turns them
- * off too, and the plugin then gives the rules for files. Pi asks for no
+ * Without the tools, the session starts with `AGENT_JOURNAL_TOOLS=off`, as in
+ * the Pi runner, and the plugin then gives the rules for files. Pi asks for no
  * approval before a tool call. Here the sessions run in `acceptEdits`, which
  * allows a file write in the working folder and the journal, with an allow
  * list of the read tools and of the read-only shell commands that the rules
@@ -63,9 +63,6 @@ const PLUGIN = join(ROOT, 'claude-code');
 const MESSAGE_TIMEOUT_MS = 5 * 60_000;
 /** The most turns one message may take, so that a model in a loop stops. */
 const MAX_TURNS = 60;
-
-/** The plugin's journal tools, which a deny rule removes in the files mode. */
-const JOURNAL_TOOLS = ['write', 'list', 'read'].map((name) => `mcp__agent-journal__${name}`);
 
 /**
  * What a session may run without a question, besides a file write: the read
@@ -161,7 +158,6 @@ function startClaude(options: { cwd: string; base: string; journalDir: string; m
     /** The journal is outside the working folder, and a session without a UI cannot ask for a write there. */
     '--add-dir',
     options.journalDir,
-    ...(options.mode === 'files' ? ['--disallowedTools', ...JOURNAL_TOOLS] : []),
   ];
   const child: ChildProcess = spawn(CLAUDE, args, {
     cwd: options.cwd,
@@ -173,6 +169,8 @@ function startClaude(options: { cwd: string; base: string; journalDir: string; m
       GIT_CEILING_DIRECTORIES: options.base,
       CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1',
       CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
+      /** The files mode turns the plugin's tools off, and the plugin then gives the rules for files. */
+      AGENT_JOURNAL_TOOLS: options.mode === 'files' ? 'off' : 'on',
     },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
@@ -271,8 +269,8 @@ function tokensOf(results: Array<Event>): Record_['tokens'] {
   return { ...tokens, total: tokens.input + tokens.output + tokens.cacheRead + tokens.cacheWrite };
 }
 
-/** The agent as the plugin names it: `claude-haiku-5-5` is `claude/haiku-5-5`. */
-const agentOf = (model: string): string => `claude/${model.replace(/^claude-/, '').replace(/\[.*\]$/, '')}`;
+/** The agent as the CLI records it: the harness and the API id of the model, `claude/claude-haiku-5-5`. */
+const agentOf = (model: string): string => `claude/${model.replace(/\[.*\]$/, '')}`;
 
 async function runOne(test: Case, mode: Mode, repeat: number, model: string): Promise<Record_> {
   const now = new Date();

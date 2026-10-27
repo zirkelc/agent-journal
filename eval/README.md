@@ -93,7 +93,7 @@ node eval/claude-code/run.ts --cases recall-needle,write-milestone --model claud
 Each session loads only the plugin in [`claude-code/`](../claude-code/), with `--setting-sources project,local`, `--strict-mcp-config` and without CLAUDE.md files or memory, so the user's settings, plugins and MCP servers do not get in. All messages of a case go into one session, as stream JSON. The differences from the Pi runner:
 
 - **Home**: Claude Code finds its login on macOS by the path of its config, so a session with another `HOME` is not logged in. The folder of each session is in the real home, as `~/.aj-eval-XXXX`, with the journal, the config (through `XDG_CONFIG_HOME`) and the working directory. The rules give the model the working directory as a path from `~`, as a user's rules do.
-- **Without the tools**: a deny rule removes the three tools, as a person can do too, and the plugin then gives the rules for files.
+- **Without the tools**: the session starts with the plugin's tools turned off, as for Pi. The plugin then registers no tools and gives the rules for files.
 - **Permissions**: Pi asks for no approval. Here the sessions run in `acceptEdits`, which allows a file write in the working directory and in the journal (`--add-dir`), with an allow list of the read tools and of the read-only shell commands that the rules for files use. A session without a UI refuses any other call, and the report counts those calls. The journal tools get no permission check at all at the moment (anthropics/claude-code#104217), so the tools mode never has a refused call.
 - **Deferred tools**: the plugin's `list` and `read` are deferred, so a session loads them with `ToolSearch` before it calls them. Pi's tools are always loaded.
 
