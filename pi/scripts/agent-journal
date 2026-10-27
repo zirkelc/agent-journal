@@ -2581,6 +2581,8 @@ EOF
     reject "the summary is ${#inner} characters, and the limit is 200"
 
   mv "$draft" "$entry" || exit 1
+  # Empty now, and the entry is written whether or not it goes.
+  rmdir "$draft_dir" 2>/dev/null || :
   printf '%s\n' "$entry"
   # The entry is written whatever the sync makes of it, so its line goes to
   # stderr and its failure does not fail the write.

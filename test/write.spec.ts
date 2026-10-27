@@ -46,6 +46,17 @@ describe('write', () => {
     expect(frontmatter(entry.text).summary).toBe('Added the write command.');
   });
 
+  test(`should leave no draft folder behind in the temp folder`, () => {
+    // Arrange
+    const store = fixture();
+
+    // Act
+    run(store, ['write', '--summary', 'Added the write command.'], { at: store.repo });
+
+    // Assert
+    expect(readdirSync(join(store.home, 'tmp'))).toEqual([]);
+  });
+
   test(`should take the body from stdin`, () => {
     // Arrange
     const store = fixture();
