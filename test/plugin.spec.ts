@@ -89,6 +89,22 @@ test(`should give every manifest and the package the same version`, () => {
   expect(distinct.size).toBe(1);
 });
 
+/**
+ * The release PR raises the version of package.json, and of each file that the
+ * release config lists. A manifest left out of that list keeps its old version,
+ * and its agent never takes the update.
+ */
+test(`should raise the version of every manifest in a release`, () => {
+  // Arrange
+  const config = read('release-please-config.json');
+
+  // Act
+  const raised = config.packages['.']['extra-files'].map((file: { path: string }) => file.path);
+
+  // Assert
+  expect([...raised].sort()).toEqual([...AGENTS.map((agent) => agent.manifest), PI.manifest].sort());
+});
+
 describe.each(AGENTS)('the $name plugin', (agent) => {
   test(`should be valid JSON with the fields a marketplace lists it by`, () => {
     // Arrange, Act
