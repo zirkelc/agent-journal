@@ -87,6 +87,24 @@ const FILTERS = {
     type: 'string',
     description: 'Only entries filed under this project. "." is the current project.',
   },
+  cwd: {
+    type: 'string',
+    description:
+      'Only entries from this directory and the directories under it. * and ? match within one name of the path.',
+  },
+  host: {
+    type: 'string',
+    description: 'Only entries written on this machine. * and ? work as in a shell glob.',
+  },
+  user: {
+    type: 'string',
+    description: 'Only entries written by this account. * and ? work as in a shell glob.',
+  },
+  agent: {
+    type: 'string',
+    description:
+      'Only entries of one agent (claude), of one model (claude-opus-5-5), or of both (claude/claude-opus-5-5). * and ? work as in a shell glob.',
+  },
   limit: {
     type: 'integer',
     minimum: 1,
@@ -141,6 +159,10 @@ export const TOOL_SPECS: ReadonlyArray<ToolSpec> = [
             'One of: ["latest"]; one or more entry ids, each whole or a prefix that matches one entry; or one local period: ["today"], ["yesterday"], ["2026"], ["2026-10"] or ["2026-10-22"].',
         },
         project: FILTERS.project,
+        cwd: FILTERS.cwd,
+        host: FILTERS.host,
+        user: FILTERS.user,
+        agent: FILTERS.agent,
         limit: {
           type: 'integer',
           minimum: 1,

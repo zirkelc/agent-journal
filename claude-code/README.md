@@ -37,7 +37,7 @@ Then restart Claude Code or run `/reload-plugins` to load the new version.
 The model writes and reads the journal with three tools of the plugin. They are the same tools that the Pi extension gives:
 
 - `write` adds one entry. The model gives only the summary and the body. The tool sets the date, the project, the directory, the host, the user, the agent and the session.
-- `list` lists entries by project and date, searches the summaries and bodies with regex terms, and counts the matches per project, day, host, user or agent.
+- `list` lists entries by project, date, directory, host, user or agent, searches the summaries and bodies with regex terms, and counts the matches per project, day, host, user or agent.
 - `read` returns entries in full: the latest, one or more by id, or all the entries of a day, a month or a year.
 
 Only the main conversation can use `write`. The rules name the tools, so the model loads `list` and `read` only when you ask about past work.

@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing';
+import { TOOL_SPECS } from '../hooks/agent.js';
+import { MAX_OUTPUT, withOlder } from '../hooks/cli.js';
 import { localDayTime } from '../hooks/format.js';
 import {
   COMMAND,
@@ -456,21 +458,87 @@ describe('register', () => {
         argv.includes('--by')
           ? '2\t2023-11-06\n40\t2026-10-05\ntotal\t42'
           : line('2026-10-05T143000Z', 'repo', 'Did a thing'),
-      stderr: { list: 'matches 1 to 2, counted from the newest; --offset 2 for older ones\n' },
+      stderr: { list: 'matches 1 to 1, counted from the newest; --offset 1 for older ones\n' },
     });
     await $.session.start(SESSION);
 
     // Act
-    const result = await $.tool.call({ tool: toolName(TOOL_LIST), terms: ['login'], project: '.', limit: 2 } as never);
+    const result = await $.tool.call({ tool: toolName(TOOL_LIST), terms: ['login'], project: '.', limit: 1 } as never);
 
     // Assert
     expect(kept.queries().map((run) => run.argv.slice(1))).toEqual([
-      ['list', 'login', '--project', '.', '--limit', '2'],
+      ['list', 'login', '--project', '.', '--limit', '1'],
       ['list', 'login', '--project', '.', '--by', 'date'],
     ]);
     expect((result as { result: string }).result.split('\n').at(-1)).toBe(
-      'matches 1 to 2 of 42, counted from the newest. 40 older matches, back to 2023-11-06, are not in this result: call again with offset 2 before you answer about them.',
+      'matches 1 to 1 of 42, counted from the newest. 41 older matches, back to 2023-11-06, are not in this result: call again with offset 1 before you answer about them.',
     );
+  });
+
+  test('list, and read for a period, pass the directory, host, user and agent filters to the CLI', async ($, on) => {
+    // Arrange
+    const kept = world(on, { list: line('2026-10-05T143000Z', 'repo', 'Did a thing'), read: 'An entry.\n' });
+    await $.session.start(SESSION);
+    const filters = { cwd: '~/Developer/repo', host: 'build-box', user: 'me', agent: 'claude-opus-*' };
+
+    // Act
+    await $.tool.call({ tool: toolName(TOOL_LIST), since: '7d', ...filters } as never);
+    await $.tool.call({ tool: toolName(TOOL_READ), which: ['2026-10-22'], ...filters } as never);
+    const refused = await $.tool.call({ tool: toolName(TOOL_LIST), host: '--all' } as never);
+
+    // Assert
+    const flags = ['--cwd', '~/Developer/repo', '--host', 'build-box', '--user', 'me', '--agent', 'claude-opus-*'];
+    expect(kept.queries().map((run) => run.argv.slice(1))).toEqual([
+      ['list', '--since', '7d', ...flags, '--limit', '50'],
+      ['read', '2026-10-22', ...flags],
+    ]);
+    expect(JSON.stringify(refused)).toContain('host must not start with');
+  });
+
+  test('the list and read tools offer the directory, host, user and agent filters', () => {
+    // Arrange
+    const [list, read] = TOOL_SPECS;
+
+    // Act
+    const keys = [list!, read!].map((spec) => Object.keys(spec.inputSchema.properties as object));
+
+    // Assert
+    expect(keys[0]).toEqual([
+      'terms',
+      'fixed',
+      'date',
+      'since',
+      'until',
+      'project',
+      'cwd',
+      'host',
+      'user',
+      'agent',
+      'limit',
+      'offset',
+      'by',
+    ]);
+    expect(keys[1]).toEqual(['which', 'project', 'cwd', 'host', 'user', 'agent', 'limit', 'offset']);
+  });
+
+  test('a list that fills the result keeps its whole note on the older matches, and gives up its oldest lines for it', () => {
+    // Arrange
+    const rows = Array.from({ length: 4 }, (_, index) =>
+      line(`2026-10-0${index + 1}T090000Z`, 'repo', 'x'.repeat(9_990)),
+    );
+    const text = [...rows, 'matches 1 to 4, counted from the newest; call again with offset 4 for older ones'].join(
+      '\n',
+    );
+
+    // Act
+    const result = withOlder(text, '1\t2026-09-01\n4\t2026-10-01\ntotal\t5');
+
+    // Assert
+    expect(result.length).toBeLessThanOrEqual(MAX_OUTPUT);
+    expect(result.split('\n')).toEqual([
+      ...rows.slice(1),
+      'matches 1 to 3 of 5, counted from the newest. 2 older matches, back to 2026-09-01, are not in this result: call again with offset 3 before you answer about them.',
+    ]);
   });
 
   test('a read call passes its ids, or a period with its project and page, to the CLI', async ($, on) => {

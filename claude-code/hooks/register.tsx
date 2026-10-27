@@ -420,7 +420,11 @@ export const register: Register = (on) => {
     const period = which.length === 1 && isPeriod(which[0]!) ? which[0]! : undefined;
     if (!period || text.length <= MAX_OUTPUT) return { result: capped(text) };
     /** Cut text would lose the last entries without a word, so a long period gives its summaries instead. */
-    const listed = await runCli(host, listArgs({ date: period, project: query.project, limit: MAX_LIMIT }));
+    const { project, cwd, host: machine, user, agent } = query;
+    const listed = await runCli(
+      host,
+      listArgs({ date: period, project, cwd, host: machine, user, agent, limit: MAX_LIMIT }),
+    );
     if (listed.exitCode !== 0) return { result: capped(text) };
     const summaries = fitList(listed.stdout, listed.stderr) ?? withNote(listed.stdout, listed.stderr);
     return {
@@ -617,6 +621,10 @@ function queryOf(input: Record<string, unknown>): Query {
     since: text(input.since),
     until: text(input.until),
     project: text(input.project),
+    cwd: text(input.cwd),
+    host: text(input.host),
+    user: text(input.user),
+    agent: text(input.agent),
     limit: number(input.limit),
     offset: number(input.offset),
     /** Checked against the fields where the arguments are made. */

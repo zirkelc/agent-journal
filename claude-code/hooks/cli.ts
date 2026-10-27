@@ -24,6 +24,12 @@ export type Filters = {
   since?: string;
   until?: string;
   project?: string;
+  /** The directory of the entries and the directories under it. `*` and `?` match within one name of the path. */
+  cwd?: string;
+  /** The machine, the account and the agent or model that wrote the entries, each a glob. */
+  host?: string;
+  user?: string;
+  agent?: string;
   limit?: number;
   /** How many of the most recent matches to skip, for the next page. */
   offset?: number;
@@ -66,18 +72,28 @@ function plain(name: string, value: string): string {
   return trimmed;
 }
 
+/** The filters that name who and where, which `read` takes for a period as `list` does, in the order the help lists them. */
+const SCOPE_FILTERS = ['project', 'cwd', 'host', 'user', 'agent'] as const;
+
+/** The flags of the filters that name who and where. */
+function scopeArgs(filters: Filters): Array<string> {
+  return SCOPE_FILTERS.flatMap((name) => {
+    const value = filters[name];
+    return value === undefined ? [] : [`--${name}`, plain(name, value)];
+  });
+}
+
 /**
  * The filter flags, in the order the help lists them. `project` `.` is the
  * project of the directory the CLI runs in, so the caller runs it where the
- * session is; `--cwd` would filter by directory instead.
+ * session is.
  */
 function filterArgs(filters: Filters): Array<string> {
   const args: Array<string> = [];
   if (filters.date !== undefined) args.push('--date', plain('date', filters.date));
   if (filters.since !== undefined) args.push('--since', plain('since', filters.since));
   if (filters.until !== undefined) args.push('--until', plain('until', filters.until));
-  if (filters.project !== undefined) args.push('--project', plain('project', filters.project));
-  return args;
+  return [...args, ...scopeArgs(filters)];
 }
 
 /** The page flags: the limit, within the cap, and the offset when there is one. */
@@ -119,11 +135,10 @@ export const isPeriod = (value: string): boolean => PERIOD.test(value.trim());
 export function readArgs(which: ReadonlyArray<string>, filters: Filters = {}): Array<string> {
   if (which.length === 0) {
     throw new InputError(
-      'which is missing. The read tool takes which, a list: ["latest"], one or more entry ids, or one period such as ["2026-10"]. A period also takes project, limit and offset.',
+      'which is missing. The read tool takes which, a list: ["latest"], one or more entry ids, or one period such as ["2026-10"]. A period also takes project, cwd, host, user, agent, limit and offset.',
     );
   }
-  const args = ['read', ...which.map((item) => plain('which', item))];
-  if (filters.project !== undefined) args.push('--project', plain('project', filters.project));
+  const args = ['read', ...which.map((item) => plain('which', item)), ...scopeArgs(filters)];
   if (filters.limit !== undefined) args.push('--limit', String(Math.max(Math.trunc(filters.limit), 1)));
   const offset = Math.max(Math.trunc(filters.offset ?? 0), 0);
   if (offset > 0) args.push('--offset', String(offset));
@@ -255,24 +270,35 @@ export const isCut = (text: string): boolean => CUT_NOTE.test(text.split('\n').a
 /**
  * A cut list whose last line also says how many older matches it left out and
  * the day of the oldest, from the counts of the same list by date. A model that
- * sees only "for older ones" often answers from the newest page alone. The text
- * stays as it is when the counts do not give both.
+ * sees only "for older ones" often answers from the newest page alone. The
+ * longer note can push the list past MAX_OUTPUT, so the oldest lines go until
+ * it fits. The text stays as it is when the counts do not give both.
  */
 export function withOlder(text: string, counts: string): string {
   const lines = text.split('\n');
   const found = CUT_NOTE.exec(lines.at(-1) ?? '');
   if (!found) return text;
-  const [, from, to, next] = found;
+  const from = Number(found[1]);
   const total = Number(/^total\t(\d+)$/m.exec(counts)?.[1]);
-  const days = counts
+  const oldest = counts
     .split('\n')
     .map((row) => /^\d+\t(\d{4}-\d{2}-\d{2})$/.exec(row)?.[1])
     .filter((day) => day !== undefined)
-    .sort();
-  const older = total - Number(next);
-  if (!Number.isFinite(total) || older <= 0 || days.length === 0) return text;
-  const note = `matches ${from} to ${to} of ${total}, counted from the newest. ${older} older matches, back to ${days[0]}, are not in this result: call again with offset ${next} before you answer about them.`;
-  return [...lines.slice(0, -1), note].join('\n');
+    .sort()[0];
+  if (!Number.isFinite(total) || !oldest) return text;
+  const note = (shown: number) => {
+    const next = from - 1 + shown;
+    const older = total - next;
+    const left =
+      older === 1
+        ? `1 older match, back to ${oldest}, is not in this result: call again with offset ${next} before you answer about it.`
+        : `${older} older matches, back to ${oldest}, are not in this result: call again with offset ${next} before you answer about them.`;
+    return `matches ${from} to ${next} of ${total}, counted from the newest. ${left}`;
+  };
+  const rows = lines.slice(0, -1);
+  if (total - (from - 1 + rows.length) <= 0) return text;
+  while (rows.length > 0 && [...rows, note(rows.length)].join('\n').length > MAX_OUTPUT) rows.shift();
+  return [...rows, note(rows.length)].join('\n');
 }
 
 /**
