@@ -12,7 +12,7 @@ import {
   recallArgs,
   sanitize,
   SYNC_OFF,
-  SYNC_PUSH_FAILED,
+  SYNC_REMOTE_FAILED,
   syncArgs,
   type Filters,
 } from './cli.js';
@@ -195,13 +195,12 @@ export function failureOf(run: Run): string {
 }
 
 /**
- * The agent writing, as an entry's `agent` field spells it: the product, then
- * the model without the product's own prefix or a context-size suffix, so
- * `claude-opus-5-5[1m]` is `claude/opus-5-5`. Without a model, the product alone.
+ * The agent writing: the product, then the model as the session names it. The
+ * CLI makes the model its API id, the same for every harness. Without a model,
+ * the product alone.
  */
 export function agentOf(model: string): string {
-  const name = model.replace(/^claude-/, '').replace(/\[.*\]$/, '');
-  return name === '' ? 'claude' : `claude/${name}`;
+  return model === '' ? 'claude' : `claude/${model}`;
 }
 
 /**
@@ -350,7 +349,7 @@ export function syncStateOf(run: Run): JournalSync {
   if (run.exitCode === -1) return { status: 'failed', text: `sync did not finish: ${run.error ?? 'stopped'}` };
   const line = sanitize(run.stdout.trim().split('\n')[0] ?? '');
   if (run.exitCode === 0) return line === SYNC_OFF ? { status: 'off', text: '' } : { status: 'synced', text: line };
-  if (run.exitCode === SYNC_PUSH_FAILED && line !== '') return { status: 'failed', text: line };
+  if (run.exitCode === SYNC_REMOTE_FAILED && line !== '') return { status: 'failed', text: line };
   return { status: 'failed', text: failureOf(run) };
 }
 
@@ -363,22 +362,27 @@ export function syncStateOf(run: Run): JournalSync {
 export function syncer(host: Host) {
   let running: Promise<void> | null = null;
   let isPending = false;
+  /** Whether the next sync pulls first: it does when any caller that waits for it asked for the pull. */
+  let isPull = true;
 
   async function loop(timeoutMs: number): Promise<void> {
     do {
       isPending = false;
       /** Off stays quiet: a journal without sync shows nothing for it. */
       await host.sync.update((sync): JournalSync => (sync.status === 'off' ? sync : { ...sync, status: 'syncing' }));
-      const ran = await runCli(host, syncArgs(), timeoutMs);
+      const ran = await runCli(host, syncArgs(isPull), timeoutMs);
       await host.sync.update(() => syncStateOf(ran));
     } while (isPending);
   }
 
-  function request(timeoutMs = SYNC_TIMEOUT_MS): Promise<void> {
+  /** `pull` false leaves out the pull before the push, for the sync at the session's end. */
+  function request(timeoutMs = SYNC_TIMEOUT_MS, pull = true): Promise<void> {
     if (running) {
+      isPull = isPending ? isPull || pull : pull;
       isPending = true;
       return running;
     }
+    isPull = pull;
     running = loop(timeoutMs).finally(() => {
       running = null;
     });

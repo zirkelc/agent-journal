@@ -6,7 +6,7 @@
 #   agent-journal read    ID... | PERIOD [filters]
 #   agent-journal write   [--summary S] [--body B]
 #   agent-journal config  [set|unset <key> [value]]
-#   agent-journal sync    [init [URL]]
+#   agent-journal sync    [--no-pull] | init [URL]
 #   agent-journal context [--cwd DIR] [--session-id ID] [--agent A] [--recall | --tools PREFIX]
 #
 # `context` is left out of the help, since only the agent hooks and the journal
@@ -71,7 +71,7 @@ usage: agent-journal list   [TERM...] [--fixed] [--by FIELD] [filters]
        agent-journal write  [--summary S] [--body B] [--project P] [--cwd DIR] [--agent A]
                             [--session-id ID] [--no-sync]
        agent-journal config [set|unset <key> [value]]
-       agent-journal sync   [init [URL]]
+       agent-journal sync   [--no-pull] | init [URL]
        agent-journal install [claude|codex|pi] [--all] [--dry-run]
        agent-journal help
 
@@ -121,14 +121,16 @@ filters: --date D      one local year, month or day: 2026, 2026-01, 2026-01-11,
          --host H      entries written on one machine
          --user U      entries written by one account
          --agent A     entries of one agent, such as claude, or of one model,
-                       such as opus-5-5, or of both, such as claude/opus-5-5
+                       such as claude-opus-5-5, or of both, such as
+                       claude/claude-opus-5-5
          --limit N     how many of the most recent to print, default 20
          --offset N    skip this many of the most recent first, for the next page
          --all         no limit
 
 The values of --project, --cwd, --host, --user and --agent can have * for any
-text and ? for one character, as a shell glob reads them: --agent 'opus-*'.
-Put them in quotes, so the shell does not expand them first.
+text and ? for one character, as a shell glob reads them, for example
+--agent 'claude-opus-*'. Put them in quotes, so the shell does not expand them
+first.
 
 settings: journal_dir    where journal entries are written
           sync           git: commit the journal folder after each write, and
@@ -138,10 +140,11 @@ settings: journal_dir    where journal entries are written
           user           the account name entries record, by default the
                          login name; set it to '' to record none
 
-sync commits every file in the journal folder and pushes the branch. It runs
-on its own after write and after the journal pane sees a new entry. sync init
-makes the folder a git repository if it is not in one, adds URL as origin,
-and turns sync on.
+sync commits every file in the journal folder, takes in what the remote
+branch has, and pushes the branch. It runs on its own after write and after
+the journal pane sees a new entry. sync init makes the folder a git
+repository if it is not in one, adds URL as origin, and turns sync on.
+--no-pull takes in the remote branch only when the push needs it.
 
 Entries are listed oldest first, so the newest is nearest the prompt. Each
 line starts with the id that read takes. Down a pipe the columns are id,
@@ -905,6 +908,7 @@ dry_run=0
 recall=0
 tools=
 no_sync=0
+no_pull=0
 keep_empty=0
 
 arg1=
@@ -967,6 +971,10 @@ while [ $# -gt 0 ]; do
     # For `write`: the caller syncs on its own, after the write has returned, so
     # a slow push does not hold up the one who wrote.
     --no-sync) no_sync=1; shift ;;
+    # For `sync`: no pull before the push, for a sync at the end of a session,
+    # which the next session's sync pulls for anyway. A push that is rejected
+    # still pulls.
+    --no-pull) no_pull=1; shift ;;
     # One flag per field, rather than one flag for "the message". An entry is a
     # summary and a body, and a single `-m` cannot say which it meant. Spelled
     # out like every other flag here, none of which has a short form.
@@ -1002,6 +1010,24 @@ esac
 # adapter passes an absolute path, but a shell invocation is where the mistake
 # would be made and it costs one line to make it impossible.
 abs=$(cd "$cwd" 2>/dev/null && pwd) && cwd=$abs
+
+# Each harness spells the same model in its own way, so the agent that an entry
+# records keeps only the model's API id: no provider path before it, no
+# context-size or date suffix after it, in lower case. `pi/anthropic/
+# claude-opus-5-5` and `claude/claude-opus-5-5[1m]` both record the model as
+# `claude-opus-5-5`. A filter stays as it was typed, since a glob can end in
+# `[...]` too.
+if [ "$cmd" = write ] || [ "$cmd" = context ]; then
+  case $agent in
+    */*)
+      model=$(printf '%s\n' "${agent#*/}" |
+        sed -e 's|.*/||' -e 's/\[[^]]*\]$//' -e 's/-[0-9]\{8\}$//' |
+        tr '[:upper:]' '[:lower:]')
+      agent=$(printf '%s\n' "${agent%%/*}" | tr '[:upper:]' '[:lower:]')${model:+/$model}
+      ;;
+    *) agent=$(printf '%s\n' "$agent" | tr '[:upper:]' '[:lower:]') ;;
+  esac
+fi
 
 read_config "$config_file"
 journal_dir=$(expand_home "${cfg_journal_dir:-$default_journal_dir}")
@@ -1244,7 +1270,7 @@ render() {
     -v cols="$cols" '
     # Whether an entry passes the filters that its frontmatter decides. An
     # agent is recorded as `name/model`, and a filter without a slash is the
-    # name or the model, so `claude` and `opus-*` both work.
+    # name or the model, so `claude` and `claude-opus-*` both work.
     function wanted(proj, dir, h, u, ag,   name, model) {
       if (project != "" && !match(proj, projectre)) return 0
       if (cwdf != "" && !match(dir, cwdre)) return 0
@@ -2100,16 +2126,16 @@ fi
 # ---------------------------------------------------------------- sync
 
 # With `sync=git`, the journal folder is a git repository of its own: everything
-# in it is committed, and its branch is pushed when it has a remote. A folder
-# inside a larger repository is refused rather than shared: a push sends the
-# whole branch, so it would publish the person's other commits along with the
-# journal, and a commit on whatever they had checked out could disappear from
-# the folder at their next checkout.
+# in it is committed, and when its branch has a remote, the remote's new commits
+# come in and the branch is pushed. A folder inside a larger repository is
+# refused rather than shared: a push sends the whole branch, so it would publish
+# the person's other commits along with the journal, and a commit on whatever
+# they had checked out could disappear from the folder at their next checkout.
 #
-# It prints one line, what it committed and what it pushed, and exits 0 when
-# both went as far as they could, 3 when the commit is made but the push failed,
-# and 1 for anything else. A push that fails is not lost: the next sync pushes
-# whatever the remote has not got yet.
+# It prints one line, what it committed, pulled and pushed, and exits 0 when
+# all went as far as they could, 3 when the commit is made but the pull or the
+# push failed, and 1 for anything else. A push that fails is not lost: the next
+# sync pushes whatever the remote has not got yet.
 
 # Signing is off for these commits, since a signing key's passphrase would be
 # asked for by a dialog nobody is watching for.
@@ -2297,15 +2323,27 @@ sync_push() {
     printf '%s\n' "$sync_done"
     return 0
   }
+  sync_base=$sync_done
+  sync_pulled=0
   sync_upstream=$(sync_git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null) || sync_upstream=
   if [ -n "$sync_upstream" ]; then
-    [ "$(sync_git rev-list --count '@{upstream}..HEAD' 2>/dev/null)" != 0 ] || {
-      printf '%s · up to date\n' "$sync_done"
-      return 0
-    }
     sync_remote=$(sync_git config "branch.$sync_branch.remote")
     sync_dest=$(sync_git config "branch.$sync_branch.merge")
     sync_target=$sync_upstream
+    # What other machines pushed comes in on every sync without --no-pull, also
+    # when this one has nothing to send, so that a machine that only reads the
+    # journal sees their entries too. The check after it then compares with the
+    # upstream as just fetched, not as the last push left it.
+    sync_reason=
+    [ "$no_pull" = 1 ] || sync_pull || sync_reason=$(first_reason "$sync_out")
+    [ "$(sync_git rev-list --count '@{upstream}..HEAD' 2>/dev/null)" != 0 ] || {
+      if [ -n "$sync_reason" ]; then
+        printf '%s · pull failed: %s\n' "$sync_done" "$sync_reason"
+        return 3
+      fi
+      printf '%s · up to date\n' "$sync_done"
+      return 0
+    }
   else
     # A branch that was never pushed has no upstream yet. With an origin, the
     # push that works sets it; without one, committing is all there is to do.
@@ -2321,21 +2359,40 @@ sync_push() {
   sync_try_push && return 0
   sync_reason=$(first_reason "$sync_out")
 
-  # Usually the remote has commits this one has not: another machine pushed
-  # first, or the repository was made with a README. Those come in under this
-  # one's, which cannot conflict as long as each writes files of its own name,
-  # and the push goes again. They are named by remote and branch rather than by
-  # the upstream, which a branch whose first push was refused does not have yet.
-  # A rebase that stops is undone, since nobody is there to finish it; it can
-  # only be this one, as sync does not start while another is open.
-  if sync_git pull -q --rebase --autostash "$sync_remote" "$sync_dest" >/dev/null 2>&1; then
+  # The remote can still have commits this one has not: another machine pushed
+  # after the pull, or a branch without an upstream was never pulled, as when
+  # the repository was made with a README. Those come in, and the push goes
+  # again.
+  if sync_pull; then
     sync_try_push && return 0
     sync_reason=$(first_reason "$sync_out")
-  elif [ -d "$sync_gitdir/rebase-merge" ] || [ -d "$sync_gitdir/rebase-apply" ]; then
-    sync_git rebase --abort >/dev/null 2>&1
   fi
   printf '%s · push failed: %s\n' "$sync_done" "$sync_reason"
   return 3
+}
+
+# Takes in the commits of the remote branch that this one has not, with this
+# one's put on top, and adds their count to the line. They cannot conflict as
+# long as each machine writes files of its own name. They are named by remote
+# and branch rather than by the upstream, which a branch whose first push was
+# refused does not have yet. A rebase that stops is undone, since nobody is
+# there to finish it; it can only be this one, as sync does not start while
+# another is open.
+sync_pull() {
+  sync_head=$(sync_git rev-parse HEAD)
+  sync_out=$(sync_git pull -q --rebase --autostash "$sync_remote" "$sync_dest" 2>&1) || {
+    if [ -d "$sync_gitdir/rebase-merge" ] || [ -d "$sync_gitdir/rebase-apply" ]; then
+      sync_git rebase --abort >/dev/null 2>&1
+    fi
+    return 1
+  }
+  sync_new=$(sync_git rev-list --count "$sync_head..FETCH_HEAD" 2>/dev/null) || sync_new=0
+  sync_pulled=$((sync_pulled + sync_new))
+  case $sync_pulled in
+    0) ;;
+    1) sync_done="$sync_base · pulled 1 commit" ;;
+    *) sync_done="$sync_base · pulled $sync_pulled commits" ;;
+  esac
 }
 
 sync_try_push() {
@@ -2347,7 +2404,7 @@ if [ "$cmd" = sync ]; then
   case $arg1 in
     '') [ "$argc" -eq 0 ] || usage ;;
     init)
-      [ "$argc" -le 2 ] || usage
+      [ "$argc" -le 2 ] && [ "$no_pull" = 0 ] || usage
       mkdir -p "$journal_dir" || exit 1
       if ! sync_git rev-parse --git-dir >/dev/null 2>&1; then
         sync_out=$(sync_git init -q 2>&1) || {

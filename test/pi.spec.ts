@@ -1,5 +1,5 @@
 import { execFile, execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ExtensionAPI, ExecResult } from '@earendil-works/pi-coding-agent';
 import { afterEach, describe, expect, test, vi } from 'vitest';
@@ -46,6 +46,8 @@ const BUILT_IN = ['read', 'bash', 'edit', 'write'];
 function pi(store: Fixture, options: { stopped?: (args: Array<string>) => boolean } = {}) {
   const handlers = new Map<string, Array<Handler>>();
   const tools = new Map<string, Tool>();
+  /** The arguments of each CLI run, in the order the extension started them. */
+  const runs: Array<Array<string>> = [];
   let active = [...BUILT_IN];
   const api = {
     on: (event: string, handler: Handler) => {
@@ -61,6 +63,7 @@ function pi(store: Fixture, options: { stopped?: (args: Array<string>) => boolea
     },
     exec: (command: string, args: Array<string>, execOptions: { cwd?: string; timeout?: number } = {}) =>
       new Promise<ExecResult>((done) => {
+        runs.push(args);
         /** As Pi ends a run at its timeout: the signal leaves no exit code, and Pi reports code 0. */
         if (options.stopped?.(args)) return done({ stdout: '', stderr: '', code: 0, killed: true });
         execFile(
@@ -104,6 +107,7 @@ function pi(store: Fixture, options: { stopped?: (args: Array<string>) => boolea
     call,
     ctx,
     setStatus,
+    runs,
     tools,
     active: () => active,
     /** As `--tools` or another extension sets them before the session starts. */
@@ -663,6 +667,68 @@ describe('the filters and the output', () => {
   });
 });
 
+describe('the start of the session', () => {
+  test(`should pull the entries of another machine when sync is on`, async () => {
+    // Arrange
+    const store = fixture();
+    const origin = join(store.home, 'remote.git');
+    execFileSync('git', ['init', '-q', '--bare', origin]);
+    synced(store, origin);
+    const other = join(store.home, 'other');
+    execFileSync('git', ['clone', '-q', '-b', git(store.journalDir, 'branch', '--show-current'), origin, other]);
+    writeFileSync(join(other, `${SECOND.stem}.md`), '---\nsummary: "Other machine."\n---\n');
+    git(other, 'add', '.');
+    git(other, 'commit', '-q', '-m', 'other');
+    git(other, 'push', '-q');
+    const host = pi(store);
+
+    // Act
+    await host.emit('session_start', { reason: 'startup' });
+
+    // Assert
+    await vi.waitFor(() => expect(existsSync(join(store.journalDir, `${SECOND.stem}.md`))).toBe(true), {
+      timeout: 10_000,
+    });
+  }, 15_000);
+
+  test(`should show a pull that failed in the footer`, async () => {
+    // Arrange
+    const store = fixture();
+    const origin = join(store.home, 'remote.git');
+    execFileSync('git', ['init', '-q', '--bare', origin]);
+    synced(store, origin);
+    renameSync(origin, join(store.home, 'moved.git'));
+    const host = pi(store);
+
+    // Act
+    await host.emit('session_start', { reason: 'startup' });
+
+    // Assert
+    await vi.waitFor(
+      () => {
+        const [key, text] = host.setStatus.mock.calls.at(-1) ?? [];
+        expect(key).toBe('agent-journal');
+        expect(text).toMatch(/^journal sync failed: nothing to commit · pull failed: .+$/);
+      },
+      { timeout: 10_000 },
+    );
+  }, 15_000);
+
+  test(`should not sync in a session without a UI, such as a subagent in print mode`, async () => {
+    // Arrange
+    const store = fixture();
+    synced(store);
+    const host = pi(store);
+
+    // Act
+    await host.emit('session_start', { reason: 'startup' }, host.ctx({ hasUI: false }));
+    await host.emit('session_shutdown', { reason: 'quit' }, host.ctx({ hasUI: false }));
+
+    // Assert
+    expect(host.runs.filter((args) => args[0] === 'sync').length).toBe(1);
+  });
+});
+
 describe('the end of the session', () => {
   test(`should commit what was written another way`, async () => {
     // Arrange
@@ -677,6 +743,7 @@ describe('the end of the session', () => {
 
     // Assert
     expect(subjects(store.journalDir)[0]).toBe(`journal: ${SECOND.stem} Second.`);
+    expect(host.runs.filter((args) => args[0] === 'sync').at(-1)).toEqual(['sync', '--no-pull']);
   });
 
   test(`should show a push that failed in the footer`, async () => {
@@ -685,6 +752,8 @@ describe('the end of the session', () => {
     synced(store, join(store.home, 'missing.git'));
     const host = pi(store);
     await host.emit('session_start', { reason: 'startup' });
+    /** The sync at the start fails too, and ends before the second entry is written. */
+    await vi.waitFor(() => expect(host.setStatus.mock.calls.length).toBe(1), { timeout: 10_000 });
     seed(store, [SECOND]);
 
     // Act

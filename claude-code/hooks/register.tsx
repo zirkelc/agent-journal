@@ -99,6 +99,8 @@ export const register: Register = (on) => {
   let waiter: ReturnType<typeof answerWaiter> | null = null;
   /** Commits and pushes the journal folder after writes, when the config turns sync on. */
   let sync: ReturnType<typeof syncer> | null = null;
+  /** Whether a draw has already asked for the load of a list that was never loaded. */
+  let isIdleLoadQueued = false;
 
   const load = (isFresh?: boolean) => loader?.load(isFresh) ?? Promise.resolve();
 
@@ -230,8 +232,21 @@ export const register: Register = (on) => {
     loader = listLoader(host);
     waiter = answerWaiter(host);
     sync = syncer(host);
-    /** Read now, so a write before the pane is opened is known as one to the journal. */
-    void loader.config().catch(() => undefined);
+    /**
+     * Read now, so a write before the pane is opened is known as one to the
+     * journal. With sync on, the session starts with a sync, which brings in
+     * what other machines pushed, and the list shows their entries after it.
+     */
+    const [bound, list, syncing] = [host, loader, sync];
+    void loader
+      .config()
+      .then(async ({ isSyncOn }) => {
+        if (!isSyncOn) return;
+        await syncing.request();
+        /** A list nobody has opened is left for the pane to load when it opens. */
+        if ((await bound.list.read()).status !== 'idle') await list.refresh();
+      })
+      .catch(() => undefined);
     keeper = rulesKeeper(host);
     /** Made now, so the first message does not wait for the CLI. */
     void keeper.prepare().catch(() => undefined);
@@ -460,7 +475,8 @@ export const register: Register = (on) => {
   on('session.end', async ($, e, next) => {
     const timeoutMs = sync && loader?.isSyncOn() ? endSyncTimeoutOf(next.budget.remainingMs, sync.isRunning()) : null;
     /** Beside the end step rather than before it, so the hooks after this one keep their share of the bound. */
-    const syncing = sync && timeoutMs !== null ? sync.request(timeoutMs).catch(() => undefined) : null;
+    /** Without a pull first, since the next session's start pulls anyway, so the exit does not wait for it. */
+    const syncing = sync && timeoutMs !== null ? sync.request(timeoutMs, false).catch(() => undefined) : null;
     const result = await next(e);
     await syncing;
     return result;
@@ -540,6 +556,18 @@ export const register: Register = (on) => {
       $.session.model().catch(() => ''),
     ]);
     paneRows = e.props.scroll.bodyRows;
+    /**
+     * A list that was never loaded, although the pane is open: after /clear the
+     * session's values start over while the pane stays, and no event says so.
+     * A draw cannot write, so the load starts just after it.
+     */
+    if (list.status === 'idle' && !isIdleLoadQueued) {
+      isIdleLoadQueued = true;
+      host.after(0, () => {
+        isIdleLoadQueued = false;
+        void load().catch(() => undefined);
+      });
+    }
     return paneView({ Box, Text, Button, Input, Markdown }, actionsOf(host, load), {
       scope,
       model,

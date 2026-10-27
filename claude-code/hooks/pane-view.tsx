@@ -496,7 +496,9 @@ function listView(ui: Ui, actions: PaneActions, model: PaneModel): RenderElement
   let shownRows = 1;
   /** Whether scrolling down shows more: rows below the window, or older entries not loaded yet. */
   let isMoreBelow = false;
-  if (list.status === 'loading' && list.entries.length === 0) rows = <Text dimColor>Loading the journal…</Text>;
+  /** A list never loaded shows as loading: the draw that finds it starts the load. */
+  if ((list.status === 'loading' || list.status === 'idle') && list.entries.length === 0)
+    rows = <Text dimColor>Loading the journal…</Text>;
   else if (list.status === 'failed') rows = <Text color="red">{sanitize(list.error)}</Text>;
   else if (list.entries.length === 0)
     rows = (

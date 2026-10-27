@@ -1,5 +1,14 @@
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 import { configure, type Fixture, fails, fixture, GIT_IDENTITY, output, seed, settings } from './helpers.ts';
@@ -214,12 +223,107 @@ describe('sync', () => {
 
     // Assert
     expect(result.status).toBe(0);
-    expect(result.stdout).toBe(`committed 2026-10-11T100000Z · pushed to origin/${branch}\n`);
+    expect(result.stdout).toBe(`committed 2026-10-11T100000Z · pulled 1 commit · pushed to origin/${branch}\n`);
     expect(subjects(origin)).toEqual([
       `journal: 2026-10-11T100000Z This machine.`,
       `other`,
       `journal: 2026-10-11T090000Z Added sync.`,
     ]);
+  });
+
+  test(`should take in what another machine pushed, also when this one has nothing to push`, () => {
+    // Arrange
+    const store = fixture();
+    const origin = remote(store);
+    seed(store, [ENTRY]);
+    sync(store, ['init', origin]);
+    const other = join(store.home, 'other');
+    execFileSync('git', ['clone', '-q', '-b', branchOf(store), origin, other]);
+    for (const stem of ['2026-10-11T093000Z', '2026-10-11T094000Z']) {
+      writeFileSync(join(other, `${stem}.md`), '---\nsummary: "Other machine."\n---\n');
+      git(other, 'add', '.');
+      git(other, 'commit', '-q', '-m', stem);
+    }
+    git(other, 'push', '-q');
+
+    // Act
+    const result = sync(store);
+
+    // Assert
+    expect(result).toEqual({ stdout: `nothing to commit · pulled 2 commits · up to date\n`, stderr: ``, status: 0 });
+    expect(existsSync(join(store.journalDir, '2026-10-11T094000Z.md'))).toBe(true);
+  });
+
+  test(`should not pull with --no-pull when there is nothing to push`, () => {
+    // Arrange
+    const store = fixture();
+    const origin = remote(store);
+    seed(store, [ENTRY]);
+    sync(store, ['init', origin]);
+    const other = join(store.home, 'other');
+    execFileSync('git', ['clone', '-q', '-b', branchOf(store), origin, other]);
+    writeFileSync(join(other, '2026-10-11T093000Z.md'), '---\nsummary: "Other machine."\n---\n');
+    git(other, 'add', '.');
+    git(other, 'commit', '-q', '-m', 'other');
+    git(other, 'push', '-q');
+
+    // Act
+    const result = sync(store, ['--no-pull']);
+
+    // Assert
+    expect(result).toEqual({ stdout: `nothing to commit · up to date\n`, stderr: ``, status: 0 });
+    expect(existsSync(join(store.journalDir, '2026-10-11T093000Z.md'))).toBe(false);
+  });
+
+  test(`should still take in what another machine pushed with --no-pull when the push is rejected`, () => {
+    // Arrange
+    const store = fixture();
+    const origin = remote(store);
+    seed(store, [ENTRY]);
+    sync(store, ['init', origin]);
+    const other = join(store.home, 'other');
+    execFileSync('git', ['clone', '-q', '-b', branchOf(store), origin, other]);
+    writeFileSync(join(other, '2026-10-11T093000Z.md'), '---\nsummary: "Other machine."\n---\n');
+    git(other, 'add', '.');
+    git(other, 'commit', '-q', '-m', 'other');
+    git(other, 'push', '-q');
+    seed(store, [{ stem: '2026-10-11T100000Z', summary: 'This machine.' }]);
+
+    // Act
+    const result = sync(store, ['--no-pull']);
+
+    // Assert
+    expect(result.stdout).toBe(
+      `committed 2026-10-11T100000Z · pulled 1 commit · pushed to origin/${branchOf(store)}\n`,
+    );
+    expect(subjects(origin)[0]).toBe(`journal: 2026-10-11T100000Z This machine.`);
+  });
+
+  test(`should refuse --no-pull with init`, () => {
+    // Arrange
+    const store = fixture();
+
+    // Act
+    const result = sync(store, ['init', '--no-pull']);
+
+    // Assert
+    expect(result.status).toBe(2);
+  });
+
+  test(`should fail with 3 when the pull fails and there is nothing to push`, () => {
+    // Arrange
+    const store = fixture();
+    const origin = remote(store);
+    seed(store, [ENTRY]);
+    sync(store, ['init', origin]);
+    renameSync(origin, join(store.home, 'moved.git'));
+
+    // Act
+    const result = sync(store);
+
+    // Assert
+    expect(result.status).toBe(3);
+    expect(result.stdout).toMatch(/^nothing to commit · pull failed: .+\n$/);
   });
 
   test(`should refuse a journal folder inside a larger repository, and leave sync off`, () => {
@@ -298,7 +402,7 @@ describe('sync', () => {
 
     // Assert
     expect(first).toEqual({
-      stdout: `nothing to commit · pushed to origin/${branchOf(store)}\n`,
+      stdout: `nothing to commit · pulled 1 commit · pushed to origin/${branchOf(store)}\n`,
       stderr: ``,
       status: 0,
     });
@@ -328,7 +432,7 @@ describe('sync', () => {
 
     // Assert
     expect(result.status).toBe(3);
-    expect(result.stdout).toMatch(/· push failed: \[rejected\] \S+ -> \S+ \(fetch first\)\n$/);
+    expect(result.stdout).toMatch(/· push failed: \[rejected\] \S+ -> \S+ \(non-fast-forward\)\n$/);
     expect(existsSync(join(store.journalDir, '.git', 'rebase-merge'))).toBe(false);
   });
 

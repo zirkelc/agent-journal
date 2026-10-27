@@ -82,7 +82,7 @@ describe('register', () => {
       '--session-id',
       'session-1',
       '--agent',
-      'claude/opus-5-5',
+      'claude/claude-opus-5-5[1m]',
       '--tools',
       TOOL_PREFIX,
     ]);
@@ -99,7 +99,7 @@ describe('register', () => {
     // Assert
     const made = kept.runs.filter((run) => run.argv[1] === 'context');
     expect(made.map((run) => run.argv.slice(1))).toEqual([
-      ['context', '--cwd', '/work', '--session-id', 'session-1', '--agent', 'claude/opus-5-5'],
+      ['context', '--cwd', '/work', '--session-id', 'session-1', '--agent', 'claude/claude-opus-5-5[1m]'],
     ]);
   });
 
@@ -508,7 +508,7 @@ describe('register', () => {
       '--session-id',
       'session-1',
       '--agent',
-      'claude/opus-5-5',
+      'claude/claude-opus-5-5[1m]',
       '--no-sync',
     ]);
     expect(writes[0]!.init?.cwd).toBe('/work');
@@ -572,6 +572,8 @@ describe('register', () => {
     await $.command.run(journal());
     await kept.clock.settle();
     lines = [...lines, line('2026-10-06T080000Z', 'repo', 'Newest')];
+    /** The session's start ran a sync and the pane a list before the write. */
+    const before = kept.queries().length;
 
     // Act
     await $.tool.call({ tool: toolName(TOOL_WRITE), summary: 'Newest', body: '' } as never);
@@ -581,9 +583,12 @@ describe('register', () => {
 
     // Assert
     /** The refresh and the sync start together, so only how many of each ran is fixed, not their order. */
-    const runs = kept.queries().map((run) => run.argv[1]);
-    expect(runs.slice(0, 2)).toEqual(['list', 'write']);
-    expect(runs.slice(2).sort()).toEqual(['list', 'sync']);
+    const runs = kept
+      .queries()
+      .slice(before)
+      .map((run) => run.argv[1]);
+    expect(runs[0]).toBe('write');
+    expect(runs.slice(1).sort()).toEqual(['list', 'sync']);
     expect(drawn).toContain('Newest');
     expect(drawn).toContain('⇅ pushed to origin/main');
   });
@@ -657,6 +662,23 @@ describe('register', () => {
     const listed = kept.queries().find((run) => run.argv[1] === 'list')!;
     expect(listed.argv.slice(1)).toEqual(['list', '--project', '.', '--limit', '201']);
     expect(drawn.indexOf('Newer') < drawn.indexOf('Older')).toBe(true);
+  });
+
+  test('a pane drawn with a list that never loaded, as after /clear, says it is loading and loads it', async ($, on) => {
+    // Arrange
+    const kept = world(on, { list: line('2026-10-05T143000Z', 'repo', 'Kept across the clear') });
+    await $.session.start(SESSION);
+
+    // Act
+    const first = textOf(await $.ui.render(PANE as never));
+    await kept.clock.settle();
+    const second = textOf(await $.ui.render(PANE as never));
+
+    // Assert
+    expect(first.includes('No entries yet.')).toBe(false);
+    expect(first.includes('Loading the journal')).toBe(true);
+    expect(kept.queries().filter((run) => run.argv[1] === 'list').length).toBe(1);
+    expect(second.includes('Kept across the clear')).toBe(true);
   });
 
   test('the list scrolls its own rows, keeps the engine\u2019s window, and loads the next page near its end', async ($, on) => {
@@ -784,6 +806,7 @@ describe('register', () => {
     await $.session.start(SESSION);
     await $.command.run(journal());
     await kept.clock.settle();
+    const before = kept.queries().filter((run) => run.argv[1] === 'sync').length;
 
     // Act
     await $.tool.call({ tool: 'Write', file_path: `${JOURNAL_DIR}/2026-10-06T080000Z.md`, content: '' } as never);
@@ -794,8 +817,35 @@ describe('register', () => {
 
     // Assert
     const syncs = kept.queries().filter((run) => run.argv[1] === 'sync');
-    expect(syncs.length).toBe(1);
+    expect(syncs.length).toBe(before + 1);
     expect(drawn).toContain('⇅ pushed to origin/main');
+  });
+
+  test('the session\u2019s start syncs, and the entries it brings in join the list', async ($, on) => {
+    // Arrange
+    let release = () => {};
+    let lines = [line('2026-10-05T143000Z', 'repo', 'Here')];
+    const kept = world(on, {
+      isSyncOn: true,
+      sync: 'nothing to commit · pulled 1 commit · up to date\n',
+      holdSync: new Promise<void>((resolve) => (release = resolve)),
+      list: () => lines.join('\n'),
+    });
+    await $.session.start(SESSION);
+    await $.command.run(journal());
+    await kept.clock.settle();
+    lines = [...lines, line('2026-10-06T080000Z', 'repo', 'Pulled')];
+
+    // Act
+    release();
+    await kept.clock.settle();
+    const drawn = textOf(await $.ui.render(PANE as never));
+
+    // Assert
+    const syncs = kept.queries().filter((run) => run.argv[1] === 'sync');
+    expect(syncs.map((run) => run.argv.slice(1))).toEqual([['sync']]);
+    expect(drawn).toContain('Pulled');
+    expect(drawn).toContain('⇅ up to date');
   });
 
   test('a write to the journal syncs it in a session that never opened the pane', async ($, on) => {
@@ -804,6 +854,7 @@ describe('register', () => {
     on('tool.call', { tool: 'Write' }, () => ({ result: 'written' }) as never);
     await $.session.start(SESSION);
     await kept.clock.settle();
+    const before = kept.queries().filter((run) => run.argv[1] === 'sync').length;
 
     // Act
     await $.tool.call({ tool: 'Write', file_path: `${JOURNAL_DIR}/2026-10-06T080000Z.md`, content: '' } as never);
@@ -811,7 +862,7 @@ describe('register', () => {
     await kept.clock.settle();
 
     // Assert
-    expect(kept.queries().filter((run) => run.argv[1] === 'sync').length).toBe(1);
+    expect(kept.queries().filter((run) => run.argv[1] === 'sync').length).toBe(before + 1);
   });
 
   test('with sync off, neither a write to the journal nor the session\u2019s end runs the CLI for it', async ($, on) => {
@@ -853,6 +904,7 @@ describe('register', () => {
     await $.session.start(SESSION);
     await $.command.run(journal());
     await kept.clock.settle();
+    const before = kept.queries().filter((run) => run.argv[1] === 'sync').length;
 
     // Act
     await $.tool.call({ tool: 'Write', file_path: '/work/notes.md', content: '' } as never);
@@ -860,21 +912,24 @@ describe('register', () => {
     await kept.clock.settle();
 
     // Assert
-    expect(kept.queries().filter((run) => run.argv[1] === 'sync').length).toBe(0);
+    expect(kept.queries().filter((run) => run.argv[1] === 'sync').length).toBe(before);
   });
 
   test('the git icon shows from the config alone, and a push that failed adds its reason', async ($, on) => {
     // Arrange
+    let release = () => {};
     const kept = world(on, {
       isSyncOn: true,
       sync: 'committed 2026-10-06T080000Z · push failed: could not read Username\n',
       exitCodes: { sync: 3 },
+      holdSync: new Promise<void>((resolve) => (release = resolve)),
     });
     on('tool.call', { tool: 'Write' }, () => ({ result: 'written' }) as never);
     await $.session.start(SESSION);
     await $.command.run(journal());
     await kept.clock.settle();
     const before = textOf(await $.ui.render(PANE as never));
+    release();
 
     // Act
     await $.tool.call({ tool: 'Write', file_path: `${JOURNAL_DIR}/2026-10-06T080000Z.md`, content: '' } as never);
@@ -892,12 +947,15 @@ describe('register', () => {
     const kept = world(on, { isSyncOn: true });
     await $.session.start(SESSION);
     await kept.clock.settle();
+    const before = kept.runs.filter((run) => run.argv[1] === 'sync').length;
 
     // Act
     await $.session.end({ reason: 'prompt_input_exit', sessionId: 'session-1', resume: { id: 'session-1' } } as never);
 
     // Assert
-    expect(kept.runs.filter((run) => run.argv[1] === 'sync').length).toBe(1);
+    const syncs = kept.runs.filter((run) => run.argv[1] === 'sync').map((run) => run.argv.slice(1));
+    expect(syncs.length).toBe(before + 1);
+    expect(syncs.at(-1)).toEqual(['sync', '--no-pull']);
   });
 
   test('the session\u2019s end neither waits for a sync under way nor starts another', async ($, on) => {

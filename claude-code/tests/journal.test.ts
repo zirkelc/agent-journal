@@ -222,10 +222,10 @@ describe('journal', () => {
 
   test('the agent is named by the product and the model, and by the product alone without a model', () => {
     // Act
-    const result = [agentOf('claude-opus-5-5[1m]'), agentOf('claude-haiku-4-5-20251001'), agentOf('')];
+    const result = [agentOf('claude-opus-5-5[1m]'), agentOf('')];
 
     // Assert
-    expect(result).toEqual(['claude/opus-5-5', 'claude/haiku-4-5-20251001', 'claude']);
+    expect(result).toEqual(['claude/claude-opus-5-5[1m]', 'claude']);
   });
 
   test('a step of the agent goes to the turn it asks for, with the entries it returned, once each', () => {
@@ -379,6 +379,34 @@ describe('journal', () => {
     expect(isWaiting).toBe(true);
     expect(runs.length).toBe(0);
     expect(await host.sync.read()).toEqual({ status: 'synced', text: 'sync done' });
+  });
+
+  test('a sync asked for while one runs pulls first when any of its callers asked for the pull', async () => {
+    // Arrange
+    const runs: Array<() => void> = [];
+    const argvs: Array<Array<string>> = [];
+    const host: Host = {
+      ...hostWith(async () => ({})),
+      run: (argv) =>
+        new Promise((resolve) => {
+          argvs.push(argv.slice(1));
+          runs.push(() => resolve({ exitCode: 0, stdout: 'nothing to commit · up to date\n', stderr: '' } as never));
+        }),
+    };
+    const sync = syncer(host);
+
+    // Act
+    const first = sync.request(SYNC_TIMEOUT_MS, false);
+    await settled();
+    const second = sync.request(SYNC_TIMEOUT_MS, true);
+    const third = sync.request(SYNC_TIMEOUT_MS, false);
+    runs.shift()!();
+    await settled();
+    runs.shift()!();
+    await Promise.all([first, second, third]);
+
+    // Assert
+    expect(argvs).toEqual([['sync', '--no-pull'], ['sync']]);
   });
 
   test('a sync run is off, synced, failed with its own line, or failed with the reason it gave', () => {

@@ -7,6 +7,9 @@
 
 This folder is the Claude Code plugin of [Agent Journal](../README.md). It is a [hooks module](https://code.claude.com/docs/en/plugins/mods/overview) that Claude Code loads itself. The plugin gives each session the rules for the journal and three tools to write and read it, opens the journal pane with `/agent-journal`, and syncs the journal with git when you turn sync on.
 
+> [!NOTE]
+> This page describes only the Claude Code plugin. For the entry format, the configuration, git sync and the CLI, see the [main README](../README.md).
+
 ## Install
 
 The plugin needs Claude Code 2.1.287 or later. Install it:
@@ -85,7 +88,7 @@ The last row of the list shows the journal directory. When git sync is on, it al
 
 ## Git sync
 
-When sync is on (see [Git sync](../README.md#git-sync) for the setup), the plugin runs a sync after the model writes an entry with the `write` tool or with the Write tool, and once more when the session ends if the exit leaves time for it. The sync runs in the background, so the turn does not wait for a push.
+When sync is on (see [Git sync](../README.md#git-sync) for the setup), the plugin runs a sync when the session starts, after the model writes an entry with the `write` tool or with the Write tool, and once more when the session ends if the exit leaves time for it. The sync at the start pulls the entries of your other machines, and the pane shows them when it is done. The sync runs in the background, so the session and the turn do not wait for the network.
 
 ## What the plugin runs, reads and sends
 
@@ -97,6 +100,7 @@ When sync is on (see [Git sync](../README.md#git-sync) for the setup), the plugi
   - `sync` runs git sync: `git add`, `git commit`, `git pull --rebase` and `git push`. A push to an SSH remote makes git start `ssh` in batch mode, so it never asks for a password. Git uses your own git setup to reach the remote (your SSH key or your credential helper). The plugin itself reads no credential and sends none anywhere.
 
   The script uses standard shell tools (such as `awk`, `grep` and `ls`) and `git`. It runs `git rev-parse` to find the project of a directory.
+
 - **Reads:** The plugin reads the conversation only to find out whether the journal rules are already in it. It looks for the mark that starts the rules and reads nothing else from the messages. Through the script, it reads `~/.config/agent-journal/config` and the journal folder. It also looks up the plugin's own folder to find the script.
 - **Sends:** The plugin sends no text from the conversation anywhere. The rules go into your own session, as a hidden message or as context of your prompt. Entries leave your machine only through git sync, to the remote that you set. Git sync is off until you turn it on.
 - **Hooks:** The plugin adds the rules to a prompt's context when the conversation does not have them. It watches calls of the Write tool that write into the journal folder, to refresh the pane and to start a sync. It does not change those calls.

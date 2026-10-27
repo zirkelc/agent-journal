@@ -1,8 +1,8 @@
 import { execFileSync } from 'node:child_process';
-import { rmSync } from 'node:fs';
+import { existsSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, test } from 'vitest';
-import { context, fields, fixture, HOOK, hook, tilde } from './helpers.ts';
+import { describe, expect, test, vi } from 'vitest';
+import { context, fields, fixture, GIT_IDENTITY, HOOK, hook, output, seed, tilde } from './helpers.ts';
 
 describe('output', () => {
   test(`should deliver the rules as SessionStart context`, () => {
@@ -268,4 +268,35 @@ describe('the agent it reports', () => {
     expect(result.session_id).toBe(undefined);
     expect(result.cwd).toBe(tilde(store, store.repo));
   });
+});
+
+describe('sync', () => {
+  test(`should take in what another machine pushed, without holding up the session`, async () => {
+    // Arrange
+    const store = fixture();
+    const origin = join(store.home, 'remote.git');
+    const other = join(store.home, 'other');
+    const git = (cwd: string, ...args: Array<string>) =>
+      execFileSync('git', ['-C', cwd, ...args], { env: { ...process.env, ...GIT_IDENTITY }, stdio: 'ignore' });
+    execFileSync('git', ['init', '-q', '--bare', origin]);
+    seed(store, [{ stem: '2026-10-11T090000Z', summary: 'This machine.' }]);
+    output(store, ['sync', 'init', origin], { env: GIT_IDENTITY });
+    const branch = execFileSync('git', ['-C', store.journalDir, 'branch', '--show-current'], {
+      encoding: 'utf8',
+    }).trim();
+    execFileSync('git', ['clone', '-q', '-b', branch, origin, other], { stdio: 'ignore' });
+    writeFileSync(join(other, '2026-10-11T093000Z.md'), '---\nsummary: "Other machine."\n---\n');
+    git(other, 'add', '.');
+    git(other, 'commit', '-q', '-m', 'other');
+    git(other, 'push', '-q');
+
+    // Act
+    const result = hook(store);
+
+    // Assert
+    expect(result?.hookSpecificOutput.hookEventName).toBe(`SessionStart`);
+    await vi.waitFor(() => expect(existsSync(join(store.journalDir, '2026-10-11T093000Z.md'))).toBe(true), {
+      timeout: 10_000,
+    });
+  }, 15_000);
 });

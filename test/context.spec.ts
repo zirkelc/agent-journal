@@ -273,15 +273,15 @@ describe('this session', () => {
 });
 
 describe('the agent', () => {
-  test(`should record which agent and model the session is`, () => {
+  test(`should record which agent and model the session is, with the model's API id`, () => {
     // Arrange
     const store = fixture();
 
     // Act
-    const result = fields(run(store, ['context', '--cwd', store.repo, '--agent', 'claude/opus-5']));
+    const result = fields(run(store, ['context', '--cwd', store.repo, '--agent', 'claude/claude-opus-5[1m]']));
 
     // Assert
-    expect(result.agent).toBe('claude/opus-5');
+    expect(result.agent).toBe('claude/claude-opus-5');
   });
 
   test(`should take the whole line out when no agent is given`, () => {
