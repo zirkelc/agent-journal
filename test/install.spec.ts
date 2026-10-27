@@ -1,19 +1,9 @@
 import { execFileSync } from 'node:child_process';
-import {
-  chmodSync,
-  existsSync,
-  lstatSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  writeFileSync,
-} from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 /** `run` here is the installer script, so the one that drives the binary is renamed. */
-import { type Fixture, fails, fixture, output as capture, ROOT, run as runBin } from './helpers.js';
+import { type Fixture, fails, fixture, output as capture, ROOT, run as runBin, tempDir } from './helpers.js';
 
 const INSTALLER = join(ROOT, 'install.sh');
 
@@ -42,7 +32,7 @@ type Install = {
  * GitHub, so the case needs no network and tests the working copy.
  */
 function install(extra: Array<string> = []): Install {
-  const home = realpathSync(mkdtempSync(join(tmpdir(), 'agent-journal-install-')));
+  const home = tempDir('install-');
   const prefix = join(home, 'opt');
   const journalDir = join(home, 'journal');
 
@@ -131,7 +121,7 @@ describe('install.sh', () => {
 
   test(`should say where entries go and how to move them`, () => {
     // Arrange, Act
-    const home = realpathSync(mkdtempSync(join(tmpdir(), 'agent-journal-install-')));
+    const home = tempDir('install-');
     const journalDir = join(home, 'journal');
     const output = run(home, ['--prefix', join(home, 'opt'), '--source', ROOT, '--dir', journalDir]);
 
@@ -142,7 +132,7 @@ describe('install.sh', () => {
 
   test(`should ask nothing, so a pipe with no terminal behind it still finishes`, () => {
     // Arrange
-    const home = realpathSync(mkdtempSync(join(tmpdir(), 'agent-journal-install-')));
+    const home = tempDir('install-');
 
     // Act
     const output = run(home, ['--prefix', join(home, 'opt'), '--source', ROOT]);
@@ -154,7 +144,7 @@ describe('install.sh', () => {
 
   test(`should say how to reach the commands when the bin directory is off PATH`, () => {
     // Arrange, Act
-    const home = realpathSync(mkdtempSync(join(tmpdir(), 'agent-journal-install-')));
+    const home = tempDir('install-');
     const output = run(home, ['--prefix', join(home, 'opt'), '--source', ROOT, '--dir', join(home, 'journal')]);
 
     // Assert
@@ -436,7 +426,7 @@ describe('the install header', () => {
 
   test(`should be printed once when the shell installer runs it`, () => {
     // Arrange
-    const home = realpathSync(mkdtempSync(join(tmpdir(), 'agent-journal-install-')));
+    const home = tempDir('install-');
 
     // Act
     const output = run(home, ['--prefix', join(home, 'opt'), '--source', ROOT]);

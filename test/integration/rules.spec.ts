@@ -1,10 +1,10 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterAll, describe, expect, test } from 'vitest';
 import { RULES_MARK } from '../../claude-code/hooks/names.ts';
-import { GIT_IDENTITY, ROOT } from '../helpers.ts';
+import { GIT_IDENTITY, ROOT, tempDir } from '../helpers.ts';
 
 /**
  * The rules name a file path for a new entry, not a folder, so the question
@@ -44,7 +44,7 @@ type Setup = { home: string; work: string; journal: string; env: NodeJS.ProcessE
  * identity on to the CLI that commits.
  */
 function setup(): Setup {
-  const home = realpathSync(mkdtempSync(join(tmpdir(), 'agent-journal-it-')));
+  const home = tempDir('it-');
   leftovers.add(home);
   const work = join(home, 'work');
   const journal = join(home, 'journal');
