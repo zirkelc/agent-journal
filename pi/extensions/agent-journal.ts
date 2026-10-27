@@ -81,6 +81,24 @@ const FILTERS = {
   project: Type.Optional(
     Type.String({ description: 'Only entries filed under this project. "." is the current project.' }),
   ),
+  cwd: Type.Optional(
+    Type.String({
+      description:
+        'Only entries from this directory and the directories under it. * and ? match within one name of the path.',
+    }),
+  ),
+  host: Type.Optional(
+    Type.String({ description: 'Only entries written on this machine. * and ? work as in a shell glob.' }),
+  ),
+  user: Type.Optional(
+    Type.String({ description: 'Only entries written by this account. * and ? work as in a shell glob.' }),
+  ),
+  agent: Type.Optional(
+    Type.String({
+      description:
+        'Only entries of one agent (claude), of one model (claude-opus-5-5), or of both (claude/claude-opus-5-5). * and ? work as in a shell glob.',
+    }),
+  ),
   limit: Type.Optional(
     Type.Integer({
       minimum: 1,
@@ -102,18 +120,34 @@ type Filters = {
   since?: string;
   until?: string;
   project?: string;
+  cwd?: string;
+  host?: string;
+  user?: string;
+  agent?: string;
   limit?: number;
   offset?: number;
   by?: ByField;
 };
 
+/** The filters that name who and where, which `read` takes for a period as `list` does, in the order the help lists them. */
+const SCOPE_FILTERS = ['project', 'cwd', 'host', 'user', 'agent'] as const;
+
+/** The CLI flags of the filters that name who and where. */
+function scopeArgs(filters: Filters): Array<string> {
+  return SCOPE_FILTERS.flatMap((key) => {
+    const value = filters[key]?.trim();
+    return value ? [`--${key}`, value] : [];
+  });
+}
+
 /** The CLI flags of the filters that the model gave. */
 export function filterArgs(filters: Filters): Array<string> {
   const args: Array<string> = [];
-  for (const key of ['date', 'since', 'until', 'project'] as const) {
+  for (const key of ['date', 'since', 'until'] as const) {
     const value = filters[key]?.trim();
     if (value) args.push(`--${key}`, value);
   }
+  args.push(...scopeArgs(filters));
   /** A count reads every match, so it takes no page: the CLI refuses a limit or an offset with it. */
   if (filters.by) {
     if (filters.limit || filters.offset) throw new Error('by counts every match, so leave out limit and offset.');
@@ -153,6 +187,46 @@ export function fitList(stdout: string, stderr: string, offset = 0): string | nu
     kept++;
   }
   return [...lines.slice(lines.length - kept), note(kept)].join('\n');
+}
+
+/** The last line of a list that the limit cut, as the tool gives it. */
+const CUT_NOTE = /^matches (\d+) to (\d+), counted from the newest; call again with offset (\d+) for older ones$/;
+
+/** Whether a list, as the tool gives it, left older matches out. */
+export const isCut = (text: string): boolean => CUT_NOTE.test(text.split('\n').at(-1) ?? '');
+
+/**
+ * A cut list whose last line also says how many older matches it left out and
+ * the day of the oldest, from the counts of the same list by date. A model that
+ * sees only "for older ones" often answers from the newest page alone. The
+ * longer note can push the list past MAX_OUTPUT, so the oldest lines go until
+ * it fits. The text stays as it is when the counts do not give both.
+ */
+export function withOlder(text: string, counts: string): string {
+  const lines = text.split('\n');
+  const found = CUT_NOTE.exec(lines.at(-1) ?? '');
+  if (!found) return text;
+  const from = Number(found[1]);
+  const total = Number(/^total\t(\d+)$/m.exec(counts)?.[1]);
+  const oldest = counts
+    .split('\n')
+    .map((row) => /^\d+\t(\d{4}-\d{2}-\d{2})$/.exec(row)?.[1])
+    .filter((day) => day !== undefined)
+    .sort()[0];
+  if (!Number.isFinite(total) || !oldest) return text;
+  const note = (shown: number) => {
+    const next = from - 1 + shown;
+    const older = total - next;
+    const left =
+      older === 1
+        ? `1 older match, back to ${oldest}, is not in this result: call again with offset ${next} before you answer about it.`
+        : `${older} older matches, back to ${oldest}, are not in this result: call again with offset ${next} before you answer about them.`;
+    return `matches ${from} to ${next} of ${total}, counted from the newest. ${left}`;
+  };
+  const rows = lines.slice(0, -1);
+  if (total - (from - 1 + rows.length) <= 0) return text;
+  while (rows.length > 0 && [...rows, note(rows.length)].join('\n').length > MAX_OUTPUT) rows.shift();
+  return [...rows, note(rows.length)].join('\n');
 }
 
 /** A period that `read` takes: a local day, month or year, or today or yesterday. */
@@ -330,7 +404,18 @@ export default function agentJournal(pi: ExtensionAPI) {
         const run = await runTool(args, ctx);
         if (params.by) return textResult(capped(run.stdout.trim()));
         const text = fitList(run.stdout, run.stderr, params.offset) ?? withNote(run.stdout, run.stderr);
-        return textResult(capped(text || 'No entries match.'));
+        if (!isCut(text)) return textResult(capped(text || 'No entries match.'));
+        /** The same list counted by day, for the note on what the cut left out. Without the count, the short note stays. */
+        const counted = await runTool(
+          [
+            'list',
+            ...terms,
+            ...(params.fixed ? ['--fixed'] : []),
+            ...filterArgs({ ...params, limit: undefined, offset: undefined, by: 'date' }),
+          ],
+          ctx,
+        ).catch(() => null);
+        return textResult(capped(counted ? withOlder(text, counted.stdout) : text));
       },
     });
 
@@ -347,6 +432,10 @@ export default function agentJournal(pi: ExtensionAPI) {
             'One of: ["latest"]; one or more entry ids, each whole or a prefix that matches one entry; or one local period: ["today"], ["yesterday"], ["2026"], ["2026-10"] or ["2026-10-22"].',
         }),
         project: FILTERS.project,
+        cwd: FILTERS.cwd,
+        host: FILTERS.host,
+        user: FILTERS.user,
+        agent: FILTERS.agent,
         limit: Type.Optional(
           Type.Integer({
             minimum: 1,
@@ -363,9 +452,7 @@ export default function agentJournal(pi: ExtensionAPI) {
       }),
       annotations: { readOnlyHint: true, openWorldHint: false },
       async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-        const args = ['read', ...params.which.map((item) => item.trim())];
-        const project = params.project?.trim();
-        if (project) args.push('--project', project);
+        const args = ['read', ...params.which.map((item) => item.trim()), ...scopeArgs(params)];
         if (params.limit) args.push('--limit', String(params.limit));
         if (params.offset) args.push('--offset', String(params.offset));
         /** Exit 1 means that nothing matches, which is an answer. */
@@ -375,7 +462,11 @@ export default function agentJournal(pi: ExtensionAPI) {
         const period = params.which.length === 1 ? params.which[0]!.trim() : '';
         if (text.length <= MAX_OUTPUT || !PERIOD.test(period)) return textResult(capped(text));
         /** Cut text would lose the last entries without a word, so a long period gives its summaries instead. */
-        const list = await runTool(['list', ...filterArgs({ date: period, project, limit: MAX_LIMIT })], ctx);
+        const { project, cwd, host, user, agent } = params;
+        const list = await runTool(
+          ['list', ...filterArgs({ date: period, project, cwd, host, user, agent, limit: MAX_LIMIT })],
+          ctx,
+        );
         const summaries = fitList(list.stdout, list.stderr) ?? withNote(list.stdout, list.stderr);
         return textResult(
           capped(
