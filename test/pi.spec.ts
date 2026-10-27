@@ -366,8 +366,51 @@ describe('the tools', () => {
 
     // Assert
     expect(answer).toBe(
+      '2026-10-11T090000Z\tdemo\tTwo.\nmatches 1 to 1 of 2, counted from the newest. 1 older match, back to 2026-10-10, is not in this result: call again with offset 1 before you answer about it.',
+    );
+  });
+
+  test(`should keep the short note on the older matches when their count fails`, async () => {
+    // Arrange
+    const store = fixture();
+    seed(store, [
+      { stem: '2026-10-10T090000Z', project: 'demo', summary: 'One.' },
+      { stem: '2026-10-11T090000Z', project: 'demo', summary: 'Two.' },
+    ]);
+    const host = pi(store, { stopped: (args) => args.includes('--by') });
+
+    // Act
+    const answer = await host.call(TOOL_LIST, { limit: 1 });
+
+    // Assert
+    expect(answer).toBe(
       '2026-10-11T090000Z\tdemo\tTwo.\nmatches 1 to 1, counted from the newest; call again with offset 1 for older ones',
     );
+  });
+
+  test(`should filter a list, and the entries of a period, by directory, host, user and agent`, async () => {
+    // Arrange
+    const store = fixture();
+    const here = { cwd: '~/Developer/demo', host: 'laptop', user: 'me', agent: 'claude/claude-opus-5-5' };
+    seed(store, [
+      { stem: '2026-10-10T090000Z', project: 'demo', summary: 'Here.', ...here },
+      { stem: '2026-10-10T100000Z', project: 'demo', summary: 'Other dir.', ...here, cwd: '~/Developer/other' },
+      { stem: '2026-10-10T110000Z', project: 'demo', summary: 'Other host.', ...here, host: 'build-box' },
+      { stem: '2026-10-10T120000Z', project: 'demo', summary: 'Other user.', ...here, user: 'ci' },
+      { stem: '2026-10-10T130000Z', project: 'demo', summary: 'Other agent.', ...here, agent: 'pi/claude-sonnet-5-5' },
+    ]);
+    const host = pi(store);
+    const filters = { cwd: '~/Developer/demo', host: 'lap*', user: 'me', agent: 'claude-opus-*' };
+
+    // Act
+    const listed = await host.call(TOOL_LIST, filters);
+    const read = await host.call(TOOL_READ, { which: ['2026-10-10'], ...filters });
+    const other = await host.call(TOOL_LIST, { host: 'build-box' });
+
+    // Assert
+    expect(rows(listed).map((row) => row.summary)).toEqual(['Here.']);
+    expect([...read.matchAll(/^summary: "(.+)"$/gm)].map((match) => match[1])).toEqual(['Here.']);
+    expect(rows(other).map((row) => row.summary)).toEqual(['Other host.']);
   });
 
   test(`should count every match for each project with by, also beyond the default limit`, async () => {
@@ -428,8 +471,9 @@ describe('the tools', () => {
     expect(answer.length).toBeLessThanOrEqual(MAX_OUTPUT);
     expect(shown.at(-1)!.id).toBe(stems.at(-6));
     expect(shown[0]!.id).toBe(stems.at(-5 - shown.length));
+    const next = 5 + shown.length;
     expect(lines.at(-1)).toBe(
-      `matches 6 to ${5 + shown.length}, counted from the newest; call again with offset ${5 + shown.length} for older ones`,
+      `matches 6 to ${next} of 100, counted from the newest. ${100 - next} older matches, back to 2026-10-01, are not in this result: call again with offset ${next} before you answer about them.`,
     );
   });
 
