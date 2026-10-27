@@ -1,8 +1,8 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { inject } from 'vitest';
 
 /**
  * Git reads these to decide which repository it is in, ahead of the directory it
@@ -70,18 +70,24 @@ function fakeCommands(dir: string): void {
   write('id', `[ "$1" = -un ] && [ -n "$AJ_TEST_ID_USER" ] || exit 1\nprintf '%s\\n' "$AJ_TEST_ID_USER"`);
 }
 
+/**
+ * A new folder in the temp folder of this test run, which the run deletes at
+ * its end. Canonicalised because git always answers with the real path, and on
+ * macOS the temp directory reaches it through a symlink.
+ */
+export function tempDir(prefix: string): string {
+  return realpathSync(mkdtempSync(join(inject('tmp'), prefix)));
+}
+
 export function fixture(instructions?: string): Fixture {
-  /**
-   * Canonicalised because git always answers with the real path, and on macOS
-   * the temp directory reaches it through a symlink.
-   */
-  const home = realpathSync(mkdtempSync(join(tmpdir(), 'agent-journal-')));
+  const home = tempDir('fixture-');
   const root = join(home, 'plugin');
   /** Where a plugin folder holds the CLI, so the Codex hook finds it from the plugin root. */
   const bin = join(root, 'scripts', 'agent-journal');
   const repo = join(home, 'repo');
 
   mkdirSync(join(root, 'scripts'), { recursive: true });
+  mkdirSync(join(home, 'tmp'));
   copyFileSync(join(ROOT, 'bin', 'agent-journal'), bin);
 
   /**
@@ -137,6 +143,8 @@ export function worktree(store: Fixture, name: string): string {
 
 type RunOptions = {
   cwd?: string;
+  /** More arguments, after the ones the helper gives. */
+  extra?: Array<string>;
   /** The directory the process itself is started in, for relative-path cases. */
   at?: string;
   sessionId?: string;
@@ -144,7 +152,7 @@ type RunOptions = {
   stdin?: string;
 };
 
-function baseEnv(store: Fixture, extra: Record<string, string | undefined> = {}): NodeJS.ProcessEnv {
+export function baseEnv(store: Fixture, extra: Record<string, string | undefined> = {}): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     /**
@@ -160,6 +168,8 @@ function baseEnv(store: Fixture, extra: Record<string, string | undefined> = {})
     GIT_CEILING_DIRECTORIES: store.home,
     /** Point config resolution at the fixture, so the developer's own config never leaks in. */
     XDG_CONFIG_HOME: join(store.home, 'config'),
+    /** The CLI's own temp files, such as a draft it keeps, go to the fixture too. */
+    TMPDIR: join(store.home, 'tmp'),
     PATH: `${store.fakes}:${process.env.PATH}`,
     AJ_TEST_LOCAL_HOST_NAME: FAKE_LOCAL_HOST_NAME,
     AJ_TEST_NODE_NAME: FAKE_NODE_NAME,
@@ -354,6 +364,7 @@ export function frontmatter(entry: string): Record<string, string> {
 export function context(store: Fixture, options: RunOptions = {}): string {
   const args = ['context', '--cwd', options.cwd ?? store.repo];
   if (options.sessionId !== undefined) args.push('--session-id', options.sessionId);
+  args.push(...(options.extra ?? []));
   return run(store, args, options);
 }
 

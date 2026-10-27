@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { chmodSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 import { configure, type Fixture, fails, fixture, frontmatter, rows, run, tilde, worktree } from './helpers.js';
@@ -44,6 +44,17 @@ describe('write', () => {
     // Assert
     const entry = written(store);
     expect(frontmatter(entry.text).summary).toBe('Added the write command.');
+  });
+
+  test(`should leave no draft folder behind in the temp folder`, () => {
+    // Arrange
+    const store = fixture();
+
+    // Act
+    run(store, ['write', '--summary', 'Added the write command.'], { at: store.repo });
+
+    // Assert
+    expect(readdirSync(join(store.home, 'tmp'))).toEqual([]);
   });
 
   test(`should take the body from stdin`, () => {
@@ -248,6 +259,44 @@ describe('write', () => {
     expect(frontmatter(written(store).text).session_id).toBe('abc-123');
   });
 
+  test(`should write a whole entry from flags alone, as an agent's tool does, without an editor`, () => {
+    // Arrange
+    const store = fixture();
+    const elsewhere = join(store.home, 'elsewhere');
+    mkdirSync(elsewhere);
+
+    // Act
+    const out = run(
+      store,
+      [
+        'write',
+        '--summary',
+        'Written through a tool.',
+        '--body',
+        'The body.',
+        '--cwd',
+        store.repo,
+        '--agent',
+        'pi/test-model',
+        '--session-id',
+        'abc-123',
+      ],
+      { at: elsewhere, env: { EDITOR: 'false', VISUAL: 'false' } },
+    );
+
+    // Assert
+    const entry = written(store);
+    expect(out).toBe(`${join(store.journalDir, entry.name)}\n`);
+    const fields = frontmatter(entry.text);
+    expect(`${fields.date.replaceAll(':', '')}.md`).toBe(entry.name);
+    expect(fields.project).toBe('repo');
+    expect(fields.summary).toBe('Written through a tool.');
+    expect(fields.cwd).toBe(tilde(store, store.repo));
+    expect(fields.agent).toBe('pi/test-model');
+    expect(fields.session_id).toBe('abc-123');
+    expect(entry.text.endsWith('---\n\nThe body.\n')).toBe(true);
+  });
+
   test(`should leave the session id out when there is none`, () => {
     // Arrange
     const store = fixture();
@@ -378,16 +427,55 @@ describe('the agent it records', () => {
     expect(frontmatter(written(store).text).agent).toBeUndefined();
   });
 
+  test(`should record a model id with a colon in quotes, as the provider writes it`, () => {
+    // Arrange
+    const store = fixture();
+
+    // Act
+    run(store, ['write', '--summary', 'From a local model.', '--agent', 'pi/llama3:8b'], { at: store.repo });
+
+    // Assert
+    const { text } = written(store);
+    expect(text).toContain('\nagent: "pi/llama3:8b"\n');
+    expect(frontmatter(text).agent).toBe('pi/llama3:8b');
+  });
+
+  test(`should count and filter an agent with a colon by its whole value`, () => {
+    // Arrange
+    const store = fixture();
+    run(store, ['write', '--summary', 'From a local model.', '--agent', 'pi/llama3:8b'], { at: store.repo });
+
+    // Act
+    const counted = run(store, ['list', '--by', 'agent']);
+    const filtered = run(store, ['list', '--agent', 'pi/llama3:8b']);
+
+    // Assert
+    expect(counted).toBe('1\tpi/llama3:8b\ntotal\t1\n');
+    expect(rows(filtered).map((row) => row.summary)).toEqual(['From a local model.']);
+  });
+
   test(`should refuse an agent that would break the frontmatter`, () => {
     // Arrange
     const store = fixture();
 
     // Act
-    const result = fails(store, ['write', '--summary', 'Fine.', '--agent', 'a: b'], { at: store.repo });
+    const result = fails(store, ['write', '--summary', 'Fine.', '--agent', 'a"b'], { at: store.repo });
 
     // Assert
     expect(result.status).toBe(2);
-    expect(result.stderr).toContain('colon');
+    expect(result.stderr).toContain('quote');
+  });
+
+  test(`should refuse an agent with a tab, which would add a column to a count`, () => {
+    // Arrange
+    const store = fixture();
+
+    // Act
+    const result = fails(store, ['write', '--summary', 'Fine.', '--agent', 'pi/a:\tb'], { at: store.repo });
+
+    // Assert
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('tab');
   });
 });
 

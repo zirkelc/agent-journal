@@ -41,7 +41,7 @@ describe('the rules', () => {
     // Assert
     expect(result).not.toMatch(/__[A-Z][A-Z_]*__/);
     expect(result).toContain(`${store.journalDir}/YYYY-MM-DDTHHMMSSZ.md`);
-    expect(result).toContain(`grep '^summary:' ${store.journalDir}/2026-01-*.md`);
+    expect(result).toContain(`    cd ${store.journalDir}\n`);
   });
 
   test(`should name the configured directory rather than the default`, () => {
@@ -68,6 +68,71 @@ describe('the rules', () => {
 
     // Assert
     expect(result).toBe(``);
+  });
+});
+
+describe('the variant with tools', () => {
+  test(`should name the tools with the prefix, and leave out the file and the commands`, () => {
+    // Arrange
+    const store = fixture();
+
+    // Act
+    const rules = context(store, { sessionId: 'abc-123', extra: ['--tools', 'journal_'] });
+
+    // Assert
+    expect(rules).toContain('`journal_write` tool');
+    expect(rules).toContain('- `journal_list` lists entries');
+    expect(rules).not.toContain('date -u');
+    expect(rules).not.toContain('grep');
+    expect(rules).not.toContain('### Current session');
+    expect(rules).not.toContain('<!--');
+    expect(rules).not.toContain('__TOOLS__');
+  });
+
+  test(`should leave the tools out of the plain variant`, () => {
+    // Arrange
+    const store = fixture();
+
+    // Act
+    const rules = context(store);
+
+    // Assert
+    expect(rules).not.toContain('__TOOLS__');
+    expect(rules).not.toContain('write` tool. It takes');
+    expect(rules).not.toContain('<!--');
+    expect(rules).toContain('date -u +%Y-%m-%dT%H:%M:%SZ');
+  });
+
+  /**
+   * Entry names are UTC, and a day the user names is local, so a model that
+   * reads the files needs the UTC bounds of the local days. The tools work
+   * them out themselves.
+   */
+  test(`should give the clock to the plain variant and not to the one with tools`, () => {
+    // Arrange
+    const store = fixture();
+    const env = { AGENT_JOURNAL_NOW: String(Date.parse('2026-10-06T14:15:27Z') / 1_000), TZ: 'Europe/Berlin' };
+
+    // Act
+    const plain = context(store, { env });
+    const tools = context(store, { env, extra: ['--tools', 'journal_'] });
+
+    // Assert
+    expect(plain).toContain(`utc_yesterday_since=2026-10-04T22:00:00Z\nutc_yesterday_until=2026-10-05T21:59:59Z\n`);
+    expect(tools).not.toContain('utc_yesterday_since');
+  });
+
+  test(`should not leave two blank lines in a row where a block was`, () => {
+    // Arrange
+    const store = fixture();
+
+    // Act
+    const plain = context(store);
+    const tools = context(store, { extra: ['--tools', 'journal_'] });
+
+    // Assert
+    expect(plain.includes('\n\n\n')).toBe(false);
+    expect(tools.includes('\n\n\n')).toBe(false);
   });
 });
 

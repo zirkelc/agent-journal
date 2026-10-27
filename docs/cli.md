@@ -219,7 +219,7 @@ aj list --host macbook
 aj list --host cookiebox --user chris
 
 # entries of one model, with any agent
-# grep -lE '^agent: [^/]*/opus-' ~/agent-journal/*.md
+# grep -lE '^agent: "?[^/]*/opus-' ~/agent-journal/*.md
 aj list --agent 'opus-*'
 
 # entries of every project whose name starts the same

@@ -7,13 +7,16 @@
 #   agent-journal write   [--summary S] [--body B]
 #   agent-journal config  [set|unset <key> [value]]
 #   agent-journal sync    [init [URL]]
-#   agent-journal context [--cwd DIR] [--session-id ID] [--agent A] [--recall]
+#   agent-journal context [--cwd DIR] [--session-id ID] [--agent A] [--recall | --tools PREFIX]
 #
 # `context` is left out of the help, since only the agent hooks and the journal
 # pane call it. It prints the text a session should be given: templates/INSTRUCTIONS.md,
 # resolved against the settings and against where the session is. With --recall
 # it prints templates/RECALL.md instead, the text for a model that only reads the
-# journal, with the clock and the calendar.
+# journal, with the clock and the calendar. With --tools it prints the variant
+# of the rules for an agent that has the journal's own tools, named PREFIX
+# followed by write, list, search and read, instead of a file to write and
+# commands to read with.
 # It prints plain text and knows nothing about any agent, which is the seam that
 # lets one adapter per agent wrap it in whatever that agent reads.
 #
@@ -66,9 +69,10 @@ help_text() {
 usage: agent-journal list   [TERM...] [--fixed] [--by FIELD] [filters]
        agent-journal read   latest | ID... | PERIOD [filters]
        agent-journal write  [--summary S] [--body B] [--project P] [--cwd DIR] [--agent A]
+                            [--session-id ID] [--no-sync]
        agent-journal config [set|unset <key> [value]]
        agent-journal sync   [init [URL]]
-       agent-journal install [claude|codex] [--all] [--dry-run]
+       agent-journal install [claude|codex|pi] [--all] [--dry-run]
        agent-journal help
 
 install with no agent named lists the ones found on this machine and what to
@@ -79,7 +83,9 @@ write takes the summary and the body as flags, and anything piped in is the
 body. Without a summary it opens $EDITOR on a template, carrying any body it
 already has. The project and the directory come from where you are unless the
 flags say otherwise. --project . names the repository of --cwd, and fails
-outside one.
+outside one. --agent and --session-id record which agent and session wrote it.
+It prints the new entry's path, whose name without .md is its id. --no-sync
+leaves the sync to the caller.
 
 list with terms searches the summaries and the bodies. Each term is an
 extended regex, as grep -E reads it, matched within one line and ignoring
@@ -897,6 +903,8 @@ body_set=0
 all_set=0
 dry_run=0
 recall=0
+tools=
+no_sync=0
 keep_empty=0
 
 arg1=
@@ -951,6 +959,14 @@ while [ $# -gt 0 ]; do
     # For `context`: the text for a reader of the journal instead of the rules
     # for writing it.
     --recall) recall=1; shift ;;
+    # For `context`: the rules for an agent that writes and reads the journal
+    # through tools of its own, which the value names: each tool is this prefix
+    # followed by write, list, search or read.
+    --tools) [ $# -ge 2 ] || usage; tools=$2; shift 2 ;;
+    --tools=*) tools=${1#--tools=}; shift ;;
+    # For `write`: the caller syncs on its own, after the write has returned, so
+    # a slow push does not hold up the one who wrote.
+    --no-sync) no_sync=1; shift ;;
     # One flag per field, rather than one flag for "the message". An entry is a
     # summary and a body, and a single `-m` cannot say which it meant. Spelled
     # out like every other flag here, none of which has a short form.
@@ -1197,14 +1213,17 @@ layout_for() {
 # is cut, where it does not get in the way of a script that splits the lines. A
 # range is checked on the name, before the file is opened, and the reading stops
 # at the first file older than it. Without terms only the frontmatter is read,
-# because that is all a line shows. awk opens the files itself, from `ARGV` in
-# `BEGIN`, because its own input loop only runs forward and cannot stop one
-# file early in POSIX.
+# because that is all a line shows. awk opens the files itself in `BEGIN`,
+# because its own input loop only runs forward and cannot stop one file early in
+# POSIX. The names come one per line on standard input, not as arguments: the
+# names of a journal of a few years are more than the arguments one program can
+# get, and `printf` is built into the shell, so it has no such limit.
 #
 # The terms and every value that was typed go through the environment rather
 # than -v, which would treat a backslash in them as an escape. A regex needs
 # its backslashes, and a name can have one.
 render() {
+  printf '%s\n' "$@" |
   AGENT_JOURNAL_TERMS=${terms:-} \
   AGENT_JOURNAL_PROJECT=$project_filter \
   AGENT_JOURNAL_CWD=$cwd_filter \
@@ -1480,8 +1499,9 @@ render() {
       # in a path as an escape.
       split(ENVIRON["AGENT_JOURNAL_SKIP"], skipped, "\n")
       for (k in skipped) skip[skipped[k]] = 1
-      for (a = ARGC - 1; a >= 1; a--)
-        if (scan(ARGV[a])) break
+      while ((getline name) > 0) names[++count] = name
+      for (a = count; a >= 1; a--)
+        if (scan(names[a])) break
 
       # One value per match, oldest first, for the caller to count. A field
       # an entry does not have is a value of its own, so the total is still
@@ -1549,7 +1569,7 @@ render() {
       note()
       exit
     }
-  ' "$@"
+  '
 }
 
 # The selection of `render`, with a directory named like an entry left out.
@@ -2396,8 +2416,10 @@ if [ "$cmd" = write ]; then
   done
 
   # A value that would end its field early or split the line is refused rather
-  # than escaped. The summary is quoted, so only a quote or a newline can break
-  # it; the others are bare, where a colon ends the key as well.
+  # than escaped. The summary and the agent are quoted, so only a quote or a
+  # newline can break them; the others are bare, where a colon ends the key as
+  # well. The agent is quoted because a model id can have a colon, as in
+  # `llama3:8b`, and it is kept as the provider writes it.
   refuse_if_unquotable() {
     case $2 in
       *'"'* | *"$newline"*)
@@ -2405,16 +2427,19 @@ if [ "$cmd" = write ]; then
         exit 2
         ;;
     esac
-    [ "$3" = bare ] || return 0
+    [ "$3" = quoted ] && return 0
     case $2 in
-      *:*)
-        printf 'the %s cannot contain a colon\n' "$1" >&2
-        exit 2
-        ;;
       *"$tab"*)
         # Not a problem for the entry, but `list` separates its columns with
         # tabs down a pipe, and one inside a value would add a column.
         printf 'the %s cannot contain a tab\n' "$1" >&2
+        exit 2
+        ;;
+    esac
+    [ "$3" = bare ] || return 0
+    case $2 in
+      *:*)
+        printf 'the %s cannot contain a colon\n' "$1" >&2
         exit 2
         ;;
     esac
@@ -2433,7 +2458,7 @@ if [ "$cmd" = write ]; then
   refuse_if_unquotable summary "$opt_summary" quoted
   refuse_if_unquotable project "$project_filter" bare
   refuse_if_unquotable 'session id' "$session_id" bare
-  refuse_if_unquotable agent "$agent" bare
+  refuse_if_unquotable agent "$agent" tabless
 
   resolve_project "$cwd"
   resolve_machine
@@ -2477,7 +2502,7 @@ if [ "$cmd" = write ]; then
     # YAML reader.
     [ -z "$host" ] || printf 'host: "%s"\n' "$host"
     [ -z "$user" ] || printf 'user: "%s"\n' "$user"
-    [ -z "$agent" ] || printf 'agent: %s\n' "$agent"
+    [ -z "$agent" ] || printf 'agent: "%s"\n' "$agent"
     [ -z "$session_id" ] || printf 'session_id: %s\n' "$session_id"
     printf -- '---\n\n'
   } > "$draft" || exit 1
@@ -2556,10 +2581,12 @@ EOF
     reject "the summary is ${#inner} characters, and the limit is 200"
 
   mv "$draft" "$entry" || exit 1
+  # Empty now, and the entry is written whether or not it goes.
+  rmdir "$draft_dir" 2>/dev/null || :
   printf '%s\n' "$entry"
   # The entry is written whatever the sync makes of it, so its line goes to
   # stderr and its failure does not fail the write.
-  [ "$cfg_sync" != git ] || sync_journal >&2 || :
+  [ "$no_sync" = 1 ] || [ "$cfg_sync" != git ] || sync_journal >&2 || :
   exit 0
 fi
 
@@ -2586,9 +2613,10 @@ fi
 
 # ---------------------------------------------------------------- context
 
-# Without --recall, the rules a session is given for writing entries. With it,
-# RECALL.md: what a model that only reads the journal is told, which carries the
-# clock and the calendar, so that model never works out a date itself.
+# Without --recall, the rules a session is given for writing entries, in the
+# variant --tools picks. With it, RECALL.md: what a model that only reads the
+# journal is told, which carries the clock and the calendar, so that model never
+# works out a date itself.
 instructions=$root/templates/INSTRUCTIONS.md
 [ "$recall" = 0 ] || instructions=$root/templates/RECALL.md
 
@@ -2598,10 +2626,15 @@ instructions=$root/templates/INSTRUCTIONS.md
 [ -f "$instructions" ] || exit 0
 
 # A reader given a wrong date answers wrongly, so a clock that cannot be read
-# fails the command rather than printing the text without it.
+# fails the command rather than printing the text without it. The rules without
+# tools get the clock too, since a model that reads the files has to turn the
+# local days the user names into UTC names. There a clock that cannot be read
+# only leaves the block out: the rules for writing matter more than it.
 time=
 if [ "$recall" = 1 ]; then
   resolve_time || exit 1
+  time=$time_text
+elif [ -z "$tools" ] && resolve_time 2>/dev/null; then
   time=$time_text
 fi
 
@@ -2619,9 +2652,10 @@ AGENT_JOURNAL_TIME=$time awk \
   -v host="$host" \
   -v user="$user" \
   -v session_id="$session_id" \
-  -v agent="$agent" '
+  -v agent="$agent" \
+  -v tools="$tools" '
   BEGIN {
-    keys = "journal_dir project cwd host user session_id agent time"
+    keys = "journal_dir project cwd host user session_id agent time tools"
     n = split(keys, key, " ")
     value["journal_dir"] = journal_dir
     value["project"] = project
@@ -2631,6 +2665,7 @@ AGENT_JOURNAL_TIME=$time awk \
     value["session_id"] = session_id
     value["agent"] = agent
     value["time"] = ENVIRON["AGENT_JOURNAL_TIME"]
+    value["tools"] = tools
 
     # In a gsub replacement `&` means the matched text and `\` escapes, so a
     # value containing either would substitute itself back in mangled.
@@ -2641,11 +2676,23 @@ AGENT_JOURNAL_TIME=$time awk \
   # what the session is told.
   NR == 1 && /^<!--/ { comment = 1 }
   comment { if (/-->/) comment = 0; next }
+  # One block per variant, so the two share every line outside them. A block
+  # for the other variant is left out, markers and all.
+  /^<!-- with tools -->$/ { block = "with"; gap = 1; next }
+  /^<!-- without tools -->$/ { block = "without"; gap = 1; next }
+  /^<!-- end -->$/ { block = ""; gap = 1; next }
+  block == "with" && tools == "" { next }
+  block == "without" && tools != "" { next }
   # The blank lines the comment left behind are not the start of the text.
   !started && /^[ \t]*$/ { next }
+  # A marker can stand in a paragraph of its own, and the blank line on each
+  # side of it would then be two where the text has one.
+  gap && blank && /^[ \t]*$/ { next }
 
   {
     started = 1
+    gap = 0
+    blank = $0 ~ /^[ \t]*$/
     line = $0
     for (i = 1; i <= n; i++) {
       placeholder = "__" toupper(key[i]) "__"

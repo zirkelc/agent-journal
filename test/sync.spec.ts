@@ -455,6 +455,23 @@ describe('write', () => {
     expect(subjects(store.journalDir)[0]).toMatch(/^journal: \S+Z Synced on write\.$/);
   });
 
+  test(`should leave the sync to the caller with --no-sync, and commit nothing`, () => {
+    // Arrange
+    const store = fixture();
+    sync(store, ['init']);
+
+    // Act
+    const result = output(store, ['write', '--summary', 'Synced later.', '--no-sync'], {
+      at: store.repo,
+      env: GIT_IDENTITY,
+    });
+
+    // Assert
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe(``);
+    expect(git(store.journalDir, 'status', '--porcelain')).toMatch(/^\?\? \S+Z\.md$/);
+  });
+
   test(`should not fail the write when the sync fails`, () => {
     // Arrange
     const store = fixture();
