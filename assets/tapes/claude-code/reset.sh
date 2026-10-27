@@ -32,8 +32,9 @@ fi
 # pane width that leaves room for the chat, and every notice, hint and upsell
 # marked as seen, so the start screen shows only the header.
 # Claude Code's own theme follows the terminal theme: light for a theme in
-# settings/ whose name ends in -light (record.sh writes the name to .theme-name).
-case $(cat "$TAPES/.theme-name" 2>/dev/null) in *-light) claude_theme=light ;; *) claude_theme=dark ;; esac
+# settings/ whose name ends in -light (record.sh writes the name to .theme-name,
+# and the tapes of another folder pass it as DEMO_THEME).
+case ${DEMO_THEME:-$(cat "$TAPES/.theme-name" 2>/dev/null)} in *-light) claude_theme=light ;; *) claude_theme=dark ;; esac
 version=$(claude --version | cut -d' ' -f1)
 cat > "$DEMO_HOME/.claude.json" <<EOF
 {

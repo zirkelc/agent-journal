@@ -352,6 +352,23 @@ describe('register', () => {
     expect(drawn.indexOf('Newer') < drawn.indexOf('Older')).toBe(true);
   });
 
+  test('a pane drawn with a list that never loaded, as after /clear, says it is loading and loads it', async ($, on) => {
+    // Arrange
+    const kept = world(on, { list: line('2026-10-05T143000Z', 'repo', 'Kept across the clear') });
+    await $.session.start(SESSION);
+
+    // Act
+    const first = textOf(await $.ui.render(PANE as never));
+    await kept.clock.settle();
+    const second = textOf(await $.ui.render(PANE as never));
+
+    // Assert
+    expect(first.includes('No entries yet.')).toBe(false);
+    expect(first.includes('Loading the journal')).toBe(true);
+    expect(kept.queries().filter((run) => run.argv[1] === 'list').length).toBe(1);
+    expect(second.includes('Kept across the clear')).toBe(true);
+  });
+
   test('the list scrolls its own rows, keeps the engine\u2019s window, and loads the next page near its end', async ($, on) => {
     // Arrange
     const entries = Array.from({ length: 230 }, (_, at) => {
