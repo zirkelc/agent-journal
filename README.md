@@ -46,6 +46,7 @@ Each journal entry is a new markdown file. The filename is the current UTC times
 
 The file starts with frontmatter, so a search across many files can match single fields. The body describes what happened:
 
+<!-- prettier-ignore -->
 ```markdown
 ---
 date: 2026-10-07T14:20:00Z
@@ -54,7 +55,7 @@ summary: "Export timed out because the CSV was built on the main thread. Moved i
 cwd: ~/Developer/acme-dashboard
 host: "macbook"
 user: "chris"
-agent: claude/opus-5-5
+agent: "claude/opus-5-5"
 session_id: 743d02a3-22f3-4016-b13e-dd448ad58daf
 ---
 
@@ -170,52 +171,36 @@ writable_roots = ["/Users/you/agent-journal"]
 
 Use the full path rather than `~`. `writable_roots` only applies in `workspace-write` mode; in `read-only` every entry stops to ask, and in `danger-full-access` nothing is restricted and this is unnecessary.
 
-### CLI
+### Pi
+
+Install the package from npm:
+
+```sh
+pi install npm:pi-agent-journal
+```
+
+Then open a new session and ask Pi to write a journal entry. By default, it writes to the directory `~/agent-journal/`. In Pi, the model writes and reads the journal with three tools of its own (`journal_write`, `journal_list` and `journal_read`). Pi does not ask for approval before a tool call, so there is no permission step.
+
+For the tools, how the extension gives the rules to the session, and what it runs, reads and sends, see the [Pi package README](pi/README.md).
+
+## CLI
 
 > [!NOTE]
 > You need to run the [shell installation](#shell) to make the CLI available.
 
-The CLI is optional. You need it only to work with the journal from your shell. It is a thin layer over `ls` and `grep` for common commands:
+The CLI is optional. You need it only to work with the journal from your shell. It is installed as `agent-journal` and as the short name `aj`, and it is a thin layer over `ls`, `grep` and `cat`.
 
+| command                                | description                                                      |
+| -------------------------------------- | ---------------------------------------------------------------- |
+| [`aj list`](docs/cli.md#aj-list)       | list entries, search or count them                               |
+| [`aj read`](docs/cli.md#aj-read)       | print entries in full, by ID or by period                        |
+| [`aj write`](docs/cli.md#aj-write)     | add an entry yourself                                            |
+| [`aj config`](docs/cli.md#aj-config)   | read and change the settings                                     |
+| [`aj sync`](docs/cli.md#aj-sync)       | commit the journal folder and push it, see [Git sync](#git-sync) |
+| [`aj install`](docs/cli.md#aj-install) | find the agents on this machine and wire each one up             |
+| `aj help`                              | the usage help                                                   |
 
-| command          | same as                                                   | description                                                      |
-| ---------------- | --------------------------------------------------------- | ---------------------------------------------------------------- |
-| `aj list`        | `ls ~/agent-journal \| tail -20`                           | the most recent entries, one line each                           |
-| `aj search TEXT` | `grep -rli 'rate limit' ~/agent-journal`                  | summaries and bodies, ignoring case                              |
-| `aj read ID`     | `cat "$(ls ~/agent-journal/*.md \| tail -1)"`              | one entry in full                                                |
-| `aj write`       | `$EDITOR ~/agent-journal/$(date -u +%Y-%m-%dT%H%M%SZ).md` | add an entry yourself                                            |
-| `aj config`      | `cat ~/.config/agent-journal/config`                      | read and change the settings                                     |
-| `aj sync`        | `git add -A && git commit && git push`                    | commit the journal folder and push it, see [Git sync](#git-sync) |
-| `aj install`     |                                                           | which agents are on this machine, and how to wire each one up    |
-| `aj help`        |                                                           | every command and option                                         |
-
-
-`list` is the default command, so `aj` and `aj list` are the same.
-
-Entries are listed oldest first, so the newest is nearest the prompt. Each line starts with the entry ID, which `aj read` takes as it is. In a terminal the columns are aligned. Down a pipe they are separated by one tab each (ID, project, summary), so `aj list | cut -f1` gives the IDs, and an entry with no project has an empty field.
-
-`list` and `search` take the same filters:
-
-
-| filter      | value                                                    | description                                                                                                                                                                           |
-| ----------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--date`    | `2026`, `2026-01`, `2026-01-11`                          | one year, month or day                                                                                                                                                                |
-| `--since`   | `2026-01-11`, `today`, `7d`, `2026-01-11T14:30:00+01:00` | from this day or time on                                                                                                                                                              |
-| `--until`   | same forms                                               | up to and including this day or time                                                                                                                                                  |
-| `--project` | a project name, or `.` for here                          | entries filed under one project, across all its worktrees. `.` names the repository of the current directory the same way the session-start hook does, and fails outside a repository |
-| `--cwd`     | a directory, or `.` for here                             | one directory and everything under it                                                                                                                                                 |
-| `--limit`   | a number, default `20`                                   | how many of the most recent to print                                                                                                                                                  |
-| `--offset`  | a number, default `0`                                    | skip this many of the most recent first, to page back through older entries                                                                                                           |
-| `--all`     |                                                          | no limit                                                                                                                                                                              |
-
-
-Days are local days, in the time zone of the machine. The IDs stay UTC, so an entry written just after local midnight can carry the date before: in Berlin in winter, `--date 2026-01-11` includes `2026-01-10T231500Z`. A time takes an offset (`+01:00`) or `Z`, and without one it is local time. `--until` with a time includes an entry written in that second. For one exact entry, use `aj read` with its ID.
-
-`aj write` also takes `--project .`. There it names the repository of `--cwd`, the directory the entry records, and also fails outside a repository.
-
-`aj install` with no agent named lists the ones found on this machine, with the command to wire up each. Naming one (`aj install codex`) runs that agent's own plugin commands for you. It writes nothing into any agent's configuration.
-
-Run `aj help` for the usage help.
+The [CLI reference](docs/cli.md) has every option, with examples and the same command without the CLI.
 
 ## Configuration
 
@@ -270,6 +255,7 @@ Use your own journal folder in `--source` if you changed `journal_dir`.
 When sync is on, `aj sync` runs:
 
 - in Claude Code, after each entry and when the session ends ([more](claude-code/README.md#git-sync)).
+- in Pi, after each entry and when the session ends ([more](pi/README.md#git-sync)).
 - after `aj write`.
 - when you run `aj sync` yourself, for example for entries that Codex wrote.
 

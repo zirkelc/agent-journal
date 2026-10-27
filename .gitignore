@@ -9,3 +9,6 @@ node_modules/
 
 # Claude Code writes the journal pane's TypeScript types here each time it loads the plugin.
 /claude-code/.claude-plugin/types/
+
+# Session records of the eval runs.
+/eval/results/

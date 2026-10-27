@@ -2,7 +2,7 @@
 #
 # Copies the shared core into each plugin folder and stages the copies.
 #
-# Claude Code and Codex install only the plugin folder, never the rest of the
+# Claude Code, Codex and Pi install only the plugin folder, never the rest of the
 # repository, so each plugin folder has to carry its own copy of the CLI and the
 # templates. The files at the repository root are the ones to edit. The copies
 # are generated from them and committed, because an install takes them from git.
@@ -19,7 +19,7 @@ set -eu
 
 cd "$(git rev-parse --show-toplevel)"
 
-plugins='claude-code codex'
+plugins='claude-code codex pi'
 shared='bin templates LICENSE'
 
 # Where a shared file goes in a plugin folder. The CLI goes to `scripts/`,

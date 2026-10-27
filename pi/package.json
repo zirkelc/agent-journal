@@ -1,0 +1,41 @@
+{
+  "name": "pi-agent-journal",
+  "version": "0.5.0",
+  "description": "A journal written by your agent, autonomously. One small markdown file per milestone, written as the work happens, in a format built to be scanned with grep and ls.",
+  "keywords": [
+    "context",
+    "diary",
+    "journal",
+    "memory",
+    "pi-package",
+    "recall",
+    "sessions"
+  ],
+  "homepage": "https://github.com/zirkelc/agent-journal",
+  "license": "MIT",
+  "author": {
+    "name": "Chris Cook",
+    "url": "https://github.com/zirkelc"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zirkelc/agent-journal.git",
+    "directory": "pi"
+  },
+  "files": [
+    "extensions",
+    "scripts",
+    "templates",
+    "LICENSE",
+    "README.md"
+  ],
+  "type": "module",
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions"
+    ]
+  }
+}

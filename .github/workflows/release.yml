@@ -1,0 +1,45 @@
+# IMPORTANT: DO NOT RENAME THIS FILE
+# It uses npm Trusted Publishing to deploy without a token.
+# The workflow name and filename must match what is configured on npmjs.com.
+
+# Publishes the Pi package when Release Please publishes a GitHub Release. The
+# Claude Code and Codex plugins need no step here: they install from git, and
+# the release PR has already raised their version on main.
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  id-token: write # needed for npm publish with provenance
+  contents: read
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    steps:
+      # https://github.com/actions/checkout
+      - uses: actions/checkout@v6
+      # https://github.com/actions/setup-node
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org/
+      - name: Publish the Pi package to npm
+        working-directory: pi
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if [[ "$VERSION" == *-* ]]; then
+            # Prerelease: publish under a dist-tag named after the channel,
+            # e.g. 0.6.0-next.3 -> next. Keeps `latest` on the stable line.
+            CHANNEL="${VERSION#*-}"
+            CHANNEL="${CHANNEL%%.*}"
+            echo "Publishing prerelease $VERSION under dist-tag: $CHANNEL"
+            npm publish --provenance --access public --tag "$CHANNEL"
+          else
+            echo "Publishing $VERSION under dist-tag: latest"
+            npm publish --provenance --access public
+          fi

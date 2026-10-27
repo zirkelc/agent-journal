@@ -24,7 +24,7 @@ Each entry starts with frontmatter:
 - `cwd`: the directory the session worked in. This is where a worktree shows
 - `host`: the machine the session ran on. Absent when it was not recorded
 - `user`: the account the session ran as on that machine. Absent when it was not recorded
-- `agent`: the agent that wrote the entry, and the model it ran as
+- `agent`: the agent that wrote the entry, and the model it ran as. Newer entries write it in double quotes, older ones without, so a search must match both: `^agent: "?claude/`
 - `session_id`: the session the entry came from
 
 The body holds what the summary leaves out: what was decided, what was rejected and why, what is still open.
@@ -37,7 +37,7 @@ summary: "Shipped the v1.2 sync path on prepared statements, with rollback when 
 cwd: ~/Developer/oss/my-lib
 host: "my-laptop"
 user: "me"
-agent: my-agent/my-model
+agent: "my-agent/my-model"
 session_id: 4eb89b17-6f7f-4264-95d4-ea5313ef277e
 ---
 

@@ -11,12 +11,13 @@
 # put seconds in front of a command whose whole job is to print two lines.
 
 # Every agent that can be wired up, in the order they are offered.
-journal_harnesses='claude codex'
+journal_harnesses='claude codex pi'
 
 journal_harness_label() {
   case $1 in
     claude) printf 'Claude Code' ;;
     codex) printf 'Codex' ;;
+    pi) printf 'Pi' ;;
     *) printf '%s' "$1" ;;
   esac
 }
@@ -33,6 +34,10 @@ journal_harness_present() {
     codex)
       command -v codex >/dev/null 2>&1 && return 0
       [ -d "${CODEX_HOME:-$HOME/.codex}" ]
+      ;;
+    pi)
+      command -v pi >/dev/null 2>&1 && return 0
+      [ -d "${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}" ]
       ;;
     *) return 1 ;;
   esac
@@ -55,6 +60,9 @@ journal_harness_steps() {
         'codex plugin marketplace add zirkelc/agent-journal' \
         'codex plugin add agent-journal@zirkelc'
       ;;
+    pi)
+      printf '%s\n' 'pi install npm:pi-agent-journal'
+      ;;
   esac
 }
 
@@ -68,8 +76,8 @@ journal_harness_manual() {
         '/plugin marketplace add zirkelc/agent-plugins' \
         '/plugin install agent-journal@zirkelc'
       ;;
-    codex)
-      journal_harness_steps codex
+    codex | pi)
+      journal_harness_steps "$1"
       ;;
   esac
 }
@@ -92,6 +100,9 @@ journal_harness_note() {
       printf '%s\n' \
         'Codex reviews a hook before it runs it. Start codex, run /hooks,' \
         'and trust agent-journal. Then ask it to write a journal entry.'
+      ;;
+    pi)
+      printf '%s\n' 'Start a new session and ask it to write a journal entry.'
       ;;
   esac
 }
@@ -132,6 +143,7 @@ journal_harness_colour() {
   case $1 in
     claude) printf '38;5;173' ;;
     codex) printf '38;5;36' ;;
+    pi) printf '38;5;250' ;;
     *) printf '36' ;;
   esac
 }
@@ -145,6 +157,7 @@ journal_harness_mark() {
   case $1 in
     claude) printf '\033[%sm✻\033[0m ' "$(journal_harness_colour claude)" ;;
     codex) printf '\033[%sm◆\033[0m ' "$(journal_harness_colour codex)" ;;
+    pi) printf '\033[%smπ\033[0m ' "$(journal_harness_colour pi)" ;;
   esac
 }
 

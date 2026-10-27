@@ -12,7 +12,6 @@ export const JOURNAL_DIR = '/home/me/journal';
 export type Script = {
   /** The lines `list` prints, or a function of its argv for a list that pages. */
   list?: string | ((argv: ReadonlyArray<string>) => string);
-  search?: string;
   read?: string;
   context?: string;
   /** Whether the config turns sync on, as `config` prints it. */
