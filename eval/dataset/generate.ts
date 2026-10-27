@@ -275,6 +275,17 @@ const KEYS: Array<Entry> = [
     summary: 'Wrote the postmortem for the ingest outage and set the review for Monday.',
     body: 'The postmortem has the timeline, the root cause and 4 actions. The biggest action is to check every cron that a migration turns off.',
   },
+  // The cause of the checkout timeouts is only in the body.
+  {
+    key: 'D1',
+    day: -34,
+    time: '15:20',
+    project: 'billing-api',
+    dir: 'Developer/billing-api',
+    agent: CLAUDE,
+    summary: 'Found why checkout hung under load and fixed it, with one change to the nightly job and one setting.',
+    body: 'The nightly revenue report held a lock on the ledger_snapshots table for up to 4 minutes, and every checkout that wrote a snapshot waited for it. The report reads from the replica now, and checkout has a lock wait timeout of 2 seconds, so it fails fast instead of hanging.',
+  },
 ];
 
 /** The entries of the years before that the cases ask about. */
@@ -391,6 +402,58 @@ const OLD_KEYS: Array<Entry> = [
     summary: 'Fixed the currency rounding of the totals: each line now rounds half to even, as the accountants asked.',
     body: 'The totals were 1 cent off on about 1 in 400 bills, because each line rounded half up and the sum of the lines did not match the tax report. The accountants use half to even, so we do too.',
   },
+  // The cache in front of the blog: the later summary does not name it.
+  {
+    key: 'V1',
+    day: -700,
+    time: '21:15',
+    project: 'blog',
+    dir: 'Developer/blog',
+    agent: 'claude/claude-opus-4-1',
+    summary: 'Put a caching proxy in front of the blog, so that a link from a big site does not take it down again.',
+    body: 'Varnish runs in front of the blog now and keeps each page for 10 minutes. The last spike of visitors from a link took the small server down in under a minute.',
+  },
+  {
+    key: 'V2',
+    day: -385,
+    time: '20:40',
+    project: 'blog',
+    dir: 'Developer/blog',
+    agent: 'claude/claude-opus-4-5',
+    summary: 'Made the hosting of the blog simpler, with one service less to keep running.',
+    body: 'Varnish is gone. The pages are static files now, and Bunny CDN caches them at its edge servers, so the server only builds the pages and uploads them.',
+  },
+  // The database backups of homelab, changed three times, among many entries about the file backups.
+  {
+    key: 'W1',
+    day: -600,
+    time: '22:05',
+    project: 'homelab',
+    dir: 'homelab',
+    agent: 'claude/claude-opus-4-5',
+    summary: 'The database on the home server is backed up continuously now, not once a night.',
+    body: 'WAL-G sends the Postgres write-ahead log to the B2 bucket every minute, so a crash loses at most a minute of data. The nightly file backups stay as they are.',
+  },
+  {
+    key: 'W2',
+    day: -420,
+    time: '19:30',
+    project: 'homelab',
+    dir: 'homelab',
+    agent: 'claude/claude-opus-4-5',
+    summary: 'Back to one database backup a night, because the continuous one cost too much.',
+    body: 'WAL-G uploaded about 40 GB a month, mostly the log of the photo index, and the B2 bill tripled. The database goes into the nightly file backup as a dump again.',
+  },
+  {
+    key: 'W3',
+    day: -95,
+    time: '18:50',
+    project: 'homelab',
+    dir: 'homelab',
+    agent: CLAUDE,
+    summary: 'The continuous database backup is back, now small enough to keep.',
+    body: 'WAL-G again, with compression and one full base backup a week. The photo index moved to its own database without a backup, since it can be built again. The uploads are about 6 GB a month now.',
+  },
 ];
 
 /** A slot of the filler: when and where an entry is, without its text. */
@@ -461,6 +524,22 @@ export const RULES: Array<Rule> = [
     words: 'tape, tapes',
     isAllowed: (slot) => slot.project !== 'agent-journal' || slot.day < -12,
     why: 'The README GIFs of agent-journal were last recorded on day -12, from vhs tapes.',
+  },
+  {
+    pattern: /ledger_snapshot/i,
+    words: 'the ledger_snapshots table',
+    why: 'One entry has the cause of the checkout timeouts in its body.',
+  },
+  {
+    pattern: /varnish|bunny/i,
+    words: 'Varnish, Bunny CDN',
+    why: 'Two entries say which cache is in front of the blog.',
+  },
+  {
+    pattern: /wal-g|write-ahead log|postgres/i,
+    words: 'WAL-G, a write-ahead log, Postgres',
+    isAllowed: (slot) => slot.project !== 'homelab',
+    why: 'In homelab, only three entries are about the database backups.',
   },
   {
     pattern: /http\/3|protobuf|retry wrapper/i,

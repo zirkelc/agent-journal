@@ -5,15 +5,20 @@ import type { Register, Timer } from 'claude-code';
 import { atom, read, update } from 'claude-code';
 import { AGENT_PROMPT, scopeOf, searchModelOf, TOOL_SPECS, WRITE_SPEC } from './agent.js';
 import {
+  type ByField,
   capped,
   entriesOf,
+  fitList,
   InputError,
+  isPeriod,
   listArgs,
+  MAX_LIMIT,
+  MAX_OUTPUT,
   readArgs,
-  searchArgs,
+  withNote,
   writeArgs,
   writtenIdOf,
-  type Filters,
+  type Query,
 } from './cli.js';
 import { ALL_DATES, entryOfText } from './format.js';
 import type { Host } from './host.js';
@@ -46,7 +51,6 @@ import {
   PANE_TITLE,
   TOOL_LIST,
   TOOL_READ,
-  TOOL_SEARCH,
   TOOL_WRITE,
   toolName,
 } from './names.js';
@@ -203,11 +207,26 @@ export const register: Register = (on) => {
           message.content.some((block) => typeof block.text === 'string' && block.text.includes(text)),
         );
       },
+      canCallTools: async () => {
+        /** The engine refuses to check a tool that a deny rule took out of the session. */
+        const verdicts = await Promise.all(
+          [TOOL_WRITE, TOOL_LIST, TOOL_READ].map((name) =>
+            $.tool.check({ tool: toolName(name), input: {} }).catch(() => null),
+          ),
+        );
+        return verdicts.every((verdict) => verdict !== null && verdict.decision !== 'deny');
+      },
       appendNote: async (text) => {
         await $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] } });
       },
       opened: { read: () => read($, openedAtom), update: (change) => update($, openedAtom, change) },
     };
+    /**
+     * The journal's tools, for the main conversation, and the search agent's
+     * too while the pane answers questions. Registered before the rules are
+     * made, which give the variant for the tools only when the session has them.
+     */
+    for (const spec of [...TOOL_SPECS, WRITE_SPEC]) await $.tool.register(spec);
     loader = listLoader(host);
     waiter = answerWaiter(host);
     sync = syncer(host);
@@ -217,8 +236,6 @@ export const register: Register = (on) => {
     /** Made now, so the first message does not wait for the CLI. */
     void keeper.prepare().catch(() => undefined);
     currentProject = projectOf(await $.session.repo().catch(() => null));
-    /** The journal's tools, for the main conversation, and the search agent's too while the pane answers questions. */
-    for (const spec of [...TOOL_SPECS, WRITE_SPEC]) await $.tool.register(spec);
     /** The agent that answers the pane's questions, while it answers any (see IS_ASK_ON). */
     if (IS_ASK_ON) {
       /**
@@ -303,7 +320,7 @@ export const register: Register = (on) => {
    * is asked about past work. Writing is what every session does, so that
    * tool's schema stays in the prompt.
    */
-  on('tool.describe', { tool: /^mcp__agent-journal__(list|search|read|write)$/ }, async ($, e, next) => ({
+  on('tool.describe', { tool: /^mcp__agent-journal__(list|read|write)$/ }, async ($, e, next) => ({
     ...(await next(e)),
     isDeferred: e.tool !== toolName(TOOL_WRITE),
   }));
@@ -339,38 +356,53 @@ export const register: Register = (on) => {
   });
 
   /** Answered here too, with no permission check: see anthropics/claude-code#104217, tracked in zirkelc/issues#22. */
-  on('tool.call', { tool: /^mcp__agent-journal__(list|search|read)$/ }, async ($, e, next) => {
+  on('tool.call', { tool: /^mcp__agent-journal__(list|read)$/ }, async ($, e, next) => {
     if (!host) return next(e);
     const input = e as unknown as Record<string, unknown>;
-    const filters: Filters = {
-      since: typeof input.since === 'string' ? input.since : undefined,
-      until: typeof input.until === 'string' ? input.until : undefined,
-      project: typeof input.project === 'string' ? input.project : undefined,
-      limit: typeof input.limit === 'number' ? input.limit : undefined,
-    };
+    const query = queryOf(input);
+    const isRead = e.tool === toolName(TOOL_READ);
+    const which = isRead ? stringsOf(input.which) : [];
     let args: Array<string>;
     try {
-      if (e.tool === toolName(TOOL_LIST)) args = listArgs(filters);
-      else if (e.tool === toolName(TOOL_SEARCH)) args = searchArgs(String(input.text ?? ''), filters);
-      else if (e.tool === toolName(TOOL_READ)) args = readArgs(String(input.id ?? ''));
+      if (e.tool === toolName(TOOL_LIST)) args = listArgs(query);
+      else if (isRead) args = readArgs(which, query);
       else return { deny: `unknown journal tool ${e.tool}` };
     } catch (error) {
       if (error instanceof InputError) return { deny: error.message };
       throw error;
     }
     const ran = await runCli(host, args);
+    /** Exit 1 of `read` means that nothing matches, which is an answer. */
+    const isNoMatch = isRead && ran.exitCode === 1;
+    const isOk = ran.exitCode === 0 || isNoMatch;
     const agentId = e.agentId;
     if (agentId) {
-      const found =
-        ran.exitCode !== 0 ? [] : e.tool === toolName(TOOL_READ) ? entryOfText(ran.stdout) : entriesOf(ran.stdout);
+      const found = ran.exitCode !== 0 ? [] : isRead ? entryOfText(ran.stdout) : entriesOf(ran.stdout);
       await update($, chatAtom, (chat) => {
         const seen = chat.flatMap((turn) => turn.seen);
-        const step = stepOf(e.tool, input, { isOk: ran.exitCode === 0, entries: found }, seen);
+        const step = stepOf(e.tool, input, { isOk, entries: found }, seen);
         return recorded(chat, agentId, step, found);
       }).catch(() => undefined);
     }
-    if (ran.exitCode !== 0) return { deny: failureOf(ran) };
-    return { result: capped(ran.stdout) || 'No entries match.' };
+    if (!isOk) return { deny: failureOf(ran) };
+    if (isNoMatch) return { result: `No entries match. ${firstLine(ran.stderr)}`.trim() };
+    if (!isRead) {
+      if (query.by) return { result: capped(ran.stdout.trim()) };
+      const text = fitList(ran.stdout, ran.stderr, query.offset) ?? withNote(ran.stdout, ran.stderr);
+      return { result: capped(text || 'No entries match.') };
+    }
+    const text = withNote(ran.stdout, ran.stderr);
+    const period = which.length === 1 && isPeriod(which[0]!) ? which[0]! : undefined;
+    if (!period || text.length <= MAX_OUTPUT) return { result: capped(text) };
+    /** Cut text would lose the last entries without a word, so a long period gives its summaries instead. */
+    const listed = await runCli(host, listArgs({ date: period, project: query.project, limit: MAX_LIMIT }));
+    if (listed.exitCode !== 0) return { result: capped(text) };
+    const summaries = fitList(listed.stdout, listed.stderr) ?? withNote(listed.stdout, listed.stderr);
+    return {
+      result: capped(
+        `The entries of ${period} are ${text.length} characters, more than one result holds. Their summaries follow; read the ones you need by id.\n${summaries}`,
+      ),
+    };
   });
 
   on('command.run', { command: 'agent-journal' }, async ($, e, next) => {
@@ -535,3 +567,44 @@ export const register: Register = (on) => {
 /** The current project's name: the last part of the repository's root, or null outside one. */
 const projectOf = (repo: { root: string } | null): string | null =>
   repo ? (repo.root.split('/').filter(Boolean).pop() ?? null) : null;
+
+/** A tool's input as the query of `list` or the filters of `read`: only the values of the right type count. */
+function queryOf(input: Record<string, unknown>): Query {
+  const text = (value: unknown) => (typeof value === 'string' ? value : undefined);
+  const number = (value: unknown) => (typeof value === 'number' ? value : undefined);
+  return {
+    terms: stringsOf(input.terms),
+    isFixed: input.fixed === true,
+    date: text(input.date),
+    since: text(input.since),
+    until: text(input.until),
+    project: text(input.project),
+    limit: number(input.limit),
+    offset: number(input.offset),
+    /** Checked against the fields where the arguments are made. */
+    by: input.by === undefined ? undefined : (String(input.by) as ByField),
+  };
+}
+
+/**
+ * A list of strings from a tool's input. A model sometimes gives a list as one
+ * string, or as the JSON text of a list, so both count as the list.
+ */
+function stringsOf(value: unknown): Array<string> {
+  let items: unknown = value;
+  if (typeof value === 'string' && value.trim().startsWith('[')) {
+    try {
+      items = JSON.parse(value);
+    } catch {
+      items = [value];
+    }
+  }
+  const list = Array.isArray(items) ? items : typeof items === 'string' ? [items] : [];
+  return list
+    .filter((item) => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter((item) => item !== '');
+}
+
+/** The first line of a text, or an empty string. */
+const firstLine = (text: string): string => text.trim().split('\n')[0] ?? '';

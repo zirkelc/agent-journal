@@ -61,17 +61,22 @@ export function rulesKeeper(host: Host) {
   /** The session the rules were last handed to a prompt in, while that prompt may still wait to enter. */
   let handedTo: string | null = null;
 
-  async function keyOf(): Promise<{ key: string; session: SessionNames }> {
-    const session = await sessionOf(host);
-    return { key: `${session.sessionId}\n${session.cwd}\n${session.agent}`, session };
+  async function keyOf(): Promise<{ key: string; session: SessionNames; hasTools: boolean }> {
+    const [session, hasTools] = await Promise.all([sessionOf(host), host.canCallTools().catch(() => false)]);
+    return { key: `${session.sessionId}\n${session.cwd}\n${session.agent}\n${hasTools}`, session, hasTools };
   }
 
   /** The rules for the session as it is now; empty when the CLI cannot give them, which the next call tries again. */
   async function rules(): Promise<string> {
-    const { key, session } = await keyOf();
+    const { key, session, hasTools } = await keyOf();
     if (made?.key !== key) {
-      /** The variant that writes and reads through this mod's tools, rather than files and a shell. */
-      const ran = runCli(host, contextArgs(session.cwd, session.sessionId, session.agent, TOOL_PREFIX));
+      /**
+       * The variant that writes and reads through this mod's tools, rather than
+       * files and a shell. A person who denies one of the tools gets the
+       * variant for files, as a session without the tools needs.
+       */
+      const toolPrefix = hasTools ? TOOL_PREFIX : undefined;
+      const ran = runCli(host, contextArgs(session.cwd, session.sessionId, session.agent, toolPrefix));
       const making = { key, rules: ran.then((run) => (run.exitCode === 0 ? run.stdout.trim() : '')) };
       made = making;
       void making.rules.then((text) => {
@@ -615,17 +620,20 @@ export function stepOf(
   const n = result.entries.length;
   const count = (one: string, many: string) => `${n} ${n === 1 ? one : many}`;
   const parts = (head: string) => [head, where, range].filter(Boolean).join(' · ');
-  if (tool.endsWith('__list'))
-    return result.isOk ? parts(`Listed ${count('entry', 'entries')}`) : `${parts('Listing')}${FAILED_STEP}`;
-  if (tool.endsWith('__search')) {
-    const query = `"${text(input.text)}"`;
+  if (tool.endsWith('__list')) {
+    const terms = Array.isArray(input.terms) ? input.terms.filter((term) => typeof term === 'string') : [];
+    if (terms.length === 0)
+      return result.isOk ? parts(`Listed ${count('entry', 'entries')}`) : `${parts('Listing')}${FAILED_STEP}`;
+    const query = terms.map((term) => `"${term}"`).join(' ');
     return result.isOk
       ? parts(`Searched ${query} · ${count('match', 'matches')}`)
       : `${parts(`Searching ${query}`)}${FAILED_STEP}`;
   }
   if (tool.endsWith('__read')) {
-    const id = text(input.id);
+    const which = Array.isArray(input.which) ? input.which.map(text) : [text(input.which)];
+    const id = which.join(', ');
     if (!result.isOk) return `Reading ${id}${FAILED_STEP}`;
+    if (which.length !== 1) return `Read ${count('entry', 'entries')}`;
     const known = [...result.entries, ...seen].find((entry) => entry.id === id);
     if (known?.summary) return `Read: ${known.summary}`;
     const instant = instantOf(id);
@@ -639,7 +647,7 @@ export function stepOf(
 /** Shows one entry in full. */
 export async function openEntry(host: Host, id: string): Promise<void> {
   await host.opened.update((): JournalOpened => ({ id, status: 'loading', text: '' }));
-  const ran = await runCli(host, readArgs(id));
+  const ran = await runCli(host, readArgs([id]));
   await host.opened.update((opened): JournalOpened => {
     if (opened?.id !== id) return opened;
     return ran.exitCode === 0

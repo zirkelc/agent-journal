@@ -9,7 +9,6 @@ import {
   PLUGIN,
   TOOL_LIST,
   TOOL_READ,
-  TOOL_SEARCH,
   toolName,
 } from '../hooks/names.js';
 import { journal, PANE, RECALL, SESSION, textOf, world } from './world.js';
@@ -31,12 +30,12 @@ if (IS_ASK_ON) {
       await $.session.start(SESSION);
 
       // Assert
-      expect(kept.registered.tools).toEqual(['list', 'search', 'read', 'write']);
+      expect(kept.registered.tools).toEqual(['list', 'read', 'write']);
       expect(kept.registered.commands).toEqual([COMMAND]);
       expect(kept.registered.agents.length).toBe(1);
       const agent = kept.registered.agents[0]!;
       expect(agent.model).toBe('inherit');
-      expect(agent.tools).toEqual([toolName(TOOL_LIST), toolName(TOOL_SEARCH), toolName(TOOL_READ)]);
+      expect(agent.tools).toEqual([toolName(TOOL_LIST), toolName(TOOL_READ)]);
       expect(agent.disallowedTools).toEqual(['Write', 'Edit', 'NotebookEdit', 'Bash']);
     });
 
@@ -49,14 +48,14 @@ if (IS_ASK_ON) {
       // Act
       const offer = await $.agent.offer({ agent: AGENT_TYPE, description: '', source: 'plugin' } as never);
       const tools = await Promise.all(
-        [TOOL_LIST, TOOL_SEARCH, TOOL_READ].map((name) =>
+        [TOOL_LIST, TOOL_READ].map((name) =>
           $.tool.describe({ tool: toolName(name), description: 'Reads the journal.' } as never),
         ),
       );
 
       // Assert
       expect(offer.isOffered).toBe(false);
-      expect(tools.map((tool) => (tool as { isDeferred: boolean }).isDeferred)).toEqual([true, true, true]);
+      expect(tools.map((tool) => (tool as { isDeferred: boolean }).isDeferred)).toEqual([true, true]);
     });
 
     test('/agent-journal with a question opens the pane and asks the agent with the recall text', async ($, on) => {
@@ -223,19 +222,18 @@ if (IS_ASK_ON) {
 
     test('the permission checks of the search agent and its tools are left to the user’s own rules', async ($, on) => {
       // Arrange
-      world(on);
-      on('tool.check', () => ({ decision: 'ask', reason: 'the engine decides' }));
+      world(on, { otherVerdict: 'ask' });
       await $.session.start(SESSION);
 
       // Act
       const spawn = await $.tool.check({ tool: 'Agent', input: { subagent_type: AGENT_TYPE } });
       const tools = await Promise.all(
-        [TOOL_LIST, TOOL_SEARCH, TOOL_READ].map((name) => $.tool.check({ tool: toolName(name), input: {} })),
+        [TOOL_LIST, TOOL_READ].map((name) => $.tool.check({ tool: toolName(name), input: {} })),
       );
 
       // Assert
       expect(spawn.decision).toBe('ask');
-      expect(tools.map((verdict) => verdict.decision)).toEqual(['ask', 'ask', 'ask']);
+      expect(tools.map((verdict) => verdict.decision)).toEqual(['ask', 'ask']);
     });
   });
 } else {
@@ -249,7 +247,7 @@ if (IS_ASK_ON) {
 
       // Assert
       expect(kept.registered.commands).toEqual([COMMAND]);
-      expect(kept.registered.tools).toEqual(['list', 'search', 'read', 'write']);
+      expect(kept.registered.tools).toEqual(['list', 'read', 'write']);
       expect(kept.registered.agents.length).toBe(0);
       expect(COMMAND_DESCRIPTION).toBe('Open the journal');
     });

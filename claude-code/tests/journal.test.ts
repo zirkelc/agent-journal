@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'claude-code/testing';
 import type { Timer } from 'claude-code';
 import type { JournalDate, JournalList, JournalOpened, JournalSync, JournalTurn, JournalView } from '../types';
-import { type Scope, type SearchModel, TOOL_SPECS } from '../hooks/agent.js';
+import { AGENT_PROMPT, type Scope, type SearchModel } from '../hooks/agent.js';
 import type { Cell, Host } from '../hooks/host.js';
-import { TOOL_LIST, TOOL_READ, TOOL_SEARCH, toolName } from '../hooks/names.js';
+import { TOOL_LIST, TOOL_READ, toolName } from '../hooks/names.js';
 import { isFailedStep } from '../hooks/pane-view.js';
 import {
   agentOf,
@@ -85,6 +85,7 @@ function hostWith(spawn: Host['spawn']): Host {
     notice: cell(''),
     sync: cell<JournalSync>({ status: 'off', text: '' }),
     conversationHas: async () => false,
+    canCallTools: async () => true,
     appendNote: async () => {},
     redraw: () => {},
   };
@@ -164,18 +165,13 @@ describe('journal', () => {
     expect((await host.chat.read()).map((turn) => turn.question)).toEqual(['one?']);
   });
 
-  test('since takes a range\u2019s _since value of the clock and until its _until value', () => {
-    // Arrange
-    const list = TOOL_SPECS.find((spec) => spec.name === TOOL_LIST)!;
-    const properties = (list.inputSchema as { properties: Record<string, { description: string }> }).properties;
-
+  test('the agent takes a range\u2019s _since value of the clock for since and its _until value for until', () => {
     // Act
-    const since = properties.since!.description;
-    const until = properties.until!.description;
+    const prompt = AGENT_PROMPT;
 
     // Assert
-    expect(since).toContain('`local_today_since`');
-    expect(until).toContain('`local_today_until`');
+    expect(prompt).toContain('`local_today_since`');
+    expect(prompt).toContain('`local_today_until`');
   });
 
   test('a list kept from before the pane loaded in pages starts at the first page', () => {
@@ -278,9 +274,9 @@ describe('journal', () => {
         [],
         zone,
       ),
-      stepOf(toolName(TOOL_SEARCH), { text: 'race' }, { isOk: true, entries: [] }, [], zone),
-      stepOf(toolName(TOOL_READ), { id: '2026-10-07T095401Z' }, { isOk: true, entries: [] }, [entry], zone),
-      stepOf(toolName(TOOL_READ), { id: '2026-10-04T223000Z' }, { isOk: true, entries: [] }, [], zone),
+      stepOf(toolName(TOOL_LIST), { terms: ['race'] }, { isOk: true, entries: [] }, [], zone),
+      stepOf(toolName(TOOL_READ), { which: ['2026-10-07T095401Z'] }, { isOk: true, entries: [] }, [entry], zone),
+      stepOf(toolName(TOOL_READ), { which: ['2026-10-04T223000Z'] }, { isOk: true, entries: [] }, [], zone),
     ];
 
     // Assert
@@ -301,9 +297,9 @@ describe('journal', () => {
     // Act
     const steps = [
       stepOf(toolName(TOOL_LIST), { since: 'today', project: '.' }, failed, [], zone),
-      stepOf(toolName(TOOL_SEARCH), { text: 'race' }, failed, [], zone),
-      stepOf(toolName(TOOL_READ), { id: '2026-10-07T095401Z' }, failed, [], zone),
-      stepOf(toolName(TOOL_SEARCH), { text: 'failed' }, { isOk: true, entries: [] }, [], zone),
+      stepOf(toolName(TOOL_LIST), { terms: ['race'] }, failed, [], zone),
+      stepOf(toolName(TOOL_READ), { which: ['2026-10-07T095401Z'] }, failed, [], zone),
+      stepOf(toolName(TOOL_LIST), { terms: ['failed'] }, { isOk: true, entries: [] }, [], zone),
     ];
 
     // Assert

@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { existsSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterAll, describe, expect, test } from 'vitest';
 import { TOOL_WRITE, toolName } from '../../claude-code/hooks/names.ts';
 import { ROOT } from '../helpers.ts';
@@ -80,7 +81,7 @@ async function run(mode: Mode, rule: Rule): Promise<Ran> {
     '--model',
     'haiku',
     '--plugin-dir',
-    ROOT,
+    join(ROOT, 'claude-code'),
     '--no-session-persistence',
     '--max-turns',
     '4',

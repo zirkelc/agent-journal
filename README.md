@@ -24,7 +24,7 @@ Agent Journal makes the model record its work along the way: one small markdown 
 Nothing leaves your machine.
 
 - **No server, no account, no API requests.** The plugin runs locally and makes no network requests of its own.
-- **No hidden tool calls.** Entries are written by the model's own file-writing tool, in your session, in front of you.
+- **No hidden tool calls.** Entries are written in your session, in front of you: in Claude Code and Pi by the plugin's own `write` tool, in Codex by the model's own file-writing tool.
 - **A read-only hook.** At session start, a hook reads the config and resolves the dynamic values (project, agent, session, etc.).
 - **Your own files.** Entries are plain markdown in a directory you choose. Delete one and it is gone.
 
@@ -116,7 +116,7 @@ The plugin needs Claude Code 2.1.287 or later, because it is a [mod](https://cod
 /plugin install agent-journal@zirkelc
 ```
 
-Then open a new session and ask Claude to write a journal entry. By default, it writes to the directory `~/agent-journal/`.
+Then open a new session and ask Claude to write a journal entry. By default, it writes to the directory `~/agent-journal/`. In Claude Code, the model writes and reads the journal with three tools of the plugin (`write`, `list` and `read`).
 
 #### Update
 
@@ -131,19 +131,19 @@ Then restart Claude Code or run `/reload-plugins` to load the new version.
 
 #### Permissions
 
-Depending on your permission mode, Claude asks for permission to write a journal entry. To allow all journal entries, add this to `~/.claude/settings.json`:
+You can allow the plugin's tools with a rule in `~/.claude/settings.json`:
 
 ```json
 {
   "permissions": {
-    "allow": ["Edit(~/agent-journal/**)"]
+    "allow": ["mcp__agent-journal__write", "mcp__agent-journal__list", "mcp__agent-journal__read"]
   }
 }
 ```
 
-If you changed `journal_dir`, use that directory in the rule.
+At the moment, Claude Code runs these tools without a permission check, also without a rule ([anthropics/claude-code#104217](https://github.com/anthropics/claude-code/issues/104217)). Only a deny rule has an effect. See [Permissions](claude-code/README.md#permissions) in the Claude Code plugin README.
 
-For the journal pane, how the hooks give the rules to the session, and what the plugin runs, reads and sends, see the [Claude Code plugin README](claude-code/README.md).
+For the tools, the journal pane, how the hooks give the rules to the session, and what the plugin runs, reads and sends, see the [Claude Code plugin README](claude-code/README.md).
 
 ### Codex
 

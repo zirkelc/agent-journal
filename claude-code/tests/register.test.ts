@@ -8,7 +8,6 @@ import {
   TOOL_LIST,
   TOOL_READ,
   TOOL_PREFIX,
-  TOOL_SEARCH,
   TOOL_WRITE,
   toolName,
 } from '../hooks/names.js';
@@ -29,7 +28,7 @@ const SCROLL = {
 const typed = (text: string) => ({ text, wait: false, origin: { kind: 'composer' } }) as const;
 
 describe('register', () => {
-  test('registers the four journal tools and the command at session start', async ($, on) => {
+  test('registers the three journal tools and the command at session start', async ($, on) => {
     // Arrange
     const kept = world(on);
 
@@ -37,7 +36,7 @@ describe('register', () => {
     await $.session.start(SESSION);
 
     // Assert
-    expect(kept.registered.tools).toEqual(['list', 'search', 'read', 'write']);
+    expect(kept.registered.tools).toEqual(['list', 'read', 'write']);
     expect(kept.registered.commands).toEqual([COMMAND]);
   });
 
@@ -49,13 +48,13 @@ describe('register', () => {
 
     // Act
     const tools = await Promise.all(
-      [TOOL_LIST, TOOL_SEARCH, TOOL_READ, TOOL_WRITE].map((name) =>
+      [TOOL_LIST, TOOL_READ, TOOL_WRITE].map((name) =>
         $.tool.describe({ tool: toolName(name), description: 'Uses the journal.' } as never),
       ),
     );
 
     // Assert
-    expect(tools.map((tool) => (tool as { isDeferred: boolean }).isDeferred)).toEqual([true, true, true, false]);
+    expect(tools.map((tool) => (tool as { isDeferred: boolean }).isDeferred)).toEqual([true, true, false]);
   });
 
   test('the rules for writing the journal go to the main conversation as a marked row of their own, once', async ($, on) => {
@@ -86,6 +85,21 @@ describe('register', () => {
       'claude/opus-5-5',
       '--tools',
       TOOL_PREFIX,
+    ]);
+  });
+
+  test('a session where a deny rule removes a journal tool gets the rules for files', async ($, on) => {
+    // Arrange
+    const kept = world(on, { context: 'Standing rules.\n', removed: [toolName(TOOL_WRITE)] });
+    await $.session.start(SESSION);
+
+    // Act
+    await $.prompt.context({ blocks: [] } as never);
+
+    // Assert
+    const made = kept.runs.filter((run) => run.argv[1] === 'context');
+    expect(made.map((run) => run.argv.slice(1))).toEqual([
+      ['context', '--cwd', '/work', '--session-id', 'session-1', '--agent', 'claude/opus-5-5'],
     ]);
   });
 
@@ -346,32 +360,128 @@ describe('register', () => {
     expect(JSON.stringify(result)).toContain('Did a thing');
   });
 
-  test('a search text that would read as a flag is refused before the CLI runs', async ($, on) => {
+  test('a list call searches with its terms and counts by a field', async ($, on) => {
+    // Arrange
+    const kept = world(on, { list: '3\t2026-10-05\n3\ttotal\n' });
+    await $.session.start(SESSION);
+
+    // Act
+    const result = await $.tool.call({
+      tool: toolName(TOOL_LIST),
+      terms: ['race', ' '],
+      fixed: true,
+      project: '.',
+      by: 'date',
+    } as never);
+
+    // Assert
+    expect(kept.queries()[0]!.argv.slice(1)).toEqual(['list', 'race', '--fixed', '--project', '.', '--by', 'date']);
+    expect(JSON.stringify(result)).toContain('3\\ttotal');
+  });
+
+  test('a list call that counts and pages at once is refused before the CLI runs', async ($, on) => {
     // Arrange
     const kept = world(on);
     await $.session.start(SESSION);
 
     // Act
-    const result = await $.tool.call({ tool: toolName(TOOL_SEARCH), text: '--all' } as never);
+    const result = await $.tool.call({ tool: toolName(TOOL_LIST), by: 'project', limit: 10 } as never);
+
+    // Assert
+    expect(kept.queries().length).toBe(0);
+    expect(JSON.stringify(result)).toContain('leave out limit and offset');
+  });
+
+  test('a search term that would read as a flag is refused before the CLI runs', async ($, on) => {
+    // Arrange
+    const kept = world(on);
+    await $.session.start(SESSION);
+
+    // Act
+    const result = await $.tool.call({ tool: toolName(TOOL_LIST), terms: ['--all'] } as never);
 
     // Assert
     expect(kept.queries().length).toBe(0);
     expect(JSON.stringify(result)).toContain('must not start with');
   });
 
-  test('a read call takes only an entry id', async ($, on) => {
+  test('a list that the limit cut names the offset of the older matches as the tool takes it', async ($, on) => {
+    // Arrange
+    world(on, {
+      list: line('2026-10-05T143000Z', 'repo', 'Did a thing'),
+      stderr: { list: 'matches 1 to 50, counted from the newest; --offset 50 for older ones\n' },
+    });
+    await $.session.start(SESSION);
+
+    // Act
+    const result = await $.tool.call({ tool: toolName(TOOL_LIST), project: '.' } as never);
+
+    // Assert
+    expect(JSON.stringify(result)).toContain('call again with offset 50 for older ones');
+  });
+
+  test('a read call passes its ids, or a period with its project and page, to the CLI', async ($, on) => {
+    // Arrange
+    const kept = world(on, { read: '---\nsummary: "A thing."\n---\n\nBody.\n' });
+    await $.session.start(SESSION);
+
+    // Act
+    await $.tool.call({ tool: toolName(TOOL_READ), which: ['2026-10-05T143000Z', '2026-10-06'] } as never);
+    const result = await $.tool.call({
+      tool: toolName(TOOL_READ),
+      which: ['2026-10'],
+      project: '.',
+      limit: 5,
+      offset: 5,
+    } as never);
+
+    // Assert
+    expect(kept.queries().map((run) => run.argv.slice(1))).toEqual([
+      ['read', '2026-10-05T143000Z', '2026-10-06'],
+      ['read', '2026-10', '--project', '.', '--limit', '5', '--offset', '5'],
+    ]);
+    expect(JSON.stringify(result)).toContain('Body.');
+  });
+
+  test('a read call takes its ids as the JSON text of a list too, and names which when it has none', async ($, on) => {
+    // Arrange
+    const kept = world(on, { read: 'An entry.\n' });
+    await $.session.start(SESSION);
+
+    // Act
+    const missing = await $.tool.call({ tool: toolName(TOOL_READ), ids: ['2026-10-05T143000Z'] } as never);
+    await $.tool.call({ tool: toolName(TOOL_READ), which: '["2026-10-05T143000Z", "2026-10-06T080000Z"]' } as never);
+
+    // Assert
+    expect(JSON.stringify(missing)).toContain('which is missing');
+    expect(kept.queries().map((run) => run.argv.slice(1))).toEqual([
+      ['read', '2026-10-05T143000Z', '2026-10-06T080000Z'],
+    ]);
+  });
+
+  test('a read that matches nothing is an answer, not a failure', async ($, on) => {
+    // Arrange
+    world(on, { exitCodes: { read: 1 }, stderr: { read: 'no entry matches 2026-01-01\n' } });
+    await $.session.start(SESSION);
+
+    // Act
+    const result = await $.tool.call({ tool: toolName(TOOL_READ), which: ['2026-01-01'] } as never);
+
+    // Assert
+    expect(result).toEqual({ result: 'No entries match. no entry matches 2026-01-01' });
+  });
+
+  test('a read value that would read as a flag is refused before the CLI runs', async ($, on) => {
     // Arrange
     const kept = world(on);
     await $.session.start(SESSION);
 
     // Act
-    const results = await Promise.all(
-      ['../secrets', '2026-10-07'].map((id) => $.tool.call({ tool: toolName(TOOL_READ), id } as never)),
-    );
+    const result = await $.tool.call({ tool: toolName(TOOL_READ), which: ['--all'] } as never);
 
     // Assert
     expect(kept.queries().length).toBe(0);
-    for (const result of results) expect(JSON.stringify(result)).toContain('not an entry id');
+    expect(JSON.stringify(result)).toContain('must not start with');
   });
 
   test('a write call runs the CLI for the session with the summary and the body, and answers with the id', async ($, on) => {
@@ -862,15 +972,14 @@ describe('register', () => {
   test('the permission checks of the journal tools are left to the user\u2019s own rules', async ($, on) => {
     // Arrange
     world(on);
-    on('tool.check', () => ({ decision: 'ask', reason: 'the engine decides' }));
     await $.session.start(SESSION);
 
     // Act
     const verdicts = await Promise.all(
-      [TOOL_LIST, TOOL_SEARCH, TOOL_READ, TOOL_WRITE].map((name) => $.tool.check({ tool: toolName(name), input: {} })),
+      [TOOL_LIST, TOOL_READ, TOOL_WRITE].map((name) => $.tool.check({ tool: toolName(name), input: {} })),
     );
 
     // Assert
-    expect(verdicts.map((verdict) => verdict.decision)).toEqual(['ask', 'ask', 'ask', 'ask']);
+    expect(verdicts.map((verdict) => verdict.decision)).toEqual(['ask', 'ask', 'ask']);
   });
 });

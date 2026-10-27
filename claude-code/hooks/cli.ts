@@ -13,9 +13,13 @@ export type Entry = {
   line?: string;
 };
 
+/** The fields that `list` can count its matches by. */
+export const BY_FIELDS = ['project', 'date', 'host', 'user', 'agent'] as const;
+export type ByField = (typeof BY_FIELDS)[number];
+
 /** The filters the CLI's query commands take, as the tools and the pane give them. */
 export type Filters = {
-  /** One local year, month or day: `2026`, `2026-10`, `2026-10-07`. */
+  /** One local year, month or day: `2026`, `2026-10`, `2026-10-07`, `today` or `yesterday`. */
   date?: string;
   since?: string;
   until?: string;
@@ -25,10 +29,22 @@ export type Filters = {
   offset?: number;
 };
 
+/** What `list` looks for: the filters, the search terms, and the field to count the matches by. */
+export type Query = Filters & {
+  /** Each term is a regex that must match one line of the entry. */
+  terms?: ReadonlyArray<string>;
+  /** Whether the terms are plain text rather than regexes. */
+  isFixed?: boolean;
+  by?: ByField;
+};
+
 /** Why a value cannot go to the CLI, as the model or the person reads it. */
 export class InputError extends Error {}
 
 const ID = /^\d{4}-\d{2}-\d{2}T\d{6}Z$/;
+
+/** How many lines a query asks for when the caller does not say. */
+export const DEFAULT_LIMIT = 50;
 
 /** The most lines a query asks for, so one call cannot fill the agent's context. */
 export const MAX_LIMIT = 200;
@@ -55,48 +71,63 @@ function plain(name: string, value: string): string {
  * project of the directory the CLI runs in, so the caller runs it where the
  * session is; `--cwd` would filter by directory instead.
  */
-function filterArgs(filters: Filters, maxLimit = MAX_LIMIT): Array<string> {
+function filterArgs(filters: Filters): Array<string> {
   const args: Array<string> = [];
   if (filters.date !== undefined) args.push('--date', plain('date', filters.date));
   if (filters.since !== undefined) args.push('--since', plain('since', filters.since));
   if (filters.until !== undefined) args.push('--until', plain('until', filters.until));
   if (filters.project !== undefined) args.push('--project', plain('project', filters.project));
-  const limit = Math.min(Math.max(Math.trunc(filters.limit ?? 50), 1), maxLimit);
-  args.push('--limit', String(limit));
+  return args;
+}
+
+/** The page flags: the limit, within the cap, and the offset when there is one. */
+function pageArgs(filters: Filters, maxLimit: number): Array<string> {
+  const args = ['--limit', String(Math.min(Math.max(Math.trunc(filters.limit ?? DEFAULT_LIMIT), 1), maxLimit))];
   const offset = Math.max(Math.trunc(filters.offset ?? 0), 0);
   if (offset > 0) args.push('--offset', String(offset));
   return args;
 }
 
 /**
- * `list` with the filters. The agent's lists stay within the cap; the pane,
- * which draws only the rows in view, passes a higher one.
+ * `list` with the terms and the filters. The agent's lists stay within the
+ * cap; the pane, which draws only the rows in view, passes a higher one. A
+ * count reads every match, so it takes no page: the CLI refuses a limit or an
+ * offset with `by`.
  */
-export const listArgs = (filters: Filters, maxLimit = MAX_LIMIT): Array<string> => [
-  'list',
-  ...filterArgs(filters, maxLimit),
-];
+export function listArgs(query: Query, maxLimit = MAX_LIMIT): Array<string> {
+  const terms = (query.terms ?? []).map((term) => plain('term', term));
+  const args = ['list', ...terms, ...(query.isFixed ? ['--fixed'] : []), ...filterArgs(query)];
+  if (query.by === undefined) return [...args, ...pageArgs(query, maxLimit)];
+  if (!BY_FIELDS.includes(query.by)) throw new InputError(`by must be one of ${BY_FIELDS.join(', ')}: ${query.by}`);
+  if (query.limit !== undefined || query.offset !== undefined) {
+    throw new InputError('by counts every match, so leave out limit and offset');
+  }
+  return [...args, '--by', query.by];
+}
+
+/** A period that `read` takes: one local year, month or day, or `today` or `yesterday`. */
+const PERIOD = /^(today|yesterday|\d{4}(-\d{2}(-\d{2})?)?)$/;
+
+/** Whether a value is a period that `read` takes, rather than an entry id. */
+export const isPeriod = (value: string): boolean => PERIOD.test(value.trim());
 
 /**
- * `list` for one text with the filters. `--fixed`, because the tool looks for
- * the text as it is, and the CLI otherwise reads it as a regex.
+ * `read` for `latest`, one or more entry ids (each whole or a prefix that
+ * matches one entry), or one period. A period also takes the project and a
+ * page.
  */
-export const searchArgs = (text: string, filters: Filters): Array<string> => [
-  'list',
-  '--fixed',
-  plain('text', text),
-  ...filterArgs(filters),
-];
-
-/**
- * `read` for one entry id. The CLI also takes a shorter prefix, but one that
- * matches several entries is an error there, and `list` with a date gives a
- * day's entries, so only a whole id passes.
- */
-export function readArgs(id: string): Array<string> {
-  const value = id.trim();
-  if (!ID.test(value)) throw new InputError(`not an entry id: ${value}`);
-  return ['read', value];
+export function readArgs(which: ReadonlyArray<string>, filters: Filters = {}): Array<string> {
+  if (which.length === 0) {
+    throw new InputError(
+      'which is missing. The read tool takes which, a list: ["latest"], one or more entry ids, or one period such as ["2026-10"]. A period also takes project, limit and offset.',
+    );
+  }
+  const args = ['read', ...which.map((item) => plain('which', item))];
+  if (filters.project !== undefined) args.push('--project', plain('project', filters.project));
+  if (filters.limit !== undefined) args.push('--limit', String(Math.max(Math.trunc(filters.limit), 1)));
+  const offset = Math.max(Math.trunc(filters.offset ?? 0), 0);
+  if (offset > 0) args.push('--offset', String(offset));
+  return args;
 }
 
 /** The flags that name a session to `context` and `write`: where it works, its id, and the agent and model in it. */
@@ -200,4 +231,33 @@ export const sanitize = (text: string): string =>
 export function capped(text: string): string {
   if (text.length <= MAX_OUTPUT) return text;
   return `${text.slice(0, MAX_OUTPUT)}\n… cut at ${MAX_OUTPUT} characters; narrow the filters to see the rest.`;
+}
+
+/**
+ * The output of a CLI run, with the note on stderr that says which older
+ * matches the limit left out. The note names the flag of the CLI, and the
+ * model calls a tool, so it names the parameter instead.
+ */
+export function withNote(stdout: string, stderr: string): string {
+  const note = stderr.trim().replace(/--offset (\d+) for older ones/, 'call again with offset $1 for older ones');
+  return note === '' ? stdout.trim() : `${stdout.trim()}\n${note}`;
+}
+
+/**
+ * A list that is longer than MAX_OUTPUT, cut at whole lines. The list is
+ * oldest first, so the oldest lines go, and the note says which offset gives
+ * them, as the note of the CLI does for the limit. Undefined when the list fits.
+ */
+export function fitList(stdout: string, stderr: string, offset = 0): string | undefined {
+  if (withNote(stdout, stderr).length <= MAX_OUTPUT) return undefined;
+  const lines = stdout.trim().split('\n');
+  const note = (shown: number) =>
+    `matches ${offset + 1} to ${offset + shown}, counted from the newest; call again with offset ${offset + shown} for older ones`;
+  let size = note(lines.length).length;
+  let kept = 0;
+  while (kept < lines.length && size + lines[lines.length - 1 - kept]!.length + 1 <= MAX_OUTPUT) {
+    size += lines[lines.length - 1 - kept]!.length + 1;
+    kept++;
+  }
+  return [...lines.slice(lines.length - kept), note(kept)].join('\n');
 }

@@ -15,7 +15,7 @@ export const COMMAND = 'agent-journal';
  * whose permission hook answers `allow`, and without one the search cannot
  * run in auto mode. The auto mode classifier denies a spawn that no model
  * response asked for, and Claude Code ignores an allow rule for the agent
- * there (it would bypass the classifier). In the other modes the three tools
+ * there (it would bypass the classifier). In the other modes the two tools
  * ask the person each time unless they allow them. The code stays, and a
  * later version may answer from the main conversation or with plain model
  * calls instead of an agent.
@@ -32,7 +32,6 @@ export const AGENT_TYPE = `${PLUGIN}:${AGENT_NAME}`;
 
 /** The tools that read the journal, for the main conversation and the search agent, by short name. */
 export const TOOL_LIST = 'list';
-export const TOOL_SEARCH = 'search';
 export const TOOL_READ = 'read';
 
 /** The tool the main conversation writes an entry with, by short name. */
@@ -45,7 +44,7 @@ export const TOOL_PREFIX = `mcp__${PLUGIN}__`;
 export const toolName = (name: string): string => `${TOOL_PREFIX}${name}`;
 
 /** Every tool name the search agent may call, and nothing else. */
-export const AGENT_TOOLS: ReadonlyArray<string> = [toolName(TOOL_LIST), toolName(TOOL_SEARCH), toolName(TOOL_READ)];
+export const AGENT_TOOLS: ReadonlyArray<string> = [toolName(TOOL_LIST), toolName(TOOL_READ)];
 
 /** What the agent must never have, whatever it inherits. */
 export const DENIED_TOOLS: ReadonlyArray<string> = ['Write', 'Edit', 'NotebookEdit', 'Bash'];
