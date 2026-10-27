@@ -2,7 +2,21 @@ import { execFileSync } from 'node:child_process';
 import { chmodSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
-import { configure, type Fixture, fails, fixture, frontmatter, rows, run, tilde, worktree } from './helpers.js';
+import { parse } from 'yaml';
+import {
+  configure,
+  FAKE_LOCAL_HOST_NAME,
+  FAKE_LOGIN,
+  type Fixture,
+  fails,
+  fixture,
+  frontmatter,
+  rows,
+  run,
+  seed,
+  tilde,
+  worktree,
+} from './helpers.js';
 
 /**
  * A stand-in for `$EDITOR`: it fills the summary in and appends a body, the way
@@ -547,5 +561,91 @@ describe('the machine and the account it records', () => {
     const result = frontmatter(written(store).text);
     expect(result.host).toBeUndefined();
     expect(result.user).toBeUndefined();
+  });
+});
+
+describe('the frontmatter as YAML', () => {
+  /** A summary with backslashes, which a double-quoted YAML string reads as escapes. */
+  const SUMMARY = 'Fixed the C:\\temp\\new path and the \\d+ regex.';
+
+  /** A folder name that a bare YAML value cannot hold: a colon, quotes and a comment. */
+  function oddFolder(store: Fixture): string {
+    const path = join(store.home, 'a: "b" #c');
+    mkdirSync(path);
+    return path;
+  }
+
+  test(`should write every value so that a YAML reader gets it back as the same string`, () => {
+    // Arrange
+    const store = fixture();
+    const folder = oddFolder(store);
+
+    // Act
+    run(store, [
+      'write',
+      '--summary',
+      SUMMARY,
+      '--project',
+      'yes',
+      '--cwd',
+      folder,
+      '--agent',
+      'pi/test-model',
+      '--session-id',
+      '12345',
+    ]);
+
+    // Assert
+    const text = written(store).text;
+    const fields = parse(text.split('---\n')[1]!);
+    expect({ ...fields, date: undefined }).toEqual({
+      date: undefined,
+      project: 'yes',
+      summary: SUMMARY,
+      cwd: tilde(store, folder),
+      host: FAKE_LOCAL_HOST_NAME,
+      user: FAKE_LOGIN,
+      agent: 'pi/test-model',
+      session_id: '12345',
+    });
+  });
+
+  test(`should list and filter the entry by the values it wrote`, () => {
+    // Arrange
+    const store = fixture();
+    const folder = oddFolder(store);
+    run(store, ['write', '--summary', SUMMARY, '--project', 'yes', '--cwd', folder]);
+
+    // Act
+    const byProject = rows(run(store, ['list', '--project', 'yes']));
+    const byFolder = rows(run(store, ['list', '--cwd', folder]));
+
+    // Assert
+    expect(byProject.map((row) => [row.project, row.summary])).toEqual([['yes', SUMMARY]]);
+    expect(byFolder.length).toBe(1);
+  });
+
+  test(`should count the backslashes of a summary once toward its limit`, () => {
+    // Arrange
+    const store = fixture();
+    const summary = 'a\\'.repeat(100);
+
+    // Act
+    run(store, ['write', '--summary', summary], { at: store.repo });
+
+    // Assert
+    expect(rows(run(store, ['list']))[0]!.summary).toBe(summary);
+  });
+
+  test(`should still list an older entry whose summary has a single backslash`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, [{ stem: '2026-10-11T090000Z', project: 'demo', summary: 'Moved C:\\temp away.' }]);
+
+    // Act
+    const listed = rows(run(store, ['list']));
+
+    // Assert
+    expect(listed[0]!.summary).toBe('Moved C:\\temp away.');
   });
 });

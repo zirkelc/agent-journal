@@ -135,7 +135,7 @@ describe('context --recall', () => {
     const result = recallAt(store);
 
     // Assert
-    expect(result).toContain(`date: 2026-01-11T14:30:00Z\nproject: my-lib\nsummary: "Shipped`);
+    expect(result).toContain(`date: 2026-01-11T14:30:00Z\nproject: "my-lib"\nsummary: "Shipped`);
   });
 
   test(`should pass the session id of the session the question comes from`, () => {

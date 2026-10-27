@@ -32,13 +32,13 @@ The body holds what the summary leaves out: what was decided, what was rejected 
 ```markdown
 ---
 date: 2026-01-11T14:30:00Z
-project: my-lib
+project: "my-lib"
 summary: "Shipped the v1.2 sync path on prepared statements, with rollback when a batch fails. Not deployed, waiting on Monday's validation."
-cwd: ~/Developer/oss/my-lib
+cwd: "~/Developer/oss/my-lib"
 host: "my-laptop"
 user: "me"
 agent: "my-agent/my-model"
-session_id: 4eb89b17-6f7f-4264-95d4-ea5313ef277e
+session_id: "4eb89b17-6f7f-4264-95d4-ea5313ef277e"
 ---
 
 Replaced the string-interpolated SQL in the sync path with prepare(). Added a rollback so a failed batch leaves nothing half-written, which is what caused Thursday's partial state.

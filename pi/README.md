@@ -43,16 +43,6 @@ The model gives only the summary and the body. `journal_write` sets the other fi
 
 A result longer than 40,000 characters is cut, with a note that tells the model to narrow the filters.
 
-### Without the tools
-
-To give the model no journal tools, start Pi with `AGENT_JOURNAL_TOOLS=off` (`0` and `false` also work):
-
-```sh
-AGENT_JOURNAL_TOOLS=off pi
-```
-
-The model then writes each entry as a file with its own `write` tool and reads the journal with `bash` and `read`, as in Claude Code and Codex. The rules for that way name the session ID and the agent, for the model to copy into the entry. A session in which the journal tools are not active, for example one started with `--tools read,bash`, gets the same rules, so the model is never told to use tools that it cannot call. The git sync at the end of the session is the same in both ways. The [eval](https://github.com/zirkelc/agent-journal/blob/main/eval/README.md) compares the two ways.
-
 ## Permissions
 
 Pi does not ask for approval before a tool call, so the tools run without a prompt. If you use a permission extension, it can decide from the tools' annotations: the three read tools are read-only, and `journal_write` is not read-only, not destructive (it only adds a file) and does not reach the network.
