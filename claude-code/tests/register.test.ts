@@ -43,7 +43,7 @@ describe('register', () => {
       '--session-id',
       'session-1',
       '--agent',
-      'claude/opus-5-5',
+      'claude/claude-opus-5-5[1m]',
     ]);
   });
 

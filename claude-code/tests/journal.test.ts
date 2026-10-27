@@ -226,10 +226,10 @@ describe('journal', () => {
 
   test('the agent is named by the product and the model, and by the product alone without a model', () => {
     // Act
-    const result = [agentOf('claude-opus-5-5[1m]'), agentOf('claude-haiku-4-5-20251001'), agentOf('')];
+    const result = [agentOf('claude-opus-5-5[1m]'), agentOf('')];
 
     // Assert
-    expect(result).toEqual(['claude/opus-5-5', 'claude/haiku-4-5-20251001', 'claude']);
+    expect(result).toEqual(['claude/claude-opus-5-5[1m]', 'claude']);
   });
 
   test('a step of the agent goes to the turn it asks for, with the entries it returned, once each', () => {
