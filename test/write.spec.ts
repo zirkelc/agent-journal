@@ -416,6 +416,28 @@ describe('the agent it records', () => {
     expect(frontmatter(written(store).text).agent).toBe('codex/gpt-5.1');
   });
 
+  test(`should record the same model id from each harness, as the model's API id`, () => {
+    // Arrange
+    const store = fixture();
+    const given = [
+      'claude/claude-opus-5-5[1m]',
+      'pi/anthropic/claude-opus-5-5',
+      'pi/Claude-Haiku-4-5-20251001',
+      'claude/',
+    ];
+
+    // Act
+    for (const agent of given) {
+      run(store, ['write', '--summary', `From ${agent}.`, '--agent', agent], { at: store.repo });
+    }
+
+    // Assert
+    const counted = run(store, ['list', '--by', 'agent']);
+    expect(counted).toBe(
+      '1\tclaude\n1\tclaude/claude-opus-5-5\n1\tpi/claude-haiku-4-5\n1\tpi/claude-opus-5-5\ntotal\t4\n',
+    );
+  });
+
   test(`should leave the agent out when a person wrote the entry`, () => {
     // Arrange
     const store = fixture();

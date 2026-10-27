@@ -189,13 +189,12 @@ export function failureOf(run: Run): string {
 }
 
 /**
- * The agent writing, as an entry's `agent` field spells it: the product, then
- * the model without the product's own prefix or a context-size suffix, so
- * `claude-opus-5-5[1m]` is `claude/opus-5-5`. Without a model, the product alone.
+ * The agent writing: the product, then the model as the session names it. The
+ * CLI makes the model its API id, the same for every harness. Without a model,
+ * the product alone.
  */
 export function agentOf(model: string): string {
-  const name = model.replace(/^claude-/, '').replace(/\[.*\]$/, '');
-  return name === '' ? 'claude' : `claude/${name}`;
+  return model === '' ? 'claude' : `claude/${model}`;
 }
 
 /**

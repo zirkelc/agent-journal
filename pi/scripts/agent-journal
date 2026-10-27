@@ -121,14 +121,16 @@ filters: --date D      one local year, month or day: 2026, 2026-01, 2026-01-11,
          --host H      entries written on one machine
          --user U      entries written by one account
          --agent A     entries of one agent, such as claude, or of one model,
-                       such as opus-5-5, or of both, such as claude/opus-5-5
+                       such as claude-opus-5-5, or of both, such as
+                       claude/claude-opus-5-5
          --limit N     how many of the most recent to print, default 20
          --offset N    skip this many of the most recent first, for the next page
          --all         no limit
 
 The values of --project, --cwd, --host, --user and --agent can have * for any
-text and ? for one character, as a shell glob reads them: --agent 'opus-*'.
-Put them in quotes, so the shell does not expand them first.
+text and ? for one character, as a shell glob reads them, for example
+--agent 'claude-opus-*'. Put them in quotes, so the shell does not expand them
+first.
 
 settings: journal_dir    where journal entries are written
           sync           git: commit the journal folder after each write, and
@@ -1009,6 +1011,24 @@ esac
 # would be made and it costs one line to make it impossible.
 abs=$(cd "$cwd" 2>/dev/null && pwd) && cwd=$abs
 
+# Each harness spells the same model in its own way, so the agent that an entry
+# records keeps only the model's API id: no provider path before it, no
+# context-size or date suffix after it, in lower case. `pi/anthropic/
+# claude-opus-5-5` and `claude/claude-opus-5-5[1m]` both record the model as
+# `claude-opus-5-5`. A filter stays as it was typed, since a glob can end in
+# `[...]` too.
+if [ "$cmd" = write ] || [ "$cmd" = context ]; then
+  case $agent in
+    */*)
+      model=$(printf '%s\n' "${agent#*/}" |
+        sed -e 's|.*/||' -e 's/\[[^]]*\]$//' -e 's/-[0-9]\{8\}$//' |
+        tr '[:upper:]' '[:lower:]')
+      agent=$(printf '%s\n' "${agent%%/*}" | tr '[:upper:]' '[:lower:]')${model:+/$model}
+      ;;
+    *) agent=$(printf '%s\n' "$agent" | tr '[:upper:]' '[:lower:]') ;;
+  esac
+fi
+
 read_config "$config_file"
 journal_dir=$(expand_home "${cfg_journal_dir:-$default_journal_dir}")
 
@@ -1250,7 +1270,7 @@ render() {
     -v cols="$cols" '
     # Whether an entry passes the filters that its frontmatter decides. An
     # agent is recorded as `name/model`, and a filter without a slash is the
-    # name or the model, so `claude` and `opus-*` both work.
+    # name or the model, so `claude` and `claude-opus-*` both work.
     function wanted(proj, dir, h, u, ag,   name, model) {
       if (project != "" && !match(proj, projectre)) return 0
       if (cwdf != "" && !match(dir, cwdre)) return 0
