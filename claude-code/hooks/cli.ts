@@ -246,6 +246,35 @@ export function withNote(stdout: string, stderr: string): string {
   return note === '' ? stdout.trim() : `${stdout.trim()}\n${note}`;
 }
 
+/** The last line of a list that the limit cut, as the tool gives it. */
+const CUT_NOTE = /^matches (\d+) to (\d+), counted from the newest; call again with offset (\d+) for older ones$/;
+
+/** Whether a list, as the tool gives it, left older matches out. */
+export const isCut = (text: string): boolean => CUT_NOTE.test(text.split('\n').at(-1) ?? '');
+
+/**
+ * A cut list whose last line also says how many older matches it left out and
+ * the day of the oldest, from the counts of the same list by date. A model that
+ * sees only "for older ones" often answers from the newest page alone. The text
+ * stays as it is when the counts do not give both.
+ */
+export function withOlder(text: string, counts: string): string {
+  const lines = text.split('\n');
+  const found = CUT_NOTE.exec(lines.at(-1) ?? '');
+  if (!found) return text;
+  const [, from, to, next] = found;
+  const total = Number(/^total\t(\d+)$/m.exec(counts)?.[1]);
+  const days = counts
+    .split('\n')
+    .map((row) => /^\d+\t(\d{4}-\d{2}-\d{2})$/.exec(row)?.[1])
+    .filter((day) => day !== undefined)
+    .sort();
+  const older = total - Number(next);
+  if (!Number.isFinite(total) || older <= 0 || days.length === 0) return text;
+  const note = `matches ${from} to ${to} of ${total}, counted from the newest. ${older} older matches, back to ${days[0]}, are not in this result: call again with offset ${next} before you answer about them.`;
+  return [...lines.slice(0, -1), note].join('\n');
+}
+
 /**
  * A list that is longer than MAX_OUTPUT, cut at whole lines. The list is
  * oldest first, so the oldest lines go, and the note says which offset gives

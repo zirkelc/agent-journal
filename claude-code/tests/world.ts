@@ -43,6 +43,8 @@ export type Script = {
   removed?: Array<string>;
   /** What the engine decides for a check of a tool the plugin did not register, such as Agent. */
   otherVerdict?: 'allow' | 'ask' | 'deny';
+  /** The environment of the session, as the plugin reads it. */
+  env?: Record<string, string>;
   /** Where a path lands once links are followed, or undefined when it does not exist. */
   lands?: (path: string) => string | undefined;
 };
@@ -64,6 +66,7 @@ export function world(on: On, script: Script = {}) {
   const filled: Array<string> = [];
 
   const clock = mock.clock(on, { now: 0 });
+  mock.env(on, script.env ?? {});
   on('session.start', ($, e) => ({ cwd: e.cwd }));
   on('session.end', ($, e) => ({ sessionId: e.sessionId }));
   on('session.cwd', () => ({ value: '/work' }));

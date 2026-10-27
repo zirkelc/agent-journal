@@ -10,12 +10,14 @@ import {
   entriesOf,
   fitList,
   InputError,
+  isCut,
   isPeriod,
   listArgs,
   MAX_LIMIT,
   MAX_OUTPUT,
   readArgs,
   withNote,
+  withOlder,
   writeArgs,
   writtenIdOf,
   type Query,
@@ -52,6 +54,7 @@ import {
   TOOL_LIST,
   TOOL_READ,
   TOOL_WRITE,
+  isToolsOn,
   toolName,
 } from './names.js';
 import type { JournalView } from '../types';
@@ -154,6 +157,8 @@ export const register: Register = (on) => {
 
   on('session.start', async ($, e, next) => {
     const started = await next(e);
+    /** Read once, at the start, since the tools are registered then. The engine takes the name only as a literal. */
+    const hasTools = isToolsOn(await $.env.get('AGENT_JOURNAL_TOOLS'));
     host = {
       pluginRoot: $.plugin.root,
       cwd: () => $.session.cwd(),
@@ -210,6 +215,7 @@ export const register: Register = (on) => {
         );
       },
       canCallTools: async () => {
+        if (!hasTools) return false;
         /** The engine refuses to check a tool that a deny rule took out of the session. */
         const verdicts = await Promise.all(
           [TOOL_WRITE, TOOL_LIST, TOOL_READ].map((name) =>
@@ -227,8 +233,9 @@ export const register: Register = (on) => {
      * The journal's tools, for the main conversation, and the search agent's
      * too while the pane answers questions. Registered before the rules are
      * made, which give the variant for the tools only when the session has them.
+     * With the tools turned off, the model writes and reads the entries as files.
      */
-    for (const spec of [...TOOL_SPECS, WRITE_SPEC]) await $.tool.register(spec);
+    if (hasTools) for (const spec of [...TOOL_SPECS, WRITE_SPEC]) await $.tool.register(spec);
     loader = listLoader(host);
     waiter = answerWaiter(host);
     sync = syncer(host);
@@ -404,7 +411,10 @@ export const register: Register = (on) => {
     if (!isRead) {
       if (query.by) return { result: capped(ran.stdout.trim()) };
       const text = fitList(ran.stdout, ran.stderr, query.offset) ?? withNote(ran.stdout, ran.stderr);
-      return { result: capped(text || 'No entries match.') };
+      if (!isCut(text)) return { result: capped(text || 'No entries match.') };
+      /** The same filters counted by day, for the note on what the cut left out. */
+      const counted = await runCli(host, listArgs({ ...query, limit: undefined, offset: undefined, by: 'date' }));
+      return { result: capped(counted.exitCode === 0 ? withOlder(text, counted.stdout) : text) };
     }
     const text = withNote(ran.stdout, ran.stderr);
     const period = which.length === 1 && isPeriod(which[0]!) ? which[0]! : undefined;

@@ -9,6 +9,8 @@ import {
   TOOL_READ,
   TOOL_PREFIX,
   TOOL_WRITE,
+  TOOLS_ENV,
+  isToolsOn,
   toolName,
 } from '../hooks/names.js';
 import { journal, JOURNAL_DIR, line, PANE, SESSION, textOf, world } from './world.js';
@@ -101,6 +103,33 @@ describe('register', () => {
     expect(made.map((run) => run.argv.slice(1))).toEqual([
       ['context', '--cwd', '/work', '--session-id', 'session-1', '--agent', 'claude/claude-opus-5-5[1m]'],
     ]);
+  });
+
+  test('a session with the tools turned off in the environment gets no journal tools and the rules for files', async ($, on) => {
+    // Arrange
+    const kept = world(on, { context: 'Standing rules.\n', env: { [TOOLS_ENV]: ' OFF ' } });
+    await $.session.start(SESSION);
+
+    // Act
+    await $.prompt.context({ blocks: [] } as never);
+
+    // Assert
+    expect(kept.registered.tools).toEqual([]);
+    const made = kept.runs.filter((run) => run.argv[1] === 'context');
+    expect(made.map((run) => run.argv.slice(1))).toEqual([
+      ['context', '--cwd', '/work', '--session-id', 'session-1', '--agent', 'claude/claude-opus-5-5[1m]'],
+    ]);
+  });
+
+  test('only off, 0 or false turn the tools off, in any case and with spaces around', () => {
+    // Arrange
+    const values = ['off', 'OFF', ' 0 ', 'False', undefined, '', 'on', '1', 'true', 'no'];
+
+    // Act
+    const result = values.map(isToolsOn);
+
+    // Assert
+    expect(result).toEqual([false, false, false, false, true, true, true, true, true, true]);
   });
 
   test('a conversation that holds the rules\u2019 mark, as a resumed one does, gets no second copy, and their text alone is no mark', async ($, on) => {
@@ -418,6 +447,30 @@ describe('register', () => {
 
     // Assert
     expect(JSON.stringify(result)).toContain('call again with offset 50 for older ones');
+  });
+
+  test('a list that the limit cuts says how many older matches it left out and how far back they go', async ($, on) => {
+    // Arrange
+    const kept = world(on, {
+      list: (argv) =>
+        argv.includes('--by')
+          ? '2\t2023-11-06\n40\t2026-10-05\ntotal\t42'
+          : line('2026-10-05T143000Z', 'repo', 'Did a thing'),
+      stderr: { list: 'matches 1 to 2, counted from the newest; --offset 2 for older ones\n' },
+    });
+    await $.session.start(SESSION);
+
+    // Act
+    const result = await $.tool.call({ tool: toolName(TOOL_LIST), terms: ['login'], project: '.', limit: 2 } as never);
+
+    // Assert
+    expect(kept.queries().map((run) => run.argv.slice(1))).toEqual([
+      ['list', 'login', '--project', '.', '--limit', '2'],
+      ['list', 'login', '--project', '.', '--by', 'date'],
+    ]);
+    expect((result as { result: string }).result.split('\n').at(-1)).toBe(
+      'matches 1 to 2 of 42, counted from the newest. 40 older matches, back to 2023-11-06, are not in this result: call again with offset 2 before you answer about them.',
+    );
   });
 
   test('a read call passes its ids, or a period with its project and page, to the CLI', async ($, on) => {

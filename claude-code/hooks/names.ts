@@ -40,6 +40,17 @@ export const TOOL_WRITE = 'write';
 /** What every tool name of the plugin starts with, as the model calls it. */
 export const TOOL_PREFIX = `mcp__${PLUGIN}__`;
 
+/**
+ * The environment variable that turns the tools off: `off`, `0` or `false`.
+ * Without the tools, the model writes and reads the entries as files. The Pi
+ * extension reads the same variable, so one setting works for both.
+ */
+export const TOOLS_ENV = 'AGENT_JOURNAL_TOOLS';
+
+/** Whether the journal tools are on for this value of TOOLS_ENV. They are on unless it turns them off. */
+export const isToolsOn = (value: string | undefined): boolean =>
+  !['off', '0', 'false'].includes(value?.trim().toLowerCase() ?? '');
+
 /** A short tool name as the model calls it. */
 export const toolName = (name: string): string => `${TOOL_PREFIX}${name}`;
 
