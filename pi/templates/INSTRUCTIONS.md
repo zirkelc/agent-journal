@@ -38,11 +38,22 @@ Some sessions hold nothing worth remembering. Then write no entry and do not ann
 
 Never write an entry about the entry: "Created the required journal entry for this session" and "Session opened, no task has been requested yet" tell a future reader only that a session happened. If a summary would mean nothing to someone reading it in a year, there is nothing to write yet.
 
+### Current session
+
+The values of this session, already resolved:
+
+- `project`: `__PROJECT__`
+- `cwd`: `__CWD__`
+- `host`: `__HOST__`
+- `user`: `__USER__`
+- `agent`: `__AGENT__`
+- `session_id`: `__SESSION_ID__`
+
 ### Writing an entry
 
 <!-- with tools -->
 
-Write each entry with the `__TOOLS__write` tool, one call per entry. It takes two things, `summary` and `body`, and sets everything else itself: the date from the clock, the project and the directory from where this session works, the host, the user, the agent and the session id. It answers with the new entry's id. Never create an entry file any other way, and never edit a past one unless explicitly asked.
+Write each entry with the `__TOOLS__write` tool, one call per entry. It takes two things, `summary` and `body`, and sets everything else itself: the date from the clock, and the values of Current session (the project, the directory, the host, the user, the agent and the session id). It answers with the new entry's id. Never create an entry file any other way, and never edit a past one unless explicitly asked.
 
 The `summary` is one line, 200 characters at most, without double quotes. This is what makes a directory of entries scannable, so it has to stand on its own: what happened and what it means, never a topic tag. "Fixed the auth bug" is a tag. "Token refresh raced the retry and logged users out, so it is serialized behind a mutex now" is a summary.
 <!-- end -->
@@ -78,24 +89,15 @@ Considered doing the same to the reporting queries and decided against it for no
 Exactly these fields, in this order, on every entry:
 
 - `date`: the same instant as the filename, full ISO 8601 with colons. Leave it unquoted, so it parses as a timestamp rather than as a string.
-- `project`: the repository the work belongs to, always double-quoted, named after its main checkout so that every worktree of it files under one name. Omit the field when no `project` is listed under Current session below, which means the session is not in a repository at all. Never make one up from the directory name: a bare directory is not a project, and `cwd` still records where the work happened.
+- `project`: the repository the work belongs to, always double-quoted, named after its main checkout so that every worktree of it files under one name. Omit the field when no `project` is listed under Current session, which means the session is not in a repository at all. Never make one up from the directory name: a bare directory is not a project, and `cwd` still records where the work happened.
 - `summary`: one line, always double-quoted and without double quotes inside, about 150 characters and never more than 200, so one sentence. This is what makes a directory of entries scannable, so it has to stand on its own: what happened and what it means, never a topic tag. "Fixed the auth bug" is a tag. "Token refresh raced the retry and logged users out, so it is serialized behind a mutex now" is a summary.
 - `cwd`: the directory the session is working in, always double-quoted, written with `~` for home. This is the only place a worktree is recorded, since `project` deliberately collapses them.
-- `host`: the machine the session runs on, always double-quoted. A journal can collect entries from several machines, and a session can be resumed only on the machine that has its transcript. Omit the field if none is given below.
-- `user`: the account the session runs as on that machine, always double-quoted. Omit the field if none is given below.
-- `agent`: which agent wrote the entry, and which model it was running as, always double-quoted, since a model id can contain a colon. Together with `session_id` this is what says where the work can be picked back up, since a session id is only meaningful to the tool that issued it. Omit the field if none is given below.
-- `session_id`: the session this entry came from, always double-quoted, which is what joins it back to the full transcript. Omit the field if no id is given below.
+- `host`: the machine the session runs on, always double-quoted. A journal can collect entries from several machines, and a session can be resumed only on the machine that has its transcript. Omit the field if Current session does not list it.
+- `user`: the account the session runs as on that machine, always double-quoted. Omit the field if Current session does not list it.
+- `agent`: which agent wrote the entry, and which model it was running as, always double-quoted, since a model id can contain a colon. Together with `session_id` this is what says where the work can be picked back up, since a session id is only meaningful to the tool that issued it. Omit the field if Current session does not list it.
+- `session_id`: the session this entry came from, always double-quoted, which is what joins it back to the full transcript. Omit the field if Current session does not list it.
 
-### Current session
-
-- `project`: `__PROJECT__`
-- `cwd`: `__CWD__`
-- `host`: `__HOST__`
-- `user`: `__USER__`
-- `agent`: `__AGENT__`
-- `session_id`: `__SESSION_ID__`
-
-Copy those verbatim. They are already resolved, so do not derive them again. If the work happened in a different repository than the one above, or in one when no `project` is listed at all, name that repository by its main checkout, never by a worktree's own directory.
+Take `project`, `cwd`, `host`, `user`, `agent` and `session_id` from Current session. Copy each value exactly as it is listed there, character for character. Do not derive a value again, and do not shorten or tidy it: `cwd` keeps every part of its path, also a part that looks unusual. If the work happened in a different repository than the one listed, or in one when no `project` is listed at all, name that repository by its main checkout, never by a worktree's own directory.
 
 Double-quote every value except `date`, so that the frontmatter parses as written. Inside the quotes, write each backslash twice (`\\`), because YAML reads a single one as the start of an escape.
 <!-- end -->
@@ -121,6 +123,7 @@ How to find what the user asks for:
 - A question about a kind of thing, such as what failed, what was decided or what changed, has no one word that finds every entry. List all summaries of the project in that time, and also search with one term of several words for the same thing, such as `decided|chose|picked|went with` for a decision, because a body can say what its summary does not.
 - For the first entries of something, or a story over a long time, follow the offset until no older matches are left.
 - For any count, use `by`. Never count the lines of a list yourself.
+- When the user means this machine, this directory, this account or this agent, give its value from Current session as the filter `host`, `cwd`, `user` or `agent`. `cwd` also finds the entries of the directories under it. Without such words, use no filter of this kind.
 <!-- end -->
 <!-- without tools -->
 
@@ -150,4 +153,5 @@ How to find what the user asks for:
 
 - Narrow with the summaries first, and open whole entries only once they point somewhere.
 - A question about a kind of thing, such as what failed, what was decided or what changed, has no one word that finds every entry. Read all summaries of the project in that time, then search the bodies with several words for the same thing, such as `decided|chose|picked|went with` for a decision.
+- When the user means this machine, this directory, this account or this agent, search the frontmatter for its value from Current session, for example `grep -lE '^host: "?my-laptop"?$' *.md`. Without such words, use no filter of this kind.
 <!-- end -->
