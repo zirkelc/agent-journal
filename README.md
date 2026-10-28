@@ -24,7 +24,7 @@ Agent Journal makes the model record its work along the way: one small markdown 
 Nothing leaves your machine.
 
 - **No server, no account, no API requests.** The plugin runs locally and makes no network requests of its own.
-- **No hidden tool calls.** Entries are written in your session, in front of you: in Claude Code and Pi by the plugin's own `write` tool, in Codex by the model's own file-writing tool.
+- **No hidden tool calls.** The model writes each entry in your session, in front of you.
 - **A read-only hook.** At session start, a hook reads the config and resolves the dynamic values (project, agent, session, etc.).
 - **Your own files.** Entries are plain markdown in a directory you choose. Delete one and it is gone.
 
@@ -75,11 +75,11 @@ ls ~/agent-journal | tail -5
 # how many entries this year
 ls ~/agent-journal/2026-*.md | wc -l
 
-# one dated line per entry, for a day or a month
-grep -h '^summary:' ~/agent-journal/2026-10-*.md
+# the summaries of a day or a month, each after its file name
+grep '^summary:' ~/agent-journal/2026-10-*.md
 
 # every entry for one project
-grep -rl '^project: acme-dashboard$' ~/agent-journal
+grep -rlE '^project: "?acme-dashboard"?$' ~/agent-journal
 
 # anywhere in an entry, body included
 grep -rli 'filter code' ~/agent-journal | tail -3
@@ -109,14 +109,16 @@ It finds the agents installed on this machine and prints the steps for each one.
 
 ### Claude
 
-The plugin needs Claude Code 2.1.287 or later, because it is a [mod](https://code.claude.com/docs/en/plugins/mods/overview), a hooks module that Claude Code loads itself. Install the plugin:
+The plugin needs Claude Code 2.1.287 or later, because it is a [mod](https://code.claude.com/docs/en/plugins/mods/overview) that Claude Code loads itself.
+
+Install the plugin:
 
 ```
 /plugin marketplace add zirkelc/agent-plugins
 /plugin install agent-journal@zirkelc
 ```
 
-Then open a new session and ask Claude to write a journal entry. By default, it writes to the directory `~/agent-journal/`. In Claude Code, the model writes and reads the journal with three tools of the plugin (`write`, `list` and `read`).
+Then open a new session and ask Claude to write a journal entry. By default, it writes to the directory `~/agent-journal/`. In Claude Code, the model reads and writes the journal with three tools of the plugin (`list`, `read` and `write`).
 
 #### Update
 
@@ -141,9 +143,7 @@ You can allow the plugin's tools with a rule in `~/.claude/settings.json`:
 }
 ```
 
-At the moment, Claude Code runs these tools without a permission check, also without a rule ([anthropics/claude-code#104217](https://github.com/anthropics/claude-code/issues/104217)). Only a deny rule has an effect. See [Permissions](claude-code/README.md#permissions) in the Claude Code plugin README.
-
-For the tools, the journal pane, how the hooks give the rules to the session, and what the plugin runs, reads and sends, see the [Claude Code plugin README](claude-code/README.md).
+For more information on the tools and hooks, and what the plugin runs, reads and sends, see the [Claude Code plugin README](claude-code/README.md).
 
 ### Codex
 
@@ -179,14 +179,9 @@ Install the package from npm:
 pi install npm:pi-agent-journal
 ```
 
-Then open a new session and ask Pi to write a journal entry. By default, it writes to the directory `~/agent-journal/`. In Pi, the model writes and reads the journal with three tools of its own (`journal_write`, `journal_list` and `journal_read`). Pi does not ask for approval before a tool call, so there is no permission step.
+Then open a new session and ask Pi to write a journal entry. By default, it writes to the directory `~/agent-journal/`. In Pi, the model reads and writes the journal with three tools of its own (`journal_list`, `journal_read` and `journal_write`). Pi does not ask for approval before a tool call, so there is no permission step.
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/pi-session-dark.gif" />
-  <img src="assets/pi-session-light.gif" alt="Pi changes a function and writes a journal entry with its journal_write tool. Then a new Pi session finds an older entry with journal_list and journal_read, and answers why an older decision was made" />
-</picture>
-
-For the tools, how the extension gives the rules to the session, and what it runs, reads and sends, see the [Pi package README](pi/README.md).
+For more information on the tools and hooks, and what it runs, reads and sends, see the [Pi package README](pi/README.md).
 
 ## CLI
 
