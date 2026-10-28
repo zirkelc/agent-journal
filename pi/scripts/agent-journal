@@ -2155,11 +2155,21 @@ if [ "$cmd" = list ] || [ "$cmd" = read ]; then
       [ -n "$date_filter$since$until" ] || usage
       read_period=1
     else
+      # An id is a time, or a prefix of one, and only that: a `/` or a `..` in
+      # it would reach a file outside the journal folder, and the agents' tools
+      # pass an id on without asking the person first.
       while IFS= read -r t_word; do
         ! is_period "$t_word" || {
           printf 'a period is read on its own, not with other ids: %s\n' "$t_word" >&2
           exit 2
         }
+        case $t_word in
+          '' | latest) ;;
+          *[!0-9TZ-]*)
+            printf 'not an entry id: %s. An id is a time such as 2026-10-07T142000Z, or a prefix of one\n' "$t_word" >&2
+            exit 2
+            ;;
+        esac
       done <<EOF
 $terms
 EOF
@@ -3074,8 +3084,12 @@ EOF
   [ "$summary_set" = 0 ] || inner=$summary
 
   [ -n "$inner" ] || reject 'the summary is empty'
-  [ "${#inner}" -le 200 ] ||
-    reject "the summary is ${#inner} characters, and the limit is 200"
+  # Characters, not bytes: dash and the C locale count `${#inner}` in bytes, so
+  # an arrow or an umlaut would count three or two. Every UTF-8 character has
+  # exactly one byte that is not a continuation byte (0x80 to 0xBF).
+  length=$(printf '%s' "$inner" | LC_ALL=C tr -d '\200-\277' | wc -c | tr -d ' ')
+  [ "$length" -le 200 ] ||
+    reject "the summary is $length characters, and the limit is 200"
 
   mv "$draft" "$entry" || exit 1
   # Empty now, and the entry is written whether or not it goes.

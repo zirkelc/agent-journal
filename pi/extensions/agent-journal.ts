@@ -399,7 +399,15 @@ export default function agentJournal(pi: ExtensionAPI) {
           ['list', ...filterArgs({ date: period, project, cwd, host, user, agent, limit: limit ?? MAX_LIMIT, offset })],
           ctx,
         );
-        const summaries = fitList(list.stdout, list.stderr, offset) ?? withNote(list.stdout, list.stderr);
+        const cut = fitList(list.stdout, list.stderr, offset) ?? withNote(list.stdout, list.stderr);
+        /** The same period counted by day, for the note on what the cap left out, as a list gives it. Without the count, the short note stays. */
+        const counted = isCut(cut)
+          ? await runTool(
+              ['list', ...filterArgs({ date: period, project, cwd, host, user, agent, by: 'date' })],
+              ctx,
+            ).catch(() => null)
+          : null;
+        const summaries = counted ? withOlder(cut, counted.stdout) : cut;
         return textResult(
           capped(
             `The entries of ${period} are ${text.length} characters, more than one result holds. Their summaries follow; read the ones you need by id.\n${summaries}`,

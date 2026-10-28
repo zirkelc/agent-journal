@@ -766,6 +766,30 @@ describe('the tools', () => {
     );
   });
 
+  test(`should say how many older entries are left when the summaries of a long period are cut`, async () => {
+    // Arrange
+    const store = fixture();
+    /** 250 entries in September, 10 a day from the 1st to the 25th, too long to read whole. */
+    const stems = Array.from(
+      { length: 250 },
+      (_, index) =>
+        `2026-09-${String(1 + Math.floor(index / 10)).padStart(2, '0')}T${String(8 + (index % 10)).padStart(2, '0')}0000Z`,
+    );
+    seed(
+      store,
+      stems.map((stem, index) => ({ stem, project: 'demo', summary: `Entry ${index}.`, body: 'x'.repeat(300) })),
+    );
+    const host = pi(store);
+
+    // Act
+    const answer: string = await host.call(TOOL_READ, { which: ['2026-09'], limit: 250 });
+
+    // Assert
+    expect(answer.split('\n').at(-1)).toBe(
+      'matches 1 to 200 of 250, counted from the newest. 50 older matches, back to 2026-09-01, are not in this result: call again with offset 200 before you answer about them.',
+    );
+  });
+
   test(`should say so for an entry that does not exist`, async () => {
     // Arrange
     const store = fixture();

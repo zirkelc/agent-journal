@@ -427,6 +427,24 @@ describe('register', () => {
     expect(JSON.stringify(result)).toContain('3\\ttotal');
   });
 
+  /** A model often fills in an optional field with its default, and Pi takes these too. */
+  test('a count with the default offset 0, or with by set to null for a plain list, still runs', async ($, on) => {
+    // Arrange
+    const kept = world(on, { list: 'total\t0\n' });
+    await $.session.start(SESSION);
+
+    // Act
+    const counted = await $.tool.call({ tool: toolName(TOOL_LIST), by: 'project', offset: 0 } as never);
+    const listed = await $.tool.call({ tool: toolName(TOOL_LIST), by: null } as never);
+
+    // Assert
+    expect([counted, listed].map((result) => 'deny' in (result as object))).toEqual([false, false]);
+    expect(kept.queries().map((run) => run.argv.slice(1))).toEqual([
+      ['list', '--by', 'project'],
+      ['list', '--limit', '50'],
+    ]);
+  });
+
   test('a list call that counts and pages at once is refused before the CLI runs', async ($, on) => {
     // Arrange
     const kept = world(on);
@@ -744,6 +762,36 @@ describe('register', () => {
     expect(listed.map((run) => run.argv.slice(1))).toEqual([
       ['list', '--date', '2026-10-10', '--limit', '10', '--offset', '10'],
     ]);
+  });
+
+  test('the summaries of a long period that the cap cuts say how many older entries are left, and how far back', async ($, on) => {
+    // Arrange
+    const kept = world(on, {
+      read: 'x'.repeat(50_000),
+      list: (argv) =>
+        argv.includes('--by')
+          ? '50\t2026-09-01\n200\t2026-09-20\ntotal\t250'
+          : line('2026-09-20T090000Z', 'demo', 'One.'),
+      stderr: { list: 'matches 1 to 1, counted from the newest; --offset 1 for older ones\n' },
+    });
+    await $.session.start(SESSION);
+
+    // Act
+    const result = await $.tool.call({ tool: toolName(TOOL_READ), which: ['2026-09'], limit: 500 } as never);
+
+    // Assert
+    expect(
+      kept
+        .queries()
+        .filter((run) => run.argv[1] === 'list')
+        .map((run) => run.argv.slice(1)),
+    ).toEqual([
+      ['list', '--date', '2026-09', '--limit', '200'],
+      ['list', '--date', '2026-09', '--by', 'date'],
+    ]);
+    expect((result as { result: string }).result.split('\n').at(-1)).toBe(
+      'matches 1 to 1 of 250, counted from the newest. 249 older matches, back to 2026-09-01, are not in this result: call again with offset 1 before you answer about them.',
+    );
   });
 
   test('a read value that would read as a flag is refused before the CLI runs', async ($, on) => {

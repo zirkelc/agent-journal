@@ -102,10 +102,10 @@ function filterArgs(filters: Filters): Array<string> {
   return [...args, ...scopeArgs(filters)];
 }
 
-/** The page flags: the limit, within the cap, and the offset when there is one. */
 /** The offset as the CLI gets it: a whole number, never below 0. A note that names the next offset counts from this one too. */
 export const offsetOf = (filters: Filters): number => Math.max(Math.trunc(filters.offset ?? 0), 0);
 
+/** The page flags: the limit, within the cap, and the offset when there is one. */
 function pageArgs(filters: Filters, maxLimit: number): Array<string> {
   const args = ['--limit', String(Math.min(Math.max(Math.trunc(filters.limit ?? DEFAULT_LIMIT), 1), maxLimit))];
   const offset = offsetOf(filters);
@@ -124,7 +124,8 @@ export function listArgs(query: Query, maxLimit = MAX_LIMIT): Array<string> {
   const args = ['list', ...terms, ...(query.isFixed ? ['--fixed'] : []), ...filterArgs(query)];
   if (query.by === undefined) return [...args, ...pageArgs(query, maxLimit)];
   if (!BY_FIELDS.includes(query.by)) throw new InputError(`by must be one of ${BY_FIELDS.join(', ')}: ${query.by}`);
-  if (query.limit !== undefined || query.offset !== undefined) {
+  /** The default offset 0 pages nothing, so a count takes it, as Pi does. */
+  if (query.limit !== undefined || (query.offset !== undefined && query.offset !== 0)) {
     throw new InputError('by counts every match, so leave out limit and offset');
   }
   return [...args, '--by', query.by];

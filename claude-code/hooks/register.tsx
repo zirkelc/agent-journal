@@ -437,7 +437,12 @@ export const register: Register = (on) => {
       listArgs({ date: period, project, cwd, host: machine, user, agent, limit: limit ?? MAX_LIMIT, offset }),
     );
     if (listed.exitCode !== 0) return { result: capped(text) };
-    const summaries = fitList(listed.stdout, listed.stderr, offsetOf(query)) ?? withNote(listed.stdout, listed.stderr);
+    const cut = fitList(listed.stdout, listed.stderr, offsetOf(query)) ?? withNote(listed.stdout, listed.stderr);
+    /** The same period counted by day, for the note on what the cap left out, as a list gives it. */
+    const counted = isCut(cut)
+      ? await runCli(host, listArgs({ date: period, project, cwd, host: machine, user, agent, by: 'date' }))
+      : undefined;
+    const summaries = counted?.exitCode === 0 ? withOlder(cut, counted.stdout) : cut;
     return {
       result: capped(
         `The entries of ${period} are ${text.length} characters, more than one result holds. Their summaries follow; read the ones you need by id.\n${summaries}`,
@@ -639,7 +644,7 @@ function queryOf(input: Record<string, unknown>): Query {
     limit: number(input.limit),
     offset: number(input.offset),
     /** Checked against the fields where the arguments are made. */
-    by: input.by === undefined ? undefined : (String(input.by) as ByField),
+    by: input.by === undefined || input.by === null ? undefined : (String(input.by) as ByField),
   };
 }
 
