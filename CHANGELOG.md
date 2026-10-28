@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.7.0](https://github.com/zirkelc/agent-journal/compare/v0.6.0...v0.7.0) (2026-10-28)
+
+
+### Features
+
+* **claude-code:** filter the journal tools by directory, host, user and agent ([30166d8](https://github.com/zirkelc/agent-journal/commit/30166d8c8b82c1934c3c7150be9d0a55f2e5975b))
+* **claude-code:** write and recall the journal with the plugin's own tools ([#8](https://github.com/zirkelc/agent-journal/issues/8)) ([30166d8](https://github.com/zirkelc/agent-journal/commit/30166d8c8b82c1934c3c7150be9d0a55f2e5975b))
+
+
+### Bug Fixes
+
+* give the model the candidates of an id prefix, check the summary before the CLI, and keep the page of a long period ([30166d8](https://github.com/zirkelc/agent-journal/commit/30166d8c8b82c1934c3c7150be9d0a55f2e5975b))
+* keep read inside the journal folder, count a summary in characters in every shell, and note what a long period left out ([30166d8](https://github.com/zirkelc/agent-journal/commit/30166d8c8b82c1934c3c7150be9d0a55f2e5975b))
+* **pi:** name the tools agent_journal_list, agent_journal_read and agent_journal_write ([30166d8](https://github.com/zirkelc/agent-journal/commit/30166d8c8b82c1934c3c7150be9d0a55f2e5975b))
+
+
+### Code Refactoring
+
+* move the CLI, the templates and the shared TypeScript into shared/, and the install command into the CLI ([30166d8](https://github.com/zirkelc/agent-journal/commit/30166d8c8b82c1934c3c7150be9d0a55f2e5975b))
+
 ## [0.6.0](https://github.com/zirkelc/agent-journal/compare/v0.5.0...v0.6.0) (2026-10-28)
 
 
