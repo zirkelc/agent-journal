@@ -592,6 +592,58 @@ describe('register', () => {
     expect(result).toEqual({ result: 'No entries match. no entry matches 2026-01-01' });
   });
 
+  test('a list of an empty journal says so, without a blank first line', async ($, on) => {
+    // Arrange
+    world(on, {
+      list: '',
+      stderr: {
+        list: 'no entries yet in /home/me/journal\nyour agent writes them on its own, or write one with: agent-journal write\n',
+      },
+    });
+    await $.session.start(SESSION);
+
+    // Act
+    const result = await $.tool.call({ tool: toolName(TOOL_LIST) } as never);
+
+    // Assert
+    expect(result).toEqual({
+      result:
+        'no entries yet in /home/me/journal\nyour agent writes them on its own, or write one with: agent-journal write',
+    });
+  });
+
+  test('a count of an empty journal gives the total and says that the journal is empty', async ($, on) => {
+    // Arrange
+    world(on, {
+      list: 'total\t0\n',
+      stderr: {
+        list: 'no entries yet in /home/me/journal\nyour agent writes them on its own, or write one with: agent-journal write\n',
+      },
+    });
+    await $.session.start(SESSION);
+
+    // Act
+    const result = await $.tool.call({ tool: toolName(TOOL_LIST), by: 'project' } as never);
+
+    // Assert
+    expect(result).toEqual({
+      result:
+        'total\t0\nno entries yet in /home/me/journal\nyour agent writes them on its own, or write one with: agent-journal write',
+    });
+  });
+
+  test('a read of a journal folder that does not exist fails, and is not an answer that nothing matches', async ($, on) => {
+    // Arrange
+    world(on, { exitCodes: { read: 3 }, stderr: { read: 'no journal at /home/me/journal\n' } });
+    await $.session.start(SESSION);
+
+    // Act
+    const result = await $.tool.call({ tool: toolName(TOOL_READ), which: ['latest'] } as never);
+
+    // Assert
+    expect((result as { deny?: string }).deny).toBe('no journal at /home/me/journal');
+  });
+
   test('a read value that would read as a flag is refused before the CLI runs', async ($, on) => {
     // Arrange
     const kept = world(on);

@@ -1,5 +1,5 @@
 import { execFile, execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ExtensionAPI, ExecResult } from '@earendil-works/pi-coding-agent';
 import { afterEach, describe, expect, test, vi } from 'vitest';
@@ -17,6 +17,7 @@ import agentJournal, {
 } from '../pi/extensions/agent-journal.ts';
 import {
   baseEnv,
+  configure,
   type Fixture,
   fixture,
   frontmatter,
@@ -505,6 +506,83 @@ describe('the tools', () => {
 
     // Assert
     expect(answer).toBe('No entries match.');
+  });
+
+  test(`should say that the journal is empty, without a blank first line`, async () => {
+    // Arrange
+    const store = fixture();
+    seed(store, []);
+    const host = pi(store);
+
+    // Act
+    const listed = await host.call(TOOL_LIST, {});
+    const searched = await host.call(TOOL_LIST, { terms: ['deploy'] });
+
+    // Assert
+    const empty = `no entries yet in ${store.journalDir}\nyour agent writes them on its own, or write one with: agent-journal write`;
+    expect(listed).toBe(empty);
+    expect(searched).toBe(empty);
+  });
+
+  test(`should count a total of 0 in an empty journal, and say that it is empty`, async () => {
+    // Arrange
+    const store = fixture();
+    seed(store, []);
+    const host = pi(store);
+
+    // Act
+    const answer = await host.call(TOOL_LIST, { by: 'project' });
+
+    // Assert
+    expect(answer).toBe(
+      `total\t0\nno entries yet in ${store.journalDir}\nyour agent writes them on its own, or write one with: agent-journal write`,
+    );
+  });
+
+  test(`should count a total of 0 when nothing matches`, async () => {
+    // Arrange
+    const store = fixture();
+    seed(store, [{ stem: '2026-10-10T090000Z', project: 'demo', summary: 'One.' }]);
+    const host = pi(store);
+
+    // Act
+    const answer = await host.call(TOOL_LIST, { by: 'project', project: 'other' });
+
+    // Assert
+    expect(answer).toBe('total\t0');
+  });
+
+  test(`should answer that nothing matches when the latest entry of an empty journal is read`, async () => {
+    // Arrange
+    const store = fixture();
+    seed(store, []);
+    const host = pi(store);
+
+    // Act
+    const answer = await host.call(TOOL_READ, { which: ['latest'] });
+
+    // Assert
+    expect(answer).toBe(`No entries match. no entries in ${store.journalDir}`);
+  });
+
+  test.each([
+    [TOOL_LIST, {}],
+    [TOOL_LIST, { by: 'project' }],
+    [TOOL_READ, { which: ['latest'] }],
+  ])(`should fail the call when the journal folder does not exist: %s %j`, async (tool, params) => {
+    // Arrange
+    const store = fixture();
+    const missing = join(store.home, 'nowhere');
+    configure(store, ['set', 'journal_dir', missing]);
+    /** Setting the folder creates it, so it goes again: a folder deleted or unmounted later. */
+    rmSync(missing, { recursive: true });
+    const host = pi(store);
+
+    // Act
+    const result = host.call(tool, params);
+
+    // Assert
+    await expect(result).rejects.toThrow();
   });
 
   test(`should read one entry in full`, async () => {

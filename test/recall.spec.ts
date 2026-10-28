@@ -1,8 +1,9 @@
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 import {
+  configure,
   type Entry,
   type Fixture,
   fails,
@@ -289,6 +290,20 @@ describe('list', () => {
 
     // Assert
     /** Advice, not a failure, so it goes to stderr and the exit code stays 0. */
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toContain('no entries yet');
+  });
+
+  test(`should say so when a search finds nothing because the journal is empty`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, []);
+
+    // Act
+    const result = output(store, ['list', 'deploy']);
+
+    // Assert
     expect(result.status).toBe(0);
     expect(result.stdout).toBe('');
     expect(result.stderr).toContain('no entries yet');
@@ -2090,6 +2105,21 @@ describe('a journal with more names than one command line holds', () => {
 });
 
 describe('list --by', () => {
+  /** A caller that reads only the counts must still see that there are none, not an empty answer. */
+  test(`should count a total of 0 in an empty journal, and still say that it is empty`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, []);
+
+    // Act
+    const result = output(store, ['list', '--by', 'project']);
+
+    // Assert
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('total\t0\n');
+    expect(result.stderr).toContain('no entries yet');
+  });
+
   test(`should count the entries per project, the largest count first`, () => {
     // Arrange
     const store = fixture();
@@ -2221,5 +2251,56 @@ describe('list --by', () => {
 
     // Assert
     expect(result.status).toBe(2);
+  });
+});
+
+describe('a journal with no entries, or no folder', () => {
+  test(`should fail to read the latest entry of an empty journal, and say that it is empty`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, []);
+
+    // Act
+    const result = fails(store, ['read', 'latest']);
+
+    // Assert
+    expect(result.status).toBe(1);
+    expect(result.stderr).toBe(`no entries in ${store.journalDir}\n`);
+  });
+
+  test(`should fail to read a period of an empty journal, and name the period`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, []);
+
+    // Act
+    const result = fails(store, ['read', 'today']);
+
+    // Assert
+    expect(result.status).toBe(1);
+    expect(result.stderr).toBe('no entry matches today\n');
+  });
+
+  /** A folder that is not there is a wrong setting, not an empty journal, so each command fails and names it. */
+  test.each([
+    [['list']],
+    [['list', 'deploy']],
+    [['list', '--by', 'project']],
+    [['read', 'latest']],
+    [['read', 'today']],
+  ])(`should fail and name the folder when the journal folder does not exist: %j`, (args) => {
+    // Arrange
+    const store = fixture();
+    const missing = join(store.home, 'nowhere');
+    configure(store, ['set', 'journal_dir', missing]);
+    /** Setting the folder creates it, so it goes again: a folder deleted or unmounted later. */
+    rmSync(missing, { recursive: true });
+
+    // Act
+    const result = fails(store, args);
+
+    // Assert
+    expect(result.status).toBe(3);
+    expect(result.stderr).toBe(`no journal at ${missing}\n`);
   });
 });

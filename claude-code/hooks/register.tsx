@@ -409,7 +409,7 @@ export const register: Register = (on) => {
     if (!isOk) return { deny: failureOf(ran) };
     if (isNoMatch) return { result: `No entries match. ${firstLine(ran.stderr)}`.trim() };
     if (!isRead) {
-      if (query.by) return { result: capped(ran.stdout.trim()) };
+      if (query.by) return { result: capped(withNote(ran.stdout, ran.stderr)) };
       const text = fitList(ran.stdout, ran.stderr, query.offset) ?? withNote(ran.stdout, ran.stderr);
       if (!isCut(text)) return { result: capped(text || 'No entries match.') };
       /** The same filters counted by day, for the note on what the cut left out. */

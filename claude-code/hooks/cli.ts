@@ -258,7 +258,7 @@ export function capped(text: string): string {
  */
 export function withNote(stdout: string, stderr: string): string {
   const note = stderr.trim().replace(/--offset (\d+) for older ones/, 'call again with offset $1 for older ones');
-  return note === '' ? stdout.trim() : `${stdout.trim()}\n${note}`;
+  return [stdout.trim(), note].filter((part) => part !== '').join('\n');
 }
 
 /** The last line of a list that the limit cut, as the tool gives it. */

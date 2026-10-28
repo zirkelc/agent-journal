@@ -1952,9 +1952,11 @@ EOF
 
   layout_for 1
 
+  # A missing folder is a wrong setting, so it has its own status: 1 from read
+  # means only that nothing matched.
   if [ ! -d "$journal_dir" ]; then
     printf 'no journal at %s\n' "$journal_dir" >&2
-    exit 1
+    exit 3
   fi
 fi
 
@@ -1979,7 +1981,9 @@ if [ "$cmd" = list ]; then
   # An empty journal and a filter that excluded everything both print nothing,
   # and the difference between them is the difference between advice and noise:
   # silence on the first run of a new install reads as something being broken.
+  # A count is read from stdout alone, so it still gives its total there.
   if [ ! -e "$1" ]; then
+    [ -n "$by" ] && printf 'total\t0\n'
     printf 'no entries yet in %s\n' "$journal_dir" >&2
     printf 'your agent writes them on its own, or write one with: agent-journal write\n' >&2
     exit 0
