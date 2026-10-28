@@ -90,15 +90,15 @@ const FILTERS = {
   cwd: {
     type: 'string',
     description:
-      'Only entries from this directory and the directories under it. * and ? match within one name of the path.',
+      'Only entries from this directory (~/Developer/my-lib) and the directories under it. * and ? match within one name of the path.',
   },
   host: {
     type: 'string',
-    description: 'Only entries written on this machine. * and ? work as in a shell glob.',
+    description: 'Only entries written on this machine (my-laptop). * and ? work as in a shell glob.',
   },
   user: {
     type: 'string',
-    description: 'Only entries written by this account. * and ? work as in a shell glob.',
+    description: 'Only entries written by this account (me). * and ? work as in a shell glob.',
   },
   agent: {
     type: 'string',
