@@ -84,9 +84,34 @@ describe('the variant with tools', () => {
     expect(rules).toContain('- `journal_list` lists entries');
     expect(rules).not.toContain('date -u');
     expect(rules).not.toContain('grep');
-    expect(rules).not.toContain('### Current session');
     expect(rules).not.toContain('<!--');
     expect(rules).not.toContain('__TOOLS__');
+  });
+
+  test(`should give both variants the values of the current session, and point to them from writing and recalling`, () => {
+    // Arrange
+    const store = fixture();
+    const session = { sessionId: 'abc-123' };
+    const agent = ['--agent', 'claude/claude-opus-5-5'];
+
+    // Act
+    const tools = context(store, { ...session, extra: ['--tools', 'journal_', ...agent] });
+    const files = context(store, { ...session, extra: agent });
+
+    // Assert
+    for (const rules of [tools, files]) {
+      const section = rules.slice(rules.indexOf('### Current session'));
+      expect(rules.indexOf('### Current session')).toBeLessThan(rules.indexOf('### Writing an entry'));
+      expect(section).toMatch(/^- `cwd`: `~[^`]*`$/m);
+      expect(section).toMatch(/^- `host`: `.+`$/m);
+      expect(section).toMatch(/^- `user`: `.+`$/m);
+      expect(section).toContain('- `agent`: `claude/claude-opus-5-5`');
+      expect(section).toContain('- `session_id`: `abc-123`');
+    }
+    expect(tools).toContain('and the values of Current session');
+    expect(tools).toContain('give its value from Current session as the filter');
+    expect(files).toContain('Copy each value exactly as it is listed there, character for character');
+    expect(files).toContain('search the frontmatter for its value from Current session');
   });
 
   test(`should leave the tools out of the plain variant`, () => {

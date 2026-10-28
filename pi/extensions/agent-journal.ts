@@ -84,14 +84,14 @@ const FILTERS = {
   cwd: Type.Optional(
     Type.String({
       description:
-        'Only entries from this directory and the directories under it. * and ? match within one name of the path.',
+        'Only entries from this directory (~/Developer/my-lib) and the directories under it. * and ? match within one name of the path.',
     }),
   ),
   host: Type.Optional(
-    Type.String({ description: 'Only entries written on this machine. * and ? work as in a shell glob.' }),
+    Type.String({ description: 'Only entries written on this machine (my-laptop). * and ? work as in a shell glob.' }),
   ),
   user: Type.Optional(
-    Type.String({ description: 'Only entries written by this account. * and ? work as in a shell glob.' }),
+    Type.String({ description: 'Only entries written by this account (me). * and ? work as in a shell glob.' }),
   ),
   agent: Type.Optional(
     Type.String({
@@ -498,13 +498,13 @@ export default function agentJournal(pi: ExtensionAPI) {
     /** The rules for the tools only when the session can call them: `--tools` or another extension can leave them out. */
     const active = pi.getActiveTools();
     const canCall = hasTools && [TOOL_WRITE, TOOL_LIST, TOOL_READ].every((name) => active.includes(name));
+    /** Both variants name the session: the rules for files to copy into an entry, the rules for the tools as the values of the filters. */
     const args = ['context', '--cwd', ctx.cwd];
+    const sessionId = ctx.sessionManager.getSessionId();
+    if (sessionId) args.push('--session-id', sessionId);
+    // The model the session starts with. After a switch of the model, the write tool records the new one, while the rules keep this one, which is still correct enough for a filter.
+    args.push('--agent', agentOf(ctx));
     if (canCall) args.push('--tools', TOOL_PREFIX);
-    else {
-      const sessionId = ctx.sessionManager.getSessionId();
-      if (sessionId) args.push('--session-id', sessionId);
-      args.push('--agent', agentOf(ctx));
-    }
     const run = await cli(args, ctx.cwd, READ_TIMEOUT_MS);
     const made = isDone(run) ? run.stdout.trim() : '';
     rules = made === '' ? null : made;

@@ -165,6 +165,23 @@ describe('the rules', () => {
     expect(rules).not.toContain('date -u');
   });
 
+  test(`should give the rules for the tools the agent and the id of the session, for the filters`, async () => {
+    // Arrange
+    const store = fixture();
+    const host = pi(store);
+    const event = runStart();
+
+    // Act
+    await host.emit('session_start', { reason: 'startup' });
+    await host.emit('before_agent_start', event);
+
+    // Assert
+    const rules = event.systemPromptOptions.sections[SECTION]!;
+    expect(rules).toContain(`\`${TOOL_LIST}\``);
+    expect(rules).toContain('- `agent`: `pi/test-model`');
+    expect(rules).toContain('- `session_id`: `pi-session-1`');
+  });
+
   test(`should add the rules at the end of the system prompt when Pi has no sections`, async () => {
     // Arrange
     const store = fixture();
