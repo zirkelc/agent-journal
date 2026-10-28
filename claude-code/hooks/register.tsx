@@ -15,6 +15,7 @@ import {
   listArgs,
   MAX_LIMIT,
   MAX_OUTPUT,
+  offsetOf,
   readArgs,
   withNote,
   withOlder,
@@ -394,23 +395,33 @@ export const register: Register = (on) => {
       throw error;
     }
     const ran = await runCli(host, args);
-    /** Exit 1 of `read` means that nothing matches, which is an answer. */
+    /**
+     * Exit 1 of `read` is an answer: nothing matches, or an id prefix matches
+     * several entries, whose ids the model needs to read the one it means.
+     */
     const isNoMatch = isRead && ran.exitCode === 1;
     const isOk = ran.exitCode === 0 || isNoMatch;
+    /**
+     * The steps of the search agent, for the chat in the pane, only while that
+     * agent exists (see IS_ASK_ON). Every subagent can call these tools, and a
+     * call of an agent without a turn in the chat changes nothing. The step
+     * reads the parsed values, since the model can give a list as a JSON string.
+     */
     const agentId = e.agentId;
-    if (agentId) {
+    if (IS_ASK_ON && agentId) {
       const found = ran.exitCode !== 0 ? [] : isRead ? entryOfText(ran.stdout) : entriesOf(ran.stdout);
+      const parsed = { ...input, which, terms: query.terms };
       await update($, chatAtom, (chat) => {
         const seen = chat.flatMap((turn) => turn.seen);
-        const step = stepOf(e.tool, input, { isOk, entries: found }, seen);
+        const step = stepOf(e.tool, parsed, { isOk, entries: found }, seen);
         return recorded(chat, agentId, step, found);
       }).catch(() => undefined);
     }
     if (!isOk) return { deny: failureOf(ran) };
-    if (isNoMatch) return { result: `No entries match. ${firstLine(ran.stderr)}`.trim() };
+    if (isNoMatch) return { result: capped(ran.stderr.trim() || 'No entries match.') };
     if (!isRead) {
       if (query.by) return { result: capped(withNote(ran.stdout, ran.stderr)) };
-      const text = fitList(ran.stdout, ran.stderr, query.offset) ?? withNote(ran.stdout, ran.stderr);
+      const text = fitList(ran.stdout, ran.stderr, offsetOf(query)) ?? withNote(ran.stdout, ran.stderr);
       if (!isCut(text)) return { result: capped(text || 'No entries match.') };
       /** The same filters counted by day, for the note on what the cut left out. */
       const counted = await runCli(host, listArgs({ ...query, limit: undefined, offset: undefined, by: 'date' }));
@@ -419,14 +430,14 @@ export const register: Register = (on) => {
     const text = withNote(ran.stdout, ran.stderr);
     const period = which.length === 1 && isPeriod(which[0]!) ? which[0]! : undefined;
     if (!period || text.length <= MAX_OUTPUT) return { result: capped(text) };
-    /** Cut text would lose the last entries without a word, so a long period gives its summaries instead. */
-    const { project, cwd, host: machine, user, agent } = query;
+    /** Cut text would lose the last entries without a word, so a long period gives the summaries of the same page instead. */
+    const { project, cwd, host: machine, user, agent, limit, offset } = query;
     const listed = await runCli(
       host,
-      listArgs({ date: period, project, cwd, host: machine, user, agent, limit: MAX_LIMIT }),
+      listArgs({ date: period, project, cwd, host: machine, user, agent, limit: limit ?? MAX_LIMIT, offset }),
     );
     if (listed.exitCode !== 0) return { result: capped(text) };
-    const summaries = fitList(listed.stdout, listed.stderr) ?? withNote(listed.stdout, listed.stderr);
+    const summaries = fitList(listed.stdout, listed.stderr, offsetOf(query)) ?? withNote(listed.stdout, listed.stderr);
     return {
       result: capped(
         `The entries of ${period} are ${text.length} characters, more than one result holds. Their summaries follow; read the ones you need by id.\n${summaries}`,
@@ -651,6 +662,3 @@ function stringsOf(value: unknown): Array<string> {
     .map((item) => item.trim())
     .filter((item) => item !== '');
 }
-
-/** The first line of a text, or an empty string. */
-const firstLine = (text: string): string => text.trim().split('\n')[0] ?? '';

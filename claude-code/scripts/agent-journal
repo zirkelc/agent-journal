@@ -353,10 +353,11 @@ resolve_project() {
 # `--project .` where there is no project to name. Each command decides which
 # directory `.` means, so only the failure is shared. Carrying on is not an
 # option: an empty project filter means no filter at all, and would list every
-# project under the name of this one.
+# project under the name of this one. It is a refusal of the input, so it exits
+# with 2, as the other refusals do: 1 from read means only that nothing matched.
 no_project_here() {
   printf '%s is not in a repository, so --project . has no project to name\n' "$(abbrev_home "$1")" >&2
-  exit 1
+  exit 2
 }
 
 # A name an entry can record in double quotes. A quote, a backslash or a control

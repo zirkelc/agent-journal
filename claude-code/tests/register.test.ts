@@ -217,6 +217,23 @@ describe('register', () => {
     expect(kept.notes).toEqual([]);
   });
 
+  test('each prompt checks the permissions of the three tools once', async ($, on) => {
+    // Arrange
+    const kept = world(on, { context: 'Standing rules.\n' });
+    await $.session.start(SESSION);
+    await kept.clock.settle();
+    const before = kept.checks.length;
+
+    // Act
+    await $.prompt.submit(typed('first'));
+    const first = kept.checks.length - before;
+    await $.prompt.submit(typed('second'));
+    const second = kept.checks.length - before - first;
+
+    // Assert
+    expect([first, second]).toEqual([3, 3]);
+  });
+
   test('a prompt after the rules came through prompt.context adds no second copy', async ($, on) => {
     // Arrange
     const kept = world(on, { context: 'Standing rules.\n' });
@@ -475,6 +492,24 @@ describe('register', () => {
     );
   });
 
+  test('a list too long for one result names the next offset from the offset the CLI got', async ($, on) => {
+    // Arrange
+    const rows = Array.from({ length: 1_000 }, (_, index) =>
+      line(`2026-10-05T${String(100_000 + index).slice(1)}Z`, 'repo', `Entry ${index} ${'x'.repeat(80)}`),
+    ).join('\n');
+    const kept = world(on, { list: (argv) => (argv.includes('--by') ? '1003\t2026-10-05\ntotal\t1003' : rows) });
+    await $.session.start(SESSION);
+
+    // Act
+    const result = await $.tool.call({ tool: toolName(TOOL_LIST), limit: 200, offset: 2.7 } as never);
+
+    // Assert
+    expect(kept.queries()[0]!.argv.slice(1)).toEqual(['list', '--limit', '200', '--offset', '2']);
+    const lines = (result as { result: string }).result.split('\n');
+    const shown = lines.length - 1;
+    expect(lines.at(-1)!.startsWith(`matches 3 to ${2 + shown} of 1003, counted from the newest.`)).toBe(true);
+  });
+
   test('list, and read for a period, pass the directory, host, user and agent filters to the CLI', async ($, on) => {
     // Arrange
     const kept = world(on, { list: line('2026-10-05T143000Z', 'repo', 'Did a thing'), read: 'An entry.\n' });
@@ -500,7 +535,7 @@ describe('register', () => {
     const [list, read] = TOOL_SPECS;
 
     // Act
-    const keys = [list!, read!].map((spec) => Object.keys(spec.inputSchema.properties as object));
+    const keys = [list!, read!].map((spec) => Object.keys(spec.inputSchema!.properties as object));
 
     // Assert
     expect(keys[0]).toEqual([
@@ -589,7 +624,7 @@ describe('register', () => {
     const result = await $.tool.call({ tool: toolName(TOOL_READ), which: ['2026-01-01'] } as never);
 
     // Assert
-    expect(result).toEqual({ result: 'No entries match. no entry matches 2026-01-01' });
+    expect(result).toEqual({ result: 'no entry matches 2026-01-01' });
   });
 
   test('a list of an empty journal says so, without a blank first line', async ($, on) => {
@@ -644,6 +679,73 @@ describe('register', () => {
     expect((result as { deny?: string }).deny).toBe('no journal at /home/me/journal');
   });
 
+  test('a read of an id prefix that matches several entries gives the candidates', async ($, on) => {
+    // Arrange
+    world(on, {
+      exitCodes: { read: 1 },
+      stderr: {
+        read: '2026-10-10T09 matches 2 entries:\n2026-10-10T090000Z\tdemo\tOne.\n2026-10-10T091500Z\tdemo\tTwo.\n',
+      },
+    });
+    await $.session.start(SESSION);
+
+    // Act
+    const result = await $.tool.call({ tool: toolName(TOOL_READ), which: ['2026-10-10T09'] } as never);
+
+    // Assert
+    expect(result).toEqual({
+      result: '2026-10-10T09 matches 2 entries:\n2026-10-10T090000Z\tdemo\tOne.\n2026-10-10T091500Z\tdemo\tTwo.',
+    });
+  });
+
+  test('a read the CLI refuses, such as the current project outside a repository, fails', async ($, on) => {
+    // Arrange
+    const refusal = '~/scratch is not in a repository, so --project . has no project to name';
+    world(on, { exitCodes: { read: 2 }, stderr: { read: `${refusal}\n` } });
+    await $.session.start(SESSION);
+
+    // Act
+    const result = await $.tool.call({ tool: toolName(TOOL_READ), which: ['2026'], project: '.' } as never);
+
+    // Assert
+    expect((result as { deny?: string }).deny).toBe(refusal);
+  });
+
+  test('a read by id leaves out the filters and the page, which work only for a period', async ($, on) => {
+    // Arrange
+    const kept = world(on, { read: '---\nsummary: "One."\n---\n' });
+    await $.session.start(SESSION);
+
+    // Act
+    await $.tool.call({
+      tool: toolName(TOOL_READ),
+      which: ['2026-10-10T090000Z'],
+      project: 'demo',
+      host: 'box',
+      limit: 5,
+      offset: 1,
+    } as never);
+
+    // Assert
+    const reads = kept.queries().filter((run) => run.argv[1] === 'read');
+    expect(reads.map((run) => run.argv.slice(1))).toEqual([['read', '2026-10-10T090000Z']]);
+  });
+
+  test('a page of a period that is too long to read whole gives the summaries of that page', async ($, on) => {
+    // Arrange
+    const kept = world(on, { read: 'x'.repeat(50_000), list: line('2026-10-10T090000Z', 'demo', 'One.') });
+    await $.session.start(SESSION);
+
+    // Act
+    await $.tool.call({ tool: toolName(TOOL_READ), which: ['2026-10-10'], limit: 10, offset: 10 } as never);
+
+    // Assert
+    const listed = kept.queries().filter((run) => run.argv[1] === 'list');
+    expect(listed.map((run) => run.argv.slice(1))).toEqual([
+      ['list', '--date', '2026-10-10', '--limit', '10', '--offset', '10'],
+    ]);
+  });
+
   test('a read value that would read as a flag is refused before the CLI runs', async ($, on) => {
     // Arrange
     const kept = world(on);
@@ -687,6 +789,26 @@ describe('register', () => {
     expect(writes[0]!.init?.cwd).toBe('/work');
     expect((result as { result?: unknown }).result).toBe('2026-10-06T080000Z');
   });
+
+  /** The CLI refuses these too, but it keeps a draft folder for each one, and a model that retries makes many. */
+  for (const [summary, reason] of [
+    ['x'.repeat(201), 'summary is 201 characters, and the limit is 200'],
+    ['Said "done".', 'summary cannot contain a double quote or a newline'],
+    ['Two\nlines.', 'summary cannot contain a double quote or a newline'],
+  ] as const) {
+    test(`a write call with the summary ${JSON.stringify(summary.slice(0, 20))} is refused before the CLI runs`, async ($, on) => {
+      // Arrange
+      const kept = world(on);
+      await $.session.start(SESSION);
+
+      // Act
+      const result = await $.tool.call({ tool: toolName(TOOL_WRITE), summary, body: 'A body.' } as never);
+
+      // Assert
+      expect(kept.queries().filter((run) => run.argv[1] === 'write').length).toBe(0);
+      expect((result as { deny?: string }).deny).toBe(reason);
+    });
+  }
 
   test('a write call with an empty summary is refused before the CLI runs', async ($, on) => {
     // Arrange
@@ -1198,19 +1320,5 @@ describe('register', () => {
     // Assert
     const listed = kept.queries().find((run) => run.argv[1] === 'list');
     expect(listed?.argv[0]).toBe('/repo/scripts/agent-journal');
-  });
-
-  test('the permission checks of the journal tools are left to the user\u2019s own rules', async ($, on) => {
-    // Arrange
-    world(on);
-    await $.session.start(SESSION);
-
-    // Act
-    const verdicts = await Promise.all(
-      [TOOL_LIST, TOOL_READ, TOOL_WRITE].map((name) => $.tool.check({ tool: toolName(name), input: {} })),
-    );
-
-    // Assert
-    expect(verdicts.map((verdict) => verdict.decision)).toEqual(['ask', 'ask', 'ask']);
   });
 });

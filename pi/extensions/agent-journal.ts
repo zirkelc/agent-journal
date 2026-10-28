@@ -65,6 +65,22 @@ export const MAX_LIMIT = 200;
 /** The most characters a tool gives back, so that one result cannot fill the context. */
 export const MAX_OUTPUT = 40_000;
 
+/** The most characters of a summary, as the CLI counts them. */
+const MAX_SUMMARY = 200;
+
+/**
+ * Why the CLI would refuse a summary, or undefined when it takes it. The CLI
+ * checks this too, but only after it keeps a draft folder for each refusal,
+ * and a model that retries makes many.
+ */
+export function summaryProblem(summary: string): string | undefined {
+  const length = [...summary].length;
+  if (summary === '') return 'summary is empty';
+  if (length > MAX_SUMMARY) return `summary is ${length} characters, and the limit is ${MAX_SUMMARY}`;
+  if (/["\n\r]/.test(summary)) return 'summary cannot contain a double quote or a newline';
+  return undefined;
+}
+
 const FILTERS = {
   date: Type.Optional(
     Type.String({ description: 'One local year, month or day: 2026, 2026-01, 2026-01-11, today or yesterday.' }),
@@ -359,7 +375,10 @@ export default function agentJournal(pi: ExtensionAPI) {
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
       async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-        const args = ['write', `--summary=${params.summary.trim()}`, `--body=${params.body.trim()}`, '--cwd', ctx.cwd];
+        const summary = params.summary.trim();
+        const problem = summaryProblem(summary);
+        if (problem) throw new Error(problem);
+        const args = ['write', `--summary=${summary}`, `--body=${params.body.trim()}`, '--cwd', ctx.cwd];
         const sessionId = ctx.sessionManager.getSessionId();
         if (sessionId) args.push('--session-id', sessionId);
         args.push('--agent', agentOf(ctx), '--no-sync');
@@ -452,22 +471,30 @@ export default function agentJournal(pi: ExtensionAPI) {
       }),
       annotations: { readOnlyHint: true, openWorldHint: false },
       async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-        const args = ['read', ...params.which.map((item) => item.trim()), ...scopeArgs(params)];
-        if (params.limit) args.push('--limit', String(params.limit));
-        if (params.offset) args.push('--offset', String(params.offset));
-        /** Exit 1 means that nothing matches, which is an answer. */
+        const which = params.which.map((item) => item.trim());
+        const period = which.length === 1 && PERIOD.test(which[0]!) ? which[0]! : '';
+        /** Only a period takes the filters and a page: the CLI refuses them with anything else. */
+        const args = ['read', ...which];
+        if (period) {
+          args.push(...scopeArgs(params));
+          if (params.limit) args.push('--limit', String(params.limit));
+          if (params.offset) args.push('--offset', String(params.offset));
+        }
+        /**
+         * Exit 1 is an answer: nothing matches, or an id prefix matches several
+         * entries, whose ids the model needs to read the one it means.
+         */
         const run = await runTool(args, ctx, [1]);
-        if (run.code === 1) return textResult(`No entries match. ${firstLine(run.stderr)}`.trim());
+        if (run.code === 1) return textResult(capped(run.stderr.trim() || 'No entries match.'));
         const text = withNote(run.stdout, run.stderr);
-        const period = params.which.length === 1 ? params.which[0]!.trim() : '';
-        if (text.length <= MAX_OUTPUT || !PERIOD.test(period)) return textResult(capped(text));
-        /** Cut text would lose the last entries without a word, so a long period gives its summaries instead. */
-        const { project, cwd, host, user, agent } = params;
+        if (text.length <= MAX_OUTPUT || !period) return textResult(capped(text));
+        /** Cut text would lose the last entries without a word, so a long period gives the summaries of the same page instead. */
+        const { project, cwd, host, user, agent, limit, offset } = params;
         const list = await runTool(
-          ['list', ...filterArgs({ date: period, project, cwd, host, user, agent, limit: MAX_LIMIT })],
+          ['list', ...filterArgs({ date: period, project, cwd, host, user, agent, limit: limit ?? MAX_LIMIT, offset })],
           ctx,
         );
-        const summaries = fitList(list.stdout, list.stderr) ?? withNote(list.stdout, list.stderr);
+        const summaries = fitList(list.stdout, list.stderr, offset) ?? withNote(list.stdout, list.stderr);
         return textResult(
           capped(
             `The entries of ${period} are ${text.length} characters, more than one result holds. Their summaries follow; read the ones you need by id.\n${summaries}`,

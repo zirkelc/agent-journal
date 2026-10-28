@@ -85,7 +85,10 @@ export function world(on: On, script: Script = {}) {
    * the person, as it does without a rule. A tool that a deny rule removed is
    * not in the session, and the engine refuses to check it.
    */
+  /** The tool of each permission check, in order: in auto mode, a check can go to the classifier. */
+  const checks: Array<string> = [];
   on('tool.check', ($, e, next) => {
+    checks.push(e.tool);
     if (script.removed?.includes(e.tool)) throw new Error(`no tool named "${e.tool}" in this session`);
     if (registered.tools.some((name) => toolName(name) === e.tool)) return { decision: 'ask' };
     return script.otherVerdict ? { decision: script.otherVerdict } : next(e);
@@ -175,6 +178,7 @@ export function world(on: On, script: Script = {}) {
   return {
     runs,
     queries,
+    checks,
     opened,
     spawned,
     registered,

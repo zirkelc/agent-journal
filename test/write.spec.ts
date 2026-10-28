@@ -189,7 +189,7 @@ describe('write', () => {
     });
 
     // Assert
-    expect(result.status).toBe(1);
+    expect(result.status).toBe(2);
     expect(result.stderr).toContain('not in a repository');
   });
 

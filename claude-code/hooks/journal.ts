@@ -61,14 +61,27 @@ export function rulesKeeper(host: Host) {
   /** The session the rules were last handed to a prompt in, while that prompt may still wait to enter. */
   let handedTo: string | null = null;
 
-  async function keyOf(): Promise<{ key: string; session: SessionNames; hasTools: boolean }> {
+  type Key = { key: string; session: SessionNames; hasTools: boolean };
+
+  async function keyOf(): Promise<Key> {
     const [session, hasTools] = await Promise.all([sessionOf(host), host.canCallTools().catch(() => false)]);
     return { key: `${session.sessionId}\n${session.cwd}\n${session.agent}\n${hasTools}`, session, hasTools };
   }
 
+  /**
+   * The key of one check, worked out at most once and only when the check
+   * needs it. Each time costs a permission check of each tool, which in auto
+   * mode can go to the classifier, and a failed one in the middle of a check
+   * would give it two keys.
+   */
+  function keyOnce(): () => Promise<Key> {
+    let found: Promise<Key> | null = null;
+    return () => (found ??= keyOf());
+  }
+
   /** The rules for the session as it is now; empty when the CLI cannot give them, which the next call tries again. */
-  async function rules(): Promise<string> {
-    const { key, session, hasTools } = await keyOf();
+  async function rules(currentKey: () => Promise<Key> = keyOnce()): Promise<string> {
+    const { key, session, hasTools } = await currentKey();
     if (made?.key !== key) {
       /**
        * The variant that writes and reads through this mod's tools, rather than
@@ -94,15 +107,16 @@ export function rulesKeeper(host: Host) {
   }
 
   /** Whether the conversation holds the rules, or a prompt that carries them waits to enter it. */
-  async function isGiven(): Promise<boolean> {
-    if (handedTo !== null && handedTo === (await keyOf()).key) return true;
+  async function isGiven(currentKey: () => Promise<Key>): Promise<boolean> {
+    if (handedTo !== null && handedTo === (await currentKey()).key) return true;
     return host.conversationHas(RULES_MARK);
   }
 
   function deliver(): Promise<RulesOutcome> {
     return exclusive(async () => {
-      if (await isGiven()) return 'present';
-      const text = await rules();
+      const currentKey = keyOnce();
+      if (await isGiven(currentKey)) return 'present';
+      const text = await rules(currentKey);
       if (text === '') return 'none';
       await host.appendNote(`${RULES_MARK}\n${text}`);
       return 'delivered';
@@ -112,10 +126,11 @@ export function rulesKeeper(host: Host) {
   /** The rules as a block of context for the prompt being submitted, marked, or null when they are given already or the CLI gives none. */
   function forPrompt(): Promise<string | null> {
     return exclusive(async () => {
-      if (await isGiven()) return null;
-      const text = await rules();
+      const currentKey = keyOnce();
+      if (await isGiven(currentKey)) return null;
+      const text = await rules(currentKey);
       if (text === '') return null;
-      handedTo = (await keyOf()).key;
+      handedTo = (await currentKey()).key;
       return `${RULES_MARK}\n${text}`;
     });
   }

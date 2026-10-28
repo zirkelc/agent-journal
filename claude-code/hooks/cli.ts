@@ -58,6 +58,9 @@ export const MAX_LIMIT = 200;
 /** The most characters of one CLI answer handed on, for the same reason. */
 export const MAX_OUTPUT = 40_000;
 
+/** The most characters of a summary, as the CLI counts them. */
+const MAX_SUMMARY = 200;
+
 /** Whether a string is an entry id, the file name without `.md`. */
 export const isEntryId = (value: string): boolean => ID.test(value);
 
@@ -97,9 +100,12 @@ function filterArgs(filters: Filters): Array<string> {
 }
 
 /** The page flags: the limit, within the cap, and the offset when there is one. */
+/** The offset as the CLI gets it: a whole number, never below 0. A note that names the next offset counts from this one too. */
+export const offsetOf = (filters: Filters): number => Math.max(Math.trunc(filters.offset ?? 0), 0);
+
 function pageArgs(filters: Filters, maxLimit: number): Array<string> {
   const args = ['--limit', String(Math.min(Math.max(Math.trunc(filters.limit ?? DEFAULT_LIMIT), 1), maxLimit))];
-  const offset = Math.max(Math.trunc(filters.offset ?? 0), 0);
+  const offset = offsetOf(filters);
   if (offset > 0) args.push('--offset', String(offset));
   return args;
 }
@@ -129,8 +135,8 @@ export const isPeriod = (value: string): boolean => PERIOD.test(value.trim());
 
 /**
  * `read` for `latest`, one or more entry ids (each whole or a prefix that
- * matches one entry), or one period. A period also takes the project and a
- * page.
+ * matches one entry), or one period. Only a period takes the filters and a
+ * page: the CLI refuses them with anything else, so they are left out there.
  */
 export function readArgs(which: ReadonlyArray<string>, filters: Filters = {}): Array<string> {
   if (which.length === 0) {
@@ -138,9 +144,11 @@ export function readArgs(which: ReadonlyArray<string>, filters: Filters = {}): A
       'which is missing. The read tool takes which, a list: ["latest"], one or more entry ids, or one period such as ["2026-10"]. A period also takes project, cwd, host, user, agent, limit and offset.',
     );
   }
-  const args = ['read', ...which.map((item) => plain('which', item)), ...scopeArgs(filters)];
+  const args = ['read', ...which.map((item) => plain('which', item))];
+  if (which.length !== 1 || !isPeriod(which[0]!)) return args;
+  args.push(...scopeArgs(filters));
   if (filters.limit !== undefined) args.push('--limit', String(Math.max(Math.trunc(filters.limit), 1)));
-  const offset = Math.max(Math.trunc(filters.offset ?? 0), 0);
+  const offset = offsetOf(filters);
   if (offset > 0) args.push('--offset', String(offset));
   return args;
 }
@@ -179,7 +187,11 @@ export function writeArgs(
   agent: string | undefined,
 ): Array<string> {
   const line = summary.trim();
+  /** The CLI refuses these too, but only after it keeps a draft folder for each, and a model that retries makes many. */
   if (line === '') throw new InputError('summary is empty');
+  const length = [...line].length;
+  if (length > MAX_SUMMARY) throw new InputError(`summary is ${length} characters, and the limit is ${MAX_SUMMARY}`);
+  if (/["\n\r]/.test(line)) throw new InputError('summary cannot contain a double quote or a newline');
   return ['write', `--summary=${line}`, `--body=${body.trim()}`, ...sessionArgs(cwd, sessionId, agent), '--no-sync'];
 }
 

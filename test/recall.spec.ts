@@ -699,7 +699,21 @@ describe('the current project', () => {
     const result = fails(store, ['list', '--project', '.'], { at: store.home });
 
     // Assert
-    expect(result.status).toBe(1);
+    /** A refusal of the input, as other refusals are: 1 from read means only that nothing matches. */
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('not in a repository');
+  });
+
+  test(`should refuse a period with the current project outside a repository, and not read it as no match`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, REPO_ENTRIES);
+
+    // Act
+    const result = fails(store, ['read', '2026', '--project', '.'], { at: store.home });
+
+    // Assert
+    expect(result.status).toBe(2);
     expect(result.stderr).toContain('not in a repository');
   });
 
