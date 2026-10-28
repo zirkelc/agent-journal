@@ -72,7 +72,7 @@ describe('install.sh', () => {
     for (const name of ['agent-journal', 'aj']) {
       const link = join(installed.binDir, name);
       expect(lstatSync(link).isSymbolicLink()).toBe(true);
-      expect(realpathSync(link)).toBe(join(installed.dataDir, 'bin', 'agent-journal'));
+      expect(realpathSync(link)).toBe(join(installed.dataDir, 'shared', 'bin', 'agent-journal'));
     }
   });
 
@@ -208,7 +208,7 @@ describe('install.sh', () => {
 
     // Assert
     expect(again).toContain('are linked into');
-    expect(realpathSync(join(installed.binDir, 'aj'))).toBe(join(installed.dataDir, 'bin', 'agent-journal'));
+    expect(realpathSync(join(installed.binDir, 'aj'))).toBe(join(installed.dataDir, 'shared', 'bin', 'agent-journal'));
   });
 });
 

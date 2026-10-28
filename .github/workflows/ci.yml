@@ -48,7 +48,7 @@ jobs:
       - name: Parse with dash
         run: |
           # Two ways in, so the list cannot go stale: by shebang, which is what
-          # catches bin/agent-journal, since it has no extension and is the one
+          # catches shared/bin/agent-journal, since it has no extension and is the one
           # that matters most; and by `.sh`, which is what catches the fragments
           # that are sourced rather than run and so carry no shebang.
           scripts=$(git ls-files | while IFS= read -r file; do

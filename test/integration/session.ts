@@ -35,6 +35,6 @@ export function setup(): Setup {
   const journal = join(home, 'journal');
   mkdirSync(work);
   const env = { ...process.env, ...GIT_IDENTITY, ...ISOLATED_ENV, XDG_CONFIG_HOME: join(home, 'config') };
-  execFileSync(join(ROOT, 'bin', 'agent-journal'), ['config', 'set', 'journal_dir', journal], { env });
+  execFileSync(join(ROOT, 'shared', 'bin', 'agent-journal'), ['config', 'set', 'journal_dir', journal], { env });
   return { home, work, journal, env };
 }

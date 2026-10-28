@@ -41,17 +41,11 @@ export const TOOL_WRITE = 'write';
 export const TOOL_PREFIX = `mcp__${PLUGIN}__`;
 
 /**
- * The environment variable that turns the tools off: `off`, `0` or `false`.
- * Without the tools, the model writes and reads the entries as files. The Pi
- * extension reads the same variable, so one setting works for both. The
+ * The switch that turns the tools off, which the Pi extension reads too. The
  * engine takes the name of a variable only as a literal, so the session start
  * writes it out again: the tests set this one, and fail if the two differ.
  */
-export const TOOLS_ENV = 'AGENT_JOURNAL_TOOLS';
-
-/** Whether the journal tools are on for this value of TOOLS_ENV. They are on unless it turns them off. */
-export const isToolsOn = (value: string | undefined): boolean =>
-  !['off', '0', 'false'].includes(value?.trim().toLowerCase() ?? '');
+export { isToolsOn, TOOLS_ENV } from '../lib/tools.js';
 
 /** A short tool name as the model calls it. */
 export const toolName = (name: string): string => `${TOOL_PREFIX}${name}`;

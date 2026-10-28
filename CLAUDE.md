@@ -10,7 +10,7 @@ After each change, run `pnpm test`, `pnpm lint` and `pnpm format:check`. Run `pn
 
 The tests do not show what a model does with the rules and the tools. After a change to the CLI, the templates or an adapter, test it in a live session of the harness that the change is for.
 
-1. Update the plugin folders. Each adapter carries its own copy of `bin/` and `templates/`, and `pnpm sync` makes the copies from the staged files, not from the working tree. So stage the changed shared files first, then run `pnpm sync`.
+1. Update the plugin folders. The shared files are in `shared/`: the CLI in `shared/bin/`, the templates in `shared/templates/`, and the TypeScript of the journal tools in `shared/lib/`. Each adapter carries its own copy of the CLI (as `scripts/`) and the templates, and Claude Code and Pi also of `lib/`. `pnpm sync` makes the copies from the staged files, not from the working tree. So stage the changed shared files first, then run `pnpm sync`.
 
 2. Use a temporary journal. The real journal can sync with git, and a test entry must not get there. Make a temporary config folder whose `agent-journal/config` has only `journal_dir=<a temporary folder>`, and start the harness with `XDG_CONFIG_HOME` set to that config folder. Without a `sync` key, the test journal does not sync. This also hides the other configs in `~/.config` (for example `git/` and `gh/`) from that session. Give the temporary folders a short, plain path (for example from `mktemp -d`). A model can copy a long path wrong, for example a path with `-Users-name-Developer-` in it, and then the test shows that error instead of the change.
 

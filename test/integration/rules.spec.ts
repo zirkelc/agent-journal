@@ -166,7 +166,7 @@ describe('the rules in a real session', () => {
       const session = setup();
       const remote = join(session.home, 'remote.git');
       execFileSync('git', ['init', '-q', '--bare', remote]);
-      execFileSync(join(ROOT, 'bin', 'agent-journal'), ['sync', 'init', remote], {
+      execFileSync(join(ROOT, 'shared', 'bin', 'agent-journal'), ['sync', 'init', remote], {
         env: session.env,
         stdio: 'ignore',
       });

@@ -32,7 +32,7 @@ Everything stays between you and your model.
 
 ## How
 
-At the start of a session, the plugin injects [`INSTRUCTIONS.md`](templates/INSTRUCTIONS.md) into the context. It contains the journalling rules and the resolved values for your current project, working directory, agent and session.
+At the start of a session, the plugin injects [`INSTRUCTIONS.md`](shared/templates/INSTRUCTIONS.md) into the context. It contains the journalling rules and the resolved values for your current project, working directory, agent and session.
 
 The model then records each important event in a new markdown file. It does this without being asked and without interrupting you.
 

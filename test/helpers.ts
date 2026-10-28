@@ -88,23 +88,20 @@ export function fixture(instructions?: string): Fixture {
 
   mkdirSync(join(root, 'scripts'), { recursive: true });
   mkdirSync(join(home, 'tmp'));
-  copyFileSync(join(ROOT, 'bin', 'agent-journal'), bin);
+  copyFileSync(join(ROOT, 'shared', 'bin', 'agent-journal'), bin);
 
   /**
-   * The Codex helpers and the `install` command are reached from the plugin root, so
-   * a fixture that omits them is a fixture where those paths silently do
-   * nothing. They are copied rather than symlinked so a case is free to replace
-   * one.
+   * The Codex helpers are reached from the plugin root, so a fixture that omits
+   * them is a fixture where those paths silently do nothing. They are copied
+   * rather than symlinked so a case is free to replace one.
    */
   copyFileSync(join(ROOT, 'codex', 'hook-json.sh'), join(root, 'hook-json.sh'));
-  mkdirSync(join(root, 'lib'), { recursive: true });
-  copyFileSync(join(ROOT, 'lib', 'install.sh'), join(root, 'lib', 'install.sh'));
   mkdirSync(join(root, 'templates'), { recursive: true });
   writeFileSync(
     join(root, 'templates', 'INSTRUCTIONS.md'),
-    instructions ?? readFileSync(join(ROOT, 'templates', 'INSTRUCTIONS.md'), 'utf8'),
+    instructions ?? readFileSync(join(ROOT, 'shared', 'templates', 'INSTRUCTIONS.md'), 'utf8'),
   );
-  copyFileSync(join(ROOT, 'templates', 'RECALL.md'), join(root, 'templates', 'RECALL.md'));
+  copyFileSync(join(ROOT, 'shared', 'templates', 'RECALL.md'), join(root, 'templates', 'RECALL.md'));
 
   mkdirSync(repo, { recursive: true });
   execFileSync('git', ['init', '-q', repo]);
