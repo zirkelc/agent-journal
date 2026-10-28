@@ -2,7 +2,7 @@
 
 This eval compares two ways for an agent to use the journal:
 
-- **tools**: the agent writes and reads the journal with the journal's own tools (in Pi `journal_write`, `journal_list` and `journal_read`, in Claude Code `write`, `list` and `read` of the plugin).
+- **tools**: the agent writes and reads the journal with the journal's own tools (in Pi `agent_journal_write`, `agent_journal_list` and `agent_journal_read`, in Claude Code `write`, `list` and `read` of the plugin).
 - **files**: the agent writes each entry as a file and reads the journal with its usual tools, such as `ls`, `grep`, `cat` and a file read.
 
 The dataset and the grader do not depend on an agent. A runner for one agent starts the sessions and gives the grader what each session left behind. The Pi runner is in [`pi/`](pi/), the Claude Code runner in [`claude-code/`](claude-code/), and what both share in [`runner.ts`](runner.ts).

@@ -39,7 +39,7 @@ import {
 export const CLI = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'agent-journal');
 
 /** What each tool name starts with. The rules name the tools with it. */
-export const TOOL_PREFIX = 'journal_';
+export const TOOL_PREFIX = 'agent_journal_';
 export const TOOL_WRITE = `${TOOL_PREFIX}write`;
 export const TOOL_LIST = `${TOOL_PREFIX}list`;
 export const TOOL_READ = `${TOOL_PREFIX}read`;

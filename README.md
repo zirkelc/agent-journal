@@ -179,7 +179,7 @@ Install the package from npm:
 pi install npm:pi-agent-journal
 ```
 
-Then open a new session and ask Pi to write a journal entry. By default, it writes to the directory `~/agent-journal/`. In Pi, the model reads and writes the journal with three tools of its own (`journal_list`, `journal_read` and `journal_write`). Pi does not ask for approval before a tool call, so there is no permission step.
+Then open a new session and ask Pi to write a journal entry. By default, it writes to the directory `~/agent-journal/`. In Pi, the model reads and writes the journal with three tools of its own (`agent_journal_list`, `agent_journal_read` and `agent_journal_write`). Pi does not ask for approval before a tool call, so there is no permission step.
 
 For more information on the tools and hooks, and what it runs, reads and sends, see the [Pi package README](pi/README.md).
 

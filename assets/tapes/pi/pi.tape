@@ -1,6 +1,6 @@
 # The Pi image of the README: the same take as ../claude-code/claude-code.tape, in Pi and
 # without the pane. Pi changes retry() and writes a journal entry with its
-# journal_write tool. Then Pi quits, a new session starts, and Pi answers a
+# agent_journal_write tool. Then Pi quits, a new session starts, and Pi answers a
 # question about an older decision from the journal.
 Output out/pi-raw.mp4
 Source .theme.tape
