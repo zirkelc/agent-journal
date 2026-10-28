@@ -67,7 +67,7 @@ if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
   dim=$(printf '\033[2m')
   reset=$(printf '\033[0m')
   # Decoration, so a log file gets the sentence alone rather than a glyph nothing
-  # coloured. The per-agent marks live with the agents, in `lib/install.sh`.
+  # coloured. The per-agent marks live with the agents, in the `install` command of the CLI.
   tick=$(printf '\033[32m✔\033[0m ')
 else
   cyan=
@@ -101,14 +101,14 @@ fi
 # ---------------------------------------------------------------- fetch
 
 if [ -n "$source_dir" ]; then
-  [ -f "$source_dir/bin/agent-journal" ] || {
+  [ -f "$source_dir/shared/bin/agent-journal" ] || {
     echo "no agent-journal checkout at $source_dir" >&2
     exit 1
   }
   mkdir -p "$data_dir"
   # Named rather than copied wholesale, so a developer's node_modules and .git
   # do not become part of an install.
-  for item in bin lib templates claude-code codex pi mods .agents README.md LICENSE; do
+  for item in shared claude-code codex pi mods .agents README.md LICENSE; do
     [ -e "$source_dir/$item" ] || continue
     cp -R "$source_dir/$item" "$data_dir/"
   done
@@ -126,15 +126,15 @@ else
   curl -fsSL "$TARBALL_URL" | tar xz -C "$data_dir" --strip-components=1
 fi
 
-chmod +x "$data_dir/bin/agent-journal"
+chmod +x "$data_dir/shared/bin/agent-journal"
 
 # ---------------------------------------------------------------- link
 
 mkdir -p "$bin_dir"
-ln -sf "$data_dir/bin/agent-journal" "$bin_dir/agent-journal"
-ln -sf "$data_dir/bin/agent-journal" "$bin_dir/aj"
+ln -sf "$data_dir/shared/bin/agent-journal" "$bin_dir/agent-journal"
+ln -sf "$data_dir/shared/bin/agent-journal" "$bin_dir/aj"
 
-installed=$data_dir/bin/agent-journal
+installed=$data_dir/shared/bin/agent-journal
 
 # An existing setting is never changed by installing, and wins over `--dir`.
 # One config file serves every agent on the machine and every entry already

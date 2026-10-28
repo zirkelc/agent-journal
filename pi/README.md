@@ -5,9 +5,9 @@
   <img src="https://raw.githubusercontent.com/zirkelc/agent-journal/main/assets/pi-session-light.gif" alt="Pi changes a function and writes a journal entry with its journal_write tool. Then a new Pi session finds an older entry with journal_list and journal_read, and answers why an older decision was made" />
 </picture>
 
-[Agent Journal](https://github.com/zirkelc/agent-journal) is a journal that your agent writes itself: one small markdown file for each milestone, written while the work happens, in a format that is easy to read and to search with `grep`. This package is the extension for [Pi](https://pi.dev). It gives each session three tools that write and read the journal, and the rules for using them. It syncs the journal with git when you turn sync on.
+[Agent Journal](https://github.com/zirkelc/agent-journal) is a journal that your agent writes itself: one small markdown file for each milestone, written while the work happens, in a format that is easy to read and to search with `grep`. This package is the extension for [Pi](https://pi.dev). It gives each session three tools that read and write the journal, and the rules for using them. It syncs the journal with git when you turn sync on.
 
-> **More information:** this page describes only the Pi extension. For the entry format, the configuration, git sync and the CLI, see the [main README](https://github.com/zirkelc/agent-journal#readme).
+> This page describes only the Pi extension. For the entry format, the configuration, git sync and the CLI, see the [main README](https://github.com/zirkelc/agent-journal#readme).
 
 ## Install
 
@@ -31,21 +31,19 @@ Then restart Pi or run `/reload` to load the new version.
 
 | Tool            | What it does                                                                                                                                                                   |
 | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `journal_write` | Writes one new entry from a `summary` and a `body`, and answers with the entry's ID.                                                                                           |
-| `journal_list`  | Lists entries, one line each with ID, project and summary. With `terms`, it searches the summaries and bodies, and adds the body line that matched. With `by`, it counts them. |
-| `journal_read`  | Gives entries in full: the latest, one or more by ID, or every entry of a day, a month or a year.                                                                              |
+| `agent_journal_list`  | Lists entries, one line each with ID, project and summary. With `terms`, it searches the summaries and bodies, and adds the body line that matched. With `by`, it counts them. |
+| `agent_journal_read`  | Gives entries in full: the latest, one or more by ID, or every entry of a day, a month or a year.                                                                              |
+| `agent_journal_write` | Writes one new entry from a `summary` and a `body`, and answers with the entry's ID.                                                                                           |
 
-The model gives only the summary and the body. `journal_write` sets the other fields itself: the date from the clock, the project and the directory from the session's working directory, the host, the user, the agent with its model (for example `pi/claude-opus-5-5`) and the session ID.
+`agent_journal_list` takes the same filters as [`aj list`](https://github.com/zirkelc/agent-journal/blob/main/docs/cli.md#aj-list): `date`, `since`, `until`, `project`, `cwd`, `host`, `user`, `agent`, `limit` and `offset`. Each search term is an extended regex that ignores case, and an entry must match every term. `fixed` reads the terms as plain text. The tool gives 50 entries when the model does not set `limit`, and 200 at most. When the limit leaves older matches out, the last line says which `offset` gives them. With `by` (`project`, `date`, `host`, `user` or `agent`), it lists no entries but counts every match for each value of that field, with a total, as `aj list --by` does. It then takes no `limit` or `offset`.
 
-`journal_list` takes the same filters as [`aj list`](https://github.com/zirkelc/agent-journal/blob/main/docs/cli.md#aj-list): `date`, `since`, `until`, `project`, `cwd`, `host`, `user`, `agent`, `limit` and `offset`. Each search term is an extended regex that ignores case, and an entry must match every term. `fixed` reads the terms as plain text. The tool gives 50 entries when the model does not set `limit`, and 200 at most. When the limit leaves older matches out, the last line says which `offset` gives them. With `by` (`project`, `date`, `host`, `user` or `agent`), it lists no entries but counts every match for each value of that field, with a total, as `aj list --by` does. It then takes no `limit` or `offset`.
+`agent_journal_read` takes `latest`, IDs, or one period (`today`, `yesterday`, `2026`, `2026-10` or `2026-10-22`), as [`aj read`](https://github.com/zirkelc/agent-journal/blob/main/docs/cli.md#aj-read) does. For a period, it also takes `project`, `cwd`, `host`, `user`, `agent`, `limit` and `offset`, and the last line names the `offset` that gives the older entries. A tool result holds at most 40,000 characters. When the entries of a period are longer, `agent_journal_read` gives their summaries instead, and the model reads the ones it needs by ID. The extension cuts any other result that is longer, with a note that tells the model to narrow the filters.
 
-`journal_read` takes `latest`, IDs, or one period (`today`, `yesterday`, `2026`, `2026-10` or `2026-10-22`), as [`aj read`](https://github.com/zirkelc/agent-journal/blob/main/docs/cli.md#aj-read) does. For a period, it also takes `project`, `cwd`, `host`, `user`, `agent`, `limit` and `offset`, and the last line names the `offset` that gives the older entries. A tool result holds at most 40,000 characters. When the entries of a period are longer, `journal_read` gives their summaries instead, and the model reads the ones it needs by ID.
-
-A result longer than 40,000 characters is cut, with a note that tells the model to narrow the filters.
+The model gives only the summary and the body. `agent_journal_write` sets the other fields itself: the date from the clock, the project and the directory from the session's working directory, the host, the user, the agent with its model (for example `pi/claude-opus-5-5`) and the session ID.
 
 ## Permissions
 
-Pi does not ask for approval before a tool call, so the tools run without a prompt. If you use a permission extension, it can decide from the tools' annotations: the three read tools are read-only, and `journal_write` is not read-only, not destructive (it only adds a file) and does not reach the network.
+Pi does not ask for approval before a tool call, so the tools run without a prompt. If you use a permission extension, it can decide from the tools' annotations: `agent_journal_list` and `agent_journal_read` are read-only, and `agent_journal_write` is not read-only, not destructive (it only adds a file) and does not reach the network.
 
 ## Rules
 
@@ -57,15 +55,15 @@ The tools read the config each time they run, so a new `journal_dir` takes effec
 
 ## Git sync
 
-When sync is on (see [Git sync](https://github.com/zirkelc/agent-journal#git-sync) for the setup), the extension runs a sync when the session starts and after each entry that `journal_write` makes. The sync at the start pulls the entries of your other machines. These syncs run in the background, so the session and the turn do not wait for the network. A session without a UI, for example a subagent in print mode, does not sync at the start.
+When sync is on (see [Git sync](https://github.com/zirkelc/agent-journal#git-sync) for the setup), the extension runs a sync when the session starts and after each entry that `agent_journal_write` makes. The sync at the start pulls the entries of your other machines. These syncs run in the background, so the session and the turn do not wait for the network. A session without a UI, for example a subagent in print mode, does not sync at the start.
 
-When the session ends, the extension runs one more sync, also for entries that were written another way, for example with `bash`. The exit waits for this sync for at most 5 seconds. A push that it stops is made by the next sync.
+When the session ends, the extension runs one more sync, also for entries that were written another way, for example with `bash`. The exit waits for this sync for at most 5 seconds. When the exit stops a push, the next sync makes it.
 
 When a sync fails, the footer shows `journal sync failed:` and the reason. The next sync that does not fail removes it.
 
 ## What the extension runs, reads and sends
 
-- **Programs:** The extension runs one program, its own [`scripts/agent-journal`](https://github.com/zirkelc/agent-journal/blob/main/pi/scripts/agent-journal). This is a readable POSIX shell script, not a compiled program. The extension finds it in its own package and never runs an `agent-journal` from your `PATH`. The extension runs the script with one of these subcommands:
+- **Programs.** The extension runs one program, its own [`scripts/agent-journal`](https://github.com/zirkelc/agent-journal/blob/main/pi/scripts/agent-journal). This is a readable POSIX shell script, not a compiled program. The extension finds it in its own package and never runs an `agent-journal` from your `PATH`. The extension runs the script with one of these subcommands:
   - `context` makes the journal rules for the session.
   - `config` reads the settings.
   - `write`, `list` and `read` do the work of the three tools.
@@ -73,7 +71,7 @@ When a sync fails, the footer shows `journal sync failed:` and the reason. The n
 
   The script uses standard shell tools (such as `awk`, `grep` and `ls`) and `git`. It runs `git rev-parse` to find the project of a directory.
 
-- **Reads:** The extension does not read the conversation. It reads the session ID, the working directory and the model ID from Pi. Through the script, it reads `~/.config/agent-journal/config` and the journal folder.
-- **Sends:** The extension sends no text from the conversation anywhere. The rules go into your own session's system prompt. Entries leave your machine only through git sync, to the remote that you set. Git sync is off until you turn it on.
-- **Hooks:** The extension watches no tool call and changes no tool result.
-- **Tools and commands:** The extension registers the three journal tools, or none when they are turned off, and no command. A tool gets only the parameters that the model gives it.
+- **Reads.** The extension does not read the conversation. It reads the session ID, the working directory and the model ID from Pi. Through the script, it reads `~/.config/agent-journal/config` and the journal folder.
+- **Sends.** The extension sends no text from the conversation anywhere. The rules go into your own session's system prompt. Entries leave your machine only through git sync, to the remote that you set. Git sync is off until you turn it on.
+- **Hooks.** The extension watches no tool call and changes no tool result.
+- **Tools and commands.** The extension registers the three journal tools, or none when they are turned off, and no command. A tool gets only the parameters that the model gives it.

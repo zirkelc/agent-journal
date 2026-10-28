@@ -85,8 +85,8 @@ EOF2
 # The journal: the sample entries, and demo values for the machine and the account.
 mkdir -p "$DEMO_HOME/agent-journal"
 cp -p "$TAPES"/fixture/agent-journal/*.md "$DEMO_HOME/agent-journal/"
-HOME="$DEMO_HOME" "$REPO/bin/agent-journal" config set host macbook >/dev/null
-HOME="$DEMO_HOME" "$REPO/bin/agent-journal" config set user chris >/dev/null
+HOME="$DEMO_HOME" "$REPO/shared/bin/agent-journal" config set host macbook >/dev/null
+HOME="$DEMO_HOME" "$REPO/shared/bin/agent-journal" config set user chris >/dev/null
 
 # The sample repository, with one commit so the model sees a clean tree.
 mkdir -p "$LIB"

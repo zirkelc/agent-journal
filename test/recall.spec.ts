@@ -496,7 +496,8 @@ describe('read', () => {
     const bare = fails(store, ['read', '2026-08-11']);
 
     // Assert
-    expect(readme.stderr).toContain('no entry matches');
+    /** README is not the form of an id, so it is refused before any file is looked at. */
+    expect(readme.stderr).toContain('not an entry id: README');
     expect(bare.stderr).toContain('no entry matches');
   });
 
@@ -699,7 +700,21 @@ describe('the current project', () => {
     const result = fails(store, ['list', '--project', '.'], { at: store.home });
 
     // Assert
-    expect(result.status).toBe(1);
+    /** A refusal of the input, as other refusals are: 1 from read means only that nothing matches. */
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('not in a repository');
+  });
+
+  test(`should refuse a period with the current project outside a repository, and not read it as no match`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, REPO_ENTRIES);
+
+    // Act
+    const result = fails(store, ['read', '2026', '--project', '.'], { at: store.home });
+
+    // Assert
+    expect(result.status).toBe(2);
     expect(result.stderr).toContain('not in a repository');
   });
 
@@ -2004,6 +2019,26 @@ describe('a list that is cut', () => {
 });
 
 describe('read with several ids', () => {
+  /** The tools run without a permission check, so an id must never reach a file outside the journal folder. */
+  test.each([['../other/2026'], ['2026/../../other'], ['*'], ['notes']])(
+    `should refuse %s, which is not an entry id, and read nothing`,
+    (id) => {
+      // Arrange
+      const store = fixture();
+      seed(store, TAGGED);
+      const other = join(store.home, 'other');
+      mkdirSync(other, { recursive: true });
+      writeFileSync(join(other, '2026-01-01T000000Z.md'), '---\nsummary: "Outside the journal."\n---\n\nSecret.\n');
+
+      // Act
+      const result = fails(store, ['read', id]);
+
+      // Assert
+      expect(result.status).toBe(2);
+      expect(result.stderr).toBe(`not an entry id: ${id}. An id is a time such as 2026-10-07T142000Z, or a prefix of one\n`);
+    },
+  );
+
   test(`should print each entry in full, in the order given, with one blank line between`, () => {
     // Arrange
     const store = fixture();

@@ -8,13 +8,14 @@ export const COMMAND = 'agent-journal';
 
 /**
  * Whether the pane answers questions about the journal (its Ask view, and
- * `/agent-journal <question>`), with the search agent and its three tools.
+ * `/agent-journal <question>`), with the search agent. The journal's tools
+ * stay registered either way, because the main conversation uses them.
  *
  * Off for now, because the Claude Code plugin directory does not list a mod
  * whose permission hook answers `allow`, and without one the search cannot
  * run in auto mode. The auto mode classifier denies a spawn that no model
  * response asked for, and Claude Code ignores an allow rule for the agent
- * there (it would bypass the classifier). In the other modes the three tools
+ * there (it would bypass the classifier). In the other modes the two tools
  * ask the person each time unless they allow them. The code stays, and a
  * later version may answer from the main conversation or with plain model
  * calls instead of an agent.
@@ -29,16 +30,28 @@ export const COMMAND_DESCRIPTION = IS_ASK_ON
 export const AGENT_NAME = 'search';
 export const AGENT_TYPE = `${PLUGIN}:${AGENT_NAME}`;
 
-/** The tools the search agent reads the journal with, by short name. */
+/** The tools that read the journal, for the main conversation and the search agent, by short name. */
 export const TOOL_LIST = 'list';
-export const TOOL_SEARCH = 'search';
 export const TOOL_READ = 'read';
 
+/** The tool the main conversation writes an entry with, by short name. */
+export const TOOL_WRITE = 'write';
+
+/** What every tool name of the plugin starts with, as the model calls it. */
+export const TOOL_PREFIX = `mcp__${PLUGIN}__`;
+
+/**
+ * The switch that turns the tools off, which the Pi extension reads too. The
+ * engine takes the name of a variable only as a literal, so the session start
+ * writes it out again: the tests set this one, and fail if the two differ.
+ */
+export { isToolsOn, TOOLS_ENV } from '../lib/tools.js';
+
 /** A short tool name as the model calls it. */
-export const toolName = (name: string): string => `mcp__${PLUGIN}__${name}`;
+export const toolName = (name: string): string => `${TOOL_PREFIX}${name}`;
 
 /** Every tool name the search agent may call, and nothing else. */
-export const AGENT_TOOLS: ReadonlyArray<string> = [toolName(TOOL_LIST), toolName(TOOL_SEARCH), toolName(TOOL_READ)];
+export const AGENT_TOOLS: ReadonlyArray<string> = [toolName(TOOL_LIST), toolName(TOOL_READ)];
 
 /** What the agent must never have, whatever it inherits. */
 export const DENIED_TOOLS: ReadonlyArray<string> = ['Write', 'Edit', 'NotebookEdit', 'Bash'];

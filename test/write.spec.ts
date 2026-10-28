@@ -189,7 +189,7 @@ describe('write', () => {
     });
 
     // Assert
-    expect(result.status).toBe(1);
+    expect(result.status).toBe(2);
     expect(result.stderr).toContain('not in a repository');
   });
 
@@ -346,6 +346,25 @@ describe('write', () => {
     // Assert
     expect(result.status).toBe(2);
     expect(result.stderr).toContain('colon');
+  });
+
+  /** dash, /bin/sh on Debian and Ubuntu, and any shell in the C locale count bytes, and the tools count characters. */
+  test(`should count the characters of a summary, not its bytes, in any locale`, () => {
+    // Arrange
+    const store = fixture();
+    const arrows = '\u2192'.repeat(150);
+    const env = { LC_ALL: 'C', LANG: 'C' };
+
+    // Act
+    const written = run(store, ['write', '--summary', arrows, '--body', 'The body.', '--no-sync'], {
+      at: store.repo,
+      env,
+    });
+    const refused = fails(store, ['write', '--summary', '\u2192'.repeat(201)], { at: store.repo, env });
+
+    // Assert
+    expect(written).toMatch(/\.md$/m);
+    expect(refused.stderr).toContain('the summary is 201 characters, and the limit is 200');
   });
 
   test(`should refuse a summary longer than 200 characters`, () => {

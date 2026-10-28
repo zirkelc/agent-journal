@@ -46,6 +46,8 @@ export type Host = {
   sync: Cell<JournalSync>;
   /** Whether a text block of the main conversation, as its next model request reads it, holds this text. */
   conversationHas: (text: string) => Promise<boolean>;
+  /** Whether the person's rules let the model call each of the journal's tools: a deny rule removes a tool from its list. */
+  canCallTools: () => Promise<boolean>;
   /** Adds a row to the main conversation that the model reads and the person does not see as typed. */
   appendNote: (text: string) => Promise<void>;
   /** Draws the pane again, for what changes with time alone. */

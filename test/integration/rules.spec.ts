@@ -1,58 +1,25 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterAll, describe, expect, test } from 'vitest';
-import { RULES_MARK } from '../../claude-code/hooks/names.ts';
-import { GIT_IDENTITY, ROOT, tempDir } from '../helpers.ts';
+import { RULES_MARK, TOOL_WRITE, toolName } from '../../claude-code/hooks/names.ts';
+import { ROOT } from '../helpers.ts';
+import { ISOLATED_ARGS, leftovers, removeLeftovers, SESSION_TIMEOUT_MS, type Setup, setup } from './session.ts';
 
 /**
- * The rules name a file path for a new entry, not a folder, so the question
- * asks for that path as written, and names where it stands. Asked only for
- * "the folder where you are told to write", Haiku answered NONE in about one
- * session of four, with the rules in its context.
+ * In Claude Code the rules name the mod's tool for a new entry, so the question
+ * asks for that name as written, and names where it stands. Asked something
+ * vaguer, such as "the folder where you are told to write", Haiku answered
+ * NONE in about one session of four, with the rules in its context.
  */
 const QUESTION =
-  'Your context holds a standing instruction from agent-journal. Reply with only the file path that its section "Writing an entry" gives, exactly as written, or NONE if there is no such instruction.';
+  'Your context holds a standing instruction from agent-journal. Reply with only the tool name that its section "Writing an entry" gives, exactly as written, or NONE if there is no such instruction.';
 
-/** The path the rules give for a new entry in a journal. */
-const entryPathIn = (journal: string): string => `${journal}/YYYY-MM-DDTHHMMSSZ.md`;
+/** The tool the rules give for a new entry. */
+const WRITE_TOOL = toolName(TOOL_WRITE);
 
-/** How long one session may take, a compaction included. */
-const SESSION_TIMEOUT_MS = 240_000;
-
-/**
- * What keeps a session to this checkout's plugin: no CLAUDE.md, memory, MCP
- * server, or user settings (with their permissions and installed plugins) of
- * the person who runs the suite. Claude Code keeps its own sign-in.
- */
-const ISOLATED_ARGS = ['--setting-sources', 'project,local', '--strict-mcp-config'];
-const ISOLATED_ENV = { CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1', CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' };
-
-/** The folders a run leaves: each setup's temp home, and the transcripts Claude Code filed for it. */
-const leftovers = new Set<string>();
-
-afterAll(() => {
-  for (const path of leftovers) rmSync(path, { recursive: true, force: true });
-});
-
-type Setup = { home: string; work: string; journal: string; env: NodeJS.ProcessEnv };
-
-/**
- * A config of its own pointing at a journal of its own, so a right answer can
- * only come from the rules this checkout made. The session hands the git
- * identity on to the CLI that commits.
- */
-function setup(): Setup {
-  const home = tempDir('it-');
-  leftovers.add(home);
-  const work = join(home, 'work');
-  const journal = join(home, 'journal');
-  mkdirSync(work);
-  const env = { ...process.env, ...GIT_IDENTITY, ...ISOLATED_ENV, XDG_CONFIG_HOME: join(home, 'config') };
-  execFileSync(join(ROOT, 'bin', 'agent-journal'), ['config', 'set', 'journal_dir', journal], { env });
-  return { home, work, journal, env };
-}
+afterAll(removeLeftovers);
 
 type Ran = { result: string; sessionId: string; debug: string };
 
@@ -92,8 +59,8 @@ function claude(setup: Setup, prompt: string, options: { resume?: string; tools?
   return { result: (parsed.result ?? '').trim(), sessionId: parsed.session_id, debug };
 }
 
-/** A path as a model replies with it, without quotes or backticks around it. */
-const pathOf = (reply: string): string => reply.trim().replace(/^[`'"]+|[`'"]+$/g, '');
+/** A name as a model replies with it, without quotes or backticks around it. */
+const nameOf = (reply: string): string => reply.trim().replace(/^[`'"]+|[`'"]+$/g, '');
 
 /** Where Claude Code filed a session's transcript, by the directory it ran in. */
 function transcriptPath(sessionId: string): string {
@@ -160,10 +127,10 @@ describe('the rules in a real session', () => {
 
       // Assert
       const delivery = deliveryOf(first.debug);
-      expect(pathOf(first.result)).toBe(entryPathIn(session.journal));
+      expect(nameOf(first.result)).toBe(WRITE_TOOL);
       expect(afterFirst).toEqual([delivery]);
       expect(afterSecond).toEqual([delivery]);
-      expect(pathOf(compacted.result)).toBe(entryPathIn(session.journal));
+      expect(nameOf(compacted.result)).toBe(WRITE_TOOL);
       expect(afterCompaction).toEqual([delivery, delivery]);
     },
     4 * SESSION_TIMEOUT_MS,
@@ -187,7 +154,7 @@ describe('the rules in a real session', () => {
       const isExpected = process.env.AGENT_JOURNAL_EXPECT_GUARD === 'true';
       expect(isGuarded(ran.debug)).toBe(isExpected);
       expect(ran.debug.includes('agent-journal: prompt.context bypassed')).toBe(isExpected);
-      expect(pathOf(ran.result)).toBe(entryPathIn(session.journal));
+      expect(nameOf(ran.result)).toBe(WRITE_TOOL);
     },
     SESSION_TIMEOUT_MS,
   );
@@ -199,20 +166,27 @@ describe('the rules in a real session', () => {
       const session = setup();
       const remote = join(session.home, 'remote.git');
       execFileSync('git', ['init', '-q', '--bare', remote]);
-      execFileSync(join(ROOT, 'bin', 'agent-journal'), ['sync', 'init', remote], {
+      execFileSync(join(ROOT, 'shared', 'bin', 'agent-journal'), ['sync', 'init', remote], {
         env: session.env,
         stdio: 'ignore',
       });
 
       // Act
-      claude(
+      /** Only the mod's write tool is allowed up front, so a file write or a shell would ask, and fail headless. */
+      const ran = claude(
         session,
         'Write a journal entry, following your journal instructions, with the summary "Integration test of the sync." and the body "Written by the integration test."',
-        /** A rule's path starts with `//` to be absolute: one with a single `/` is relative to the project. */
-        { tools: [`Edit(/${session.journal}/**)`, 'Bash(date:*)'] },
+        { tools: [WRITE_TOOL] },
       );
 
       // Assert
+      const toolUses = transcript(ran.sessionId).flatMap((row) => {
+        const content = (row.message as { content?: unknown } | undefined)?.content;
+        return Array.isArray(content)
+          ? content.filter((block) => block?.type === 'tool_use').map((block) => block.name)
+          : [];
+      });
+      expect(toolUses).toEqual([WRITE_TOOL]);
       const subjects = execFileSync('git', ['-C', remote, 'log', '--branches', '--format=%s'], {
         encoding: 'utf8',
       });

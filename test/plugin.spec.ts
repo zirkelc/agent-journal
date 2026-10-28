@@ -179,16 +179,21 @@ describe.each(COMMAND_AGENTS)('the $name hook command', (agent) => {
 });
 
 /**
- * The files at the root that each plugin folder carries a copy of, and where the
+ * The shared files that each plugin folder carries a copy of, and where the
  * copy goes. The CLI goes to `scripts/`, because Claude Code puts a plugin's
  * `bin/` on the Bash tool's `PATH`, and claude.ai and Cowork refuse to install a
  * plugin that has one.
  */
-const SHARED: Array<{ source: string; copy: string }> = [
-  { source: 'bin', copy: 'scripts' },
-  { source: 'templates', copy: 'templates' },
+const SHARED: Array<{ source: string; copy: string; dirs?: Array<string> }> = [
+  { source: 'shared/bin', copy: 'scripts' },
+  { source: 'shared/templates', copy: 'templates' },
   { source: 'LICENSE', copy: 'LICENSE' },
+  /** The TypeScript of the journal tools, which only Claude Code and Pi have. */
+  { source: 'shared/lib', copy: 'lib', dirs: ['claude-code', 'pi'] },
 ];
+
+/** The shared items that the plugin folder `dir` carries. */
+const sharedOf = (dir: string) => SHARED.filter((item) => !item.dirs || item.dirs.includes(dir));
 
 /** Every file under `item` in `dir`, relative to `item`, or `''` when `item` is a file. */
 function filesUnder(dir: string, item: string): Array<string> {
@@ -202,7 +207,7 @@ function filesUnder(dir: string, item: string): Array<string> {
 
 /** Each shared file at the root, with the path of its copy in `dir`. */
 function sharedPairs(dir: string): Array<{ source: string; copy: string }> {
-  return SHARED.flatMap((item) =>
+  return sharedOf(dir).flatMap((item) =>
     filesUnder('.', item.source).map((rest) => ({
       source: join(item.source, rest),
       copy: join(dir, item.copy, rest),
@@ -290,13 +295,13 @@ describe('the Pi package', () => {
     expect(statSync(join(ROOT, 'pi', 'extensions', 'agent-journal.ts')).isFile()).toBe(true);
   });
 
-  /** npm publishes only the paths in `files`, and the extension runs the CLI and reads the templates. */
-  test(`should publish the extension, the CLI and the templates`, () => {
+  /** npm publishes only the paths in `files`, and the extension runs the CLI, reads the templates and imports the shared code. */
+  test(`should publish the extension, the CLI, the shared code and the templates`, () => {
     // Arrange, Act
     const pkg = read(PI.manifest);
 
     // Assert
-    expect(pkg.files).toEqual(['extensions', 'scripts', 'templates', 'LICENSE', 'README.md']);
+    expect(pkg.files).toEqual(['extensions', 'lib', 'scripts', 'templates', 'LICENSE', 'README.md']);
     for (const path of pkg.files) expect(statSync(join(ROOT, 'pi', path), { throwIfNoEntry: false })).toBeDefined();
   });
 
@@ -346,7 +351,7 @@ describe('the Codex adapter', () => {
 describe('the core the plugin ships', () => {
   test(`should be executable, since the hook runs it directly`, () => {
     // Assert
-    expect(isExecutable(join(ROOT, 'bin', 'agent-journal'))).toBe(true);
+    expect(isExecutable(join(ROOT, 'shared', 'bin', 'agent-journal'))).toBe(true);
     expect(isExecutable(join(ROOT, 'install.sh'))).toBe(true);
   });
 

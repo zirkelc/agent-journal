@@ -267,6 +267,35 @@ describe('the tools', () => {
     expect(text.endsWith('---\n\nThe body.\n')).toBe(true);
   });
 
+  /** The CLI refuses these too, but it keeps a draft folder for each one, and a model that retries makes many. */
+  test.each([['x'.repeat(201)], ['Said "done".'], ['Two\nlines.']])(
+    `should refuse the summary %j before the CLI runs`,
+    async (summary) => {
+      // Arrange
+      const store = fixture();
+      const host = pi(store);
+
+      // Act
+      const result = host.call(TOOL_WRITE, { summary, body: 'The body.' });
+
+      // Assert
+      await expect(result).rejects.toThrow();
+      expect(host.runs.filter((args) => args[0] === 'write').length).toBe(0);
+    },
+  );
+
+  test(`should write a summary of exactly 200 characters`, async () => {
+    // Arrange
+    const store = fixture();
+    const host = pi(store);
+
+    // Act
+    const answer = await host.call(TOOL_WRITE, { summary: 'x'.repeat(200), body: 'The body.' });
+
+    // Assert
+    expect(answer).toMatch(/^Wrote the journal entry \d{4}-\d{2}-\d{2}T\d{6}Z\.$/);
+  });
+
   test(`should fail the call when the CLI refuses the entry`, async () => {
     // Arrange
     const store = fixture();
@@ -562,7 +591,7 @@ describe('the tools', () => {
     const answer = await host.call(TOOL_READ, { which: ['latest'] });
 
     // Assert
-    expect(answer).toBe(`No entries match. no entries in ${store.journalDir}`);
+    expect(answer).toBe(`no entries in ${store.journalDir}`);
   });
 
   test.each([
@@ -585,6 +614,25 @@ describe('the tools', () => {
     await expect(result).rejects.toThrow();
   });
 
+  /** The candidates are on stderr, and the model needs their ids to read the one it means. */
+  test(`should give the candidates when an id prefix matches several entries`, async () => {
+    // Arrange
+    const store = fixture();
+    seed(store, [
+      { stem: '2026-10-10T090000Z', project: 'demo', summary: 'One.' },
+      { stem: '2026-10-10T091500Z', project: 'demo', summary: 'Two.' },
+    ]);
+    const host = pi(store);
+
+    // Act
+    const answer = await host.call(TOOL_READ, { which: ['2026-10-10T09'] });
+
+    // Assert
+    expect(answer).toBe(
+      '2026-10-10T09 matches 2 entries:\n2026-10-10T090000Z\tdemo\tOne.\n2026-10-10T091500Z\tdemo\tTwo.',
+    );
+  });
+
   test(`should read one entry in full`, async () => {
     // Arrange
     const store = fixture();
@@ -593,6 +641,20 @@ describe('the tools', () => {
 
     // Act
     const answer = await host.call(TOOL_READ, { which: ['2026-10-10T090000Z'] });
+
+    // Assert
+    expect(answer).toBe(readFileSync(join(store.journalDir, '2026-10-10T090000Z.md'), 'utf8').trim());
+  });
+
+  /** The filters and the page work only for a period, and the CLI refuses them with ids. */
+  test(`should read an entry by id when the model also gives filters and a page`, async () => {
+    // Arrange
+    const store = fixture();
+    seed(store, [{ stem: '2026-10-10T090000Z', project: 'demo', summary: 'One.', body: 'The whole body.' }]);
+    const host = pi(store);
+
+    // Act
+    const answer = await host.call(TOOL_READ, { which: ['2026-10-10T090000Z'], project: 'demo', limit: 5, offset: 1 });
 
     // Assert
     expect(answer).toBe(readFileSync(join(store.journalDir, '2026-10-10T090000Z.md'), 'utf8').trim());
@@ -679,6 +741,55 @@ describe('the tools', () => {
     expect(answer).not.toContain('xxxx');
   });
 
+  test(`should give the summaries of the page that the call asked for, when that page is too long to read whole`, async () => {
+    // Arrange
+    const store = fixture();
+    /** 30 entries of 5,000 characters each, every half hour from 06:00 UTC on, so 10 of them are too long already. */
+    const stems = Array.from(
+      { length: 30 },
+      (_, index) =>
+        `2026-10-10T${String(6 + Math.floor(index / 2)).padStart(2, '0')}${index % 2 === 0 ? '00' : '30'}00Z`,
+    );
+    seed(
+      store,
+      stems.map((stem, index) => ({ stem, project: 'demo', summary: `Entry ${index}.`, body: 'x'.repeat(5_000) })),
+    );
+    const host = pi(store);
+
+    // Act
+    const answer: string = await host.call(TOOL_READ, { which: ['2026-10-10'], limit: 10, offset: 10 });
+
+    // Assert
+    /** Newest first, the offset skips entries 29 to 20, and the limit keeps 19 to 10. */
+    expect(rows(answer).map((row) => row.summary)).toEqual(
+      Array.from({ length: 10 }, (_, index) => `Entry ${10 + index}.`),
+    );
+  });
+
+  test(`should say how many older entries are left when the summaries of a long period are cut`, async () => {
+    // Arrange
+    const store = fixture();
+    /** 250 entries in September, 10 a day from the 1st to the 25th, too long to read whole. */
+    const stems = Array.from(
+      { length: 250 },
+      (_, index) =>
+        `2026-09-${String(1 + Math.floor(index / 10)).padStart(2, '0')}T${String(8 + (index % 10)).padStart(2, '0')}0000Z`,
+    );
+    seed(
+      store,
+      stems.map((stem, index) => ({ stem, project: 'demo', summary: `Entry ${index}.`, body: 'x'.repeat(300) })),
+    );
+    const host = pi(store);
+
+    // Act
+    const answer: string = await host.call(TOOL_READ, { which: ['2026-09'], limit: 250 });
+
+    // Assert
+    expect(answer.split('\n').at(-1)).toBe(
+      'matches 1 to 200 of 250, counted from the newest. 50 older matches, back to 2026-09-01, are not in this result: call again with offset 200 before you answer about them.',
+    );
+  });
+
   test(`should say so for an entry that does not exist`, async () => {
     // Arrange
     const store = fixture();
@@ -689,20 +800,7 @@ describe('the tools', () => {
     const answer = await host.call(TOOL_READ, { which: ['2020-01-01T000000Z'] });
 
     // Assert
-    expect(answer).toBe('No entries match. no entry matches 2020-01-01T000000Z');
-  });
-
-  test(`should fail the call for ids with a filter, which the CLI refuses`, async () => {
-    // Arrange
-    const store = fixture();
-    seed(store, [{ stem: '2026-10-10T090000Z', project: 'demo', summary: 'One.' }]);
-    const host = pi(store);
-
-    // Act
-    const result = host.call(TOOL_READ, { which: ['2026-10-10T090000Z'], project: 'demo' });
-
-    // Assert
-    await expect(result).rejects.toThrow();
+    expect(answer).toBe('no entry matches 2020-01-01T000000Z');
   });
 });
 

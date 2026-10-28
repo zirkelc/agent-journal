@@ -77,11 +77,11 @@ describe('the variant with tools', () => {
     const store = fixture();
 
     // Act
-    const rules = context(store, { sessionId: 'abc-123', extra: ['--tools', 'journal_'] });
+    const rules = context(store, { sessionId: 'abc-123', extra: ['--tools', 'agent_journal_'] });
 
     // Assert
-    expect(rules).toContain('`journal_write` tool');
-    expect(rules).toContain('- `journal_list` lists entries');
+    expect(rules).toContain('`agent_journal_write` tool');
+    expect(rules).toContain('- `agent_journal_list` lists entries');
     expect(rules).not.toContain('date -u');
     expect(rules).not.toContain('grep');
     expect(rules).not.toContain('<!--');
@@ -95,7 +95,7 @@ describe('the variant with tools', () => {
     const agent = ['--agent', 'claude/claude-opus-5-5'];
 
     // Act
-    const tools = context(store, { ...session, extra: ['--tools', 'journal_', ...agent] });
+    const tools = context(store, { ...session, extra: ['--tools', 'agent_journal_', ...agent] });
     const files = context(store, { ...session, extra: agent });
 
     // Assert
@@ -140,11 +140,34 @@ describe('the variant with tools', () => {
 
     // Act
     const plain = context(store, { env });
-    const tools = context(store, { env, extra: ['--tools', 'journal_'] });
+    const tools = context(store, { env, extra: ['--tools', 'agent_journal_'] });
 
     // Assert
     expect(plain).toContain(`utc_yesterday_since=2026-10-04T22:00:00Z\nutc_yesterday_until=2026-10-05T21:59:59Z\n`);
     expect(tools).not.toContain('utc_yesterday_since');
+  });
+
+  test(`should keep the rules both variants share`, () => {
+    // Arrange
+    const store = fixture();
+
+    // Act
+    const plain = context(store, { sessionId: 'abc-123' });
+    const tools = context(store, { sessionId: 'abc-123', extra: ['--tools', 'agent_journal_'] });
+
+    // Assert
+    for (const shared of [
+      'The following is a standing instruction',
+      '### When to write',
+      '### When NOT to write',
+      'Never write an entry about the entry',
+      'The body is the detail the summary had to leave out',
+      'Never record a secret',
+      'Read the journal when the user asks about past work',
+    ]) {
+      expect(plain).toContain(shared);
+      expect(tools).toContain(shared);
+    }
   });
 
   test(`should not leave two blank lines in a row where a block was`, () => {
@@ -153,7 +176,7 @@ describe('the variant with tools', () => {
 
     // Act
     const plain = context(store);
-    const tools = context(store, { extra: ['--tools', 'journal_'] });
+    const tools = context(store, { extra: ['--tools', 'agent_journal_'] });
 
     // Assert
     expect(plain.includes('\n\n\n')).toBe(false);

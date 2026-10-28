@@ -3,8 +3,26 @@
 /* @jsxFrag Fragment */
 import type { Register, Timer } from 'claude-code';
 import { atom, read, update } from 'claude-code';
-import { AGENT_PROMPT, scopeOf, searchModelOf, TOOL_SPECS } from './agent.js';
-import { capped, entriesOf, InputError, listArgs, readArgs, searchArgs, type Filters } from './cli.js';
+import { AGENT_PROMPT, scopeOf, searchModelOf, TOOL_SPECS, WRITE_SPEC } from './agent.js';
+import {
+  type ByField,
+  capped,
+  entriesOf,
+  fitList,
+  InputError,
+  isCut,
+  isPeriod,
+  listArgs,
+  MAX_LIMIT,
+  MAX_OUTPUT,
+  offsetOf,
+  readArgs,
+  withNote,
+  withOlder,
+  writeArgs,
+  writtenIdOf,
+  type Query,
+} from './cli.js';
 import { ALL_DATES, entryOfText } from './format.js';
 import type { Host } from './host.js';
 import {
@@ -20,6 +38,7 @@ import {
   rulesKeeper,
   endSyncTimeoutOf,
   runCli,
+  sessionOf,
   stepOf,
   syncer,
 } from './journal.js';
@@ -35,7 +54,8 @@ import {
   PANE_TITLE,
   TOOL_LIST,
   TOOL_READ,
-  TOOL_SEARCH,
+  TOOL_WRITE,
+  isToolsOn,
   toolName,
 } from './names.js';
 import type { JournalView } from '../types';
@@ -88,6 +108,28 @@ export const register: Register = (on) => {
 
   const load = (isFresh?: boolean) => loader?.load(isFresh) ?? Promise.resolve();
 
+  /**
+   * A new entry shows in the list without a reload by hand, and is committed
+   * and pushed when sync is on. Several writes in a row do this once, after
+   * the last. The sync runs on its own, so a push never holds up the turn.
+   */
+  function journalWritten(bound: Host, list: ReturnType<typeof listLoader>, syncing: ReturnType<typeof syncer>): void {
+    void list
+      .config()
+      .then(({ isSyncOn }) => {
+        refresh?.cancel();
+        refresh = bound.after(REFRESH_DEBOUNCE_MS, () => {
+          /** A list nobody has opened is left for the pane to load when it opens. */
+          void bound.list
+            .read()
+            .then((shown) => (shown.status === 'idle' ? undefined : list.refresh()))
+            .catch(() => undefined);
+          if (isSyncOn) void syncing.request().catch(() => undefined);
+        });
+      })
+      .catch(() => undefined);
+  }
+
   /** While a question is open, the pane redraws each second, so its elapsed time counts up. */
   function tick(bound: Host): void {
     if (isTicking) return;
@@ -116,6 +158,8 @@ export const register: Register = (on) => {
 
   on('session.start', async ($, e, next) => {
     const started = await next(e);
+    /** Read once, at the start, since the tools are registered then. The engine takes the name only as a literal. */
+    const hasTools = isToolsOn(await $.env.get('AGENT_JOURNAL_TOOLS'));
     host = {
       pluginRoot: $.plugin.root,
       cwd: () => $.session.cwd(),
@@ -171,11 +215,28 @@ export const register: Register = (on) => {
           message.content.some((block) => typeof block.text === 'string' && block.text.includes(text)),
         );
       },
+      canCallTools: async () => {
+        if (!hasTools) return false;
+        /** The engine refuses to check a tool that a deny rule took out of the session. */
+        const verdicts = await Promise.all(
+          [TOOL_WRITE, TOOL_LIST, TOOL_READ].map((name) =>
+            $.tool.check({ tool: toolName(name), input: {} }).catch(() => null),
+          ),
+        );
+        return verdicts.every((verdict) => verdict !== null && verdict.decision !== 'deny');
+      },
       appendNote: async (text) => {
         await $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] } });
       },
       opened: { read: () => read($, openedAtom), update: (change) => update($, openedAtom, change) },
     };
+    /**
+     * The journal's tools, for the main conversation, and the search agent's
+     * too while the pane answers questions. Registered before the rules are
+     * made, which give the variant for the tools only when the session has them.
+     * With the tools turned off, the model writes and reads the entries as files.
+     */
+    if (hasTools) for (const spec of [...TOOL_SPECS, WRITE_SPEC]) await $.tool.register(spec);
     loader = listLoader(host);
     waiter = answerWaiter(host);
     sync = syncer(host);
@@ -198,9 +259,8 @@ export const register: Register = (on) => {
     /** Made now, so the first message does not wait for the CLI. */
     void keeper.prepare().catch(() => undefined);
     currentProject = projectOf(await $.session.repo().catch(() => null));
-    /** The tools and the agent that answer the pane's questions, while it answers any (see IS_ASK_ON). */
+    /** The agent that answers the pane's questions, while it answers any (see IS_ASK_ON). */
     if (IS_ASK_ON) {
-      for (const spec of TOOL_SPECS) await $.tool.register(spec);
       /**
        * The agent type. It runs on the session's model unless a question names
        * another, so the model can change between questions. Its permission mode
@@ -274,51 +334,121 @@ export const register: Register = (on) => {
     return next(e);
   });
 
-  /** The search agent and its tools, while the pane answers questions (see IS_ASK_ON). */
-  if (IS_ASK_ON) {
-    /** The search agent is this mod's own: the main model never sees it. */
-    on('agent.offer', { agent: 'agent-journal:search' }, () => ({ isOffered: false }));
+  /** The search agent is this mod's own: the main model never sees it. It exists only while the pane answers questions (see IS_ASK_ON). */
+  if (IS_ASK_ON) on('agent.offer', { agent: 'agent-journal:search' }, () => ({ isOffered: false }));
 
-    /** The main model may find the journal tools, but they take no room in its prompt. */
-    on('tool.describe', { tool: /^mcp__agent-journal__(list|search|read)$/ }, async ($, e, next) => ({
-      ...(await next(e)),
-      isDeferred: true,
-    }));
+  /**
+   * The main model may find the tools that read the journal, but they take no
+   * room in its prompt: the rules name them, so it loads them by name when it
+   * is asked about past work. Writing is what every session does, so that
+   * tool's schema stays in the prompt.
+   */
+  on('tool.describe', { tool: /^mcp__agent-journal__(list|read|write)$/ }, async ($, e, next) => ({
+    ...(await next(e)),
+    isDeferred: e.tool !== toolName(TOOL_WRITE),
+  }));
 
-    on('tool.call', { tool: /^mcp__agent-journal__(list|search|read)$/ }, async ($, e, next) => {
-      if (!host) return next(e);
-      const input = e as unknown as Record<string, unknown>;
-      const filters: Filters = {
-        since: typeof input.since === 'string' ? input.since : undefined,
-        until: typeof input.until === 'string' ? input.until : undefined,
-        project: typeof input.project === 'string' ? input.project : undefined,
-        limit: typeof input.limit === 'number' ? input.limit : undefined,
-      };
-      let args: Array<string>;
-      try {
-        if (e.tool === toolName(TOOL_LIST)) args = listArgs(filters);
-        else if (e.tool === toolName(TOOL_SEARCH)) args = searchArgs(String(input.text ?? ''), filters);
-        else if (e.tool === toolName(TOOL_READ)) args = readArgs(String(input.id ?? ''));
-        else return { deny: `unknown journal tool ${e.tool}` };
-      } catch (error) {
-        if (error instanceof InputError) return { deny: error.message };
-        throw error;
-      }
-      const ran = await runCli(host, args);
-      const agentId = e.agentId;
-      if (agentId) {
-        const found =
-          ran.exitCode !== 0 ? [] : e.tool === toolName(TOOL_READ) ? entryOfText(ran.stdout) : entriesOf(ran.stdout);
-        await update($, chatAtom, (chat) => {
-          const seen = chat.flatMap((turn) => turn.seen);
-          const step = stepOf(e.tool, input, { isOk: ran.exitCode === 0, entries: found }, seen);
-          return recorded(chat, agentId, step, found);
-        }).catch(() => undefined);
-      }
-      if (ran.exitCode !== 0) return { deny: failureOf(ran) };
-      return { result: capped(ran.stdout) || 'No entries match.' };
-    });
-  }
+  /**
+   * One new entry, for the session as it is now. Only the main conversation
+   * writes the journal, so a subagent's call is refused before the CLI runs.
+   *
+   * The hook answers the call itself, so no permission check runs: only a deny
+   * rule for the tool stops it. Workaround for anthropics/claude-code#104217,
+   * tracked in zirkelc/issues#22. Remove both when the fix is adopted.
+   */
+  on('tool.call', { tool: /^mcp__agent-journal__write$/ }, async ($, e, next) => {
+    if (e.agentId) return { deny: 'Only the main conversation writes journal entries.' };
+    const [bound, list, syncing] = [host, loader, sync];
+    if (!bound || !list || !syncing) return next(e);
+    const input = e as unknown as Record<string, unknown>;
+    const session = await sessionOf(bound);
+    let args: Array<string>;
+    try {
+      const summary = typeof input.summary === 'string' ? input.summary : '';
+      const body = typeof input.body === 'string' ? input.body : '';
+      args = writeArgs(summary, body, session.cwd, session.sessionId, session.agent);
+    } catch (error) {
+      if (error instanceof InputError) return { deny: error.message };
+      throw error;
+    }
+    const ran = await runCli(bound, args);
+    const id = ran.exitCode === 0 ? writtenIdOf(ran.stdout) : undefined;
+    if (!id) return { deny: failureOf(ran) };
+    journalWritten(bound, list, syncing);
+    return { result: id };
+  });
+
+  /** Answered here too, with no permission check: see anthropics/claude-code#104217, tracked in zirkelc/issues#22. */
+  on('tool.call', { tool: /^mcp__agent-journal__(list|read)$/ }, async ($, e, next) => {
+    if (!host) return next(e);
+    const input = e as unknown as Record<string, unknown>;
+    const query = queryOf(input);
+    const isRead = e.tool === toolName(TOOL_READ);
+    const which = isRead ? stringsOf(input.which) : [];
+    let args: Array<string>;
+    try {
+      if (e.tool === toolName(TOOL_LIST)) args = listArgs(query);
+      else if (isRead) args = readArgs(which, query);
+      else return { deny: `unknown journal tool ${e.tool}` };
+    } catch (error) {
+      if (error instanceof InputError) return { deny: error.message };
+      throw error;
+    }
+    const ran = await runCli(host, args);
+    /**
+     * Exit 1 of `read` is an answer: nothing matches, or an id prefix matches
+     * several entries, whose ids the model needs to read the one it means.
+     */
+    const isNoMatch = isRead && ran.exitCode === 1;
+    const isOk = ran.exitCode === 0 || isNoMatch;
+    /**
+     * The steps of the search agent, for the chat in the pane, only while that
+     * agent exists (see IS_ASK_ON). Every subagent can call these tools, and a
+     * call of an agent without a turn in the chat changes nothing. The step
+     * reads the parsed values, since the model can give a list as a JSON string.
+     */
+    const agentId = e.agentId;
+    if (IS_ASK_ON && agentId) {
+      const found = ran.exitCode !== 0 ? [] : isRead ? entryOfText(ran.stdout) : entriesOf(ran.stdout);
+      const parsed = { ...input, which, terms: query.terms };
+      await update($, chatAtom, (chat) => {
+        const seen = chat.flatMap((turn) => turn.seen);
+        const step = stepOf(e.tool, parsed, { isOk, entries: found }, seen);
+        return recorded(chat, agentId, step, found);
+      }).catch(() => undefined);
+    }
+    if (!isOk) return { deny: failureOf(ran) };
+    if (isNoMatch) return { result: capped(ran.stderr.trim() || 'No entries match.') };
+    if (!isRead) {
+      if (query.by) return { result: capped(withNote(ran.stdout, ran.stderr)) };
+      const text = fitList(ran.stdout, ran.stderr, offsetOf(query)) ?? withNote(ran.stdout, ran.stderr);
+      if (!isCut(text)) return { result: capped(text || 'No entries match.') };
+      /** The same filters counted by day, for the note on what the cut left out. */
+      const counted = await runCli(host, listArgs({ ...query, limit: undefined, offset: undefined, by: 'date' }));
+      return { result: capped(counted.exitCode === 0 ? withOlder(text, counted.stdout) : text) };
+    }
+    const text = withNote(ran.stdout, ran.stderr);
+    const period = which.length === 1 && isPeriod(which[0]!) ? which[0]! : undefined;
+    if (!period || text.length <= MAX_OUTPUT) return { result: capped(text) };
+    /** Cut text would lose the last entries without a word, so a long period gives the summaries of the same page instead. */
+    const { project, cwd, host: machine, user, agent, limit, offset } = query;
+    const listed = await runCli(
+      host,
+      listArgs({ date: period, project, cwd, host: machine, user, agent, limit: limit ?? MAX_LIMIT, offset }),
+    );
+    if (listed.exitCode !== 0) return { result: capped(text) };
+    const cut = fitList(listed.stdout, listed.stderr, offsetOf(query)) ?? withNote(listed.stdout, listed.stderr);
+    /** The same period counted by day, for the note on what the cap left out, as a list gives it. */
+    const counted = isCut(cut)
+      ? await runCli(host, listArgs({ date: period, project, cwd, host: machine, user, agent, by: 'date' }))
+      : undefined;
+    const summaries = counted?.exitCode === 0 ? withOlder(cut, counted.stdout) : cut;
+    return {
+      result: capped(
+        `The entries of ${period} are ${text.length} characters, more than one result holds. Their summaries follow; read the ones you need by id.\n${summaries}`,
+      ),
+    };
+  });
 
   on('command.run', { command: 'agent-journal' }, async ($, e, next) => {
     if (!host) return next(e);
@@ -350,11 +480,7 @@ export const register: Register = (on) => {
     });
   }
 
-  /**
-   * A new entry shows in the list without a reload by hand, and is committed
-   * and pushed when sync is on. The sync runs on its own, so a push never holds
-   * up the turn.
-   */
+  /** An entry written as a file, as the person may still ask for, counts as a write to the journal too. */
   on('tool.call', { tool: 'Write' }, async ($, e, next) => {
     const result = await next(e);
     const isRefused = 'deny' in result && Boolean(result.deny);
@@ -363,27 +489,18 @@ export const register: Register = (on) => {
     const path = String(e.file_path);
     void list
       .config()
-      .then(({ journalDir, isSyncOn }) => {
-        if (!journalDir || !path.startsWith(`${journalDir}/`)) return;
-        refresh?.cancel();
-        refresh = bound.after(REFRESH_DEBOUNCE_MS, () => {
-          /** A list nobody has opened is left for the pane to load when it opens. */
-          void bound.list
-            .read()
-            .then((shown) => (shown.status === 'idle' ? undefined : list.refresh()))
-            .catch(() => undefined);
-          if (isSyncOn) void syncing.request().catch(() => undefined);
-        });
+      .then(({ journalDir }) => {
+        if (journalDir && path.startsWith(`${journalDir}/`)) journalWritten(bound, list, syncing);
       })
       .catch(() => undefined);
     return result;
   });
 
   /**
-   * The last chance to commit what was written another way than the Write
-   * tool, or in the moment before the exit. The engine bounds the whole exit,
-   * so the sync gets what is left of that bound; a push it cuts short is made
-   * by the next sync.
+   * The last chance to commit what was written another way than the journal's
+   * tool or the Write tool, or in the moment before the exit. The engine
+   * bounds the whole exit, so the sync gets what is left of that bound; a push
+   * it cuts short is made by the next sync.
    */
   on('session.end', async ($, e, next) => {
     const timeoutMs = sync && loader?.isSyncOn() ? endSyncTimeoutOf(next.budget.remainingMs, sync.isRunning()) : null;
@@ -508,3 +625,45 @@ export const register: Register = (on) => {
 /** The current project's name: the last part of the repository's root, or null outside one. */
 const projectOf = (repo: { root: string } | null): string | null =>
   repo ? (repo.root.split('/').filter(Boolean).pop() ?? null) : null;
+
+/** A tool's input as the query of `list` or the filters of `read`: only the values of the right type count. */
+function queryOf(input: Record<string, unknown>): Query {
+  const text = (value: unknown) => (typeof value === 'string' ? value : undefined);
+  const number = (value: unknown) => (typeof value === 'number' ? value : undefined);
+  return {
+    terms: stringsOf(input.terms),
+    isFixed: input.fixed === true,
+    date: text(input.date),
+    since: text(input.since),
+    until: text(input.until),
+    project: text(input.project),
+    cwd: text(input.cwd),
+    host: text(input.host),
+    user: text(input.user),
+    agent: text(input.agent),
+    limit: number(input.limit),
+    offset: number(input.offset),
+    /** Checked against the fields where the arguments are made. */
+    by: input.by === undefined || input.by === null ? undefined : (String(input.by) as ByField),
+  };
+}
+
+/**
+ * A list of strings from a tool's input. A model sometimes gives a list as one
+ * string, or as the JSON text of a list, so both count as the list.
+ */
+function stringsOf(value: unknown): Array<string> {
+  let items: unknown = value;
+  if (typeof value === 'string' && value.trim().startsWith('[')) {
+    try {
+      items = JSON.parse(value);
+    } catch {
+      items = [value];
+    }
+  }
+  const list = Array.isArray(items) ? items : typeof items === 'string' ? [items] : [];
+  return list
+    .filter((item) => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter((item) => item !== '');
+}

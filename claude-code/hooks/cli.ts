@@ -4,6 +4,21 @@
  * through here.
  */
 
+import { DEFAULT_LIMIT, isPeriod, MAX_LIMIT, summaryProblem } from '../lib/tools.js';
+
+/** The limits and the output of the journal tools, which the Pi extension shares. */
+export {
+  capped,
+  DEFAULT_LIMIT,
+  fitList,
+  isCut,
+  isPeriod,
+  MAX_LIMIT,
+  MAX_OUTPUT,
+  withNote,
+  withOlder,
+} from '../lib/tools.js';
+
 /** One line of `list` down a pipe. */
 export type Entry = {
   id: string;
@@ -13,28 +28,41 @@ export type Entry = {
   line?: string;
 };
 
+/** The fields that `list` can count its matches by. */
+export const BY_FIELDS = ['project', 'date', 'host', 'user', 'agent'] as const;
+export type ByField = (typeof BY_FIELDS)[number];
+
 /** The filters the CLI's query commands take, as the tools and the pane give them. */
 export type Filters = {
-  /** One local year, month or day: `2026`, `2026-10`, `2026-10-07`. */
+  /** One local year, month or day: `2026`, `2026-10`, `2026-10-07`, `today` or `yesterday`. */
   date?: string;
   since?: string;
   until?: string;
   project?: string;
+  /** The directory of the entries and the directories under it. `*` and `?` match within one name of the path. */
+  cwd?: string;
+  /** The machine, the account and the agent or model that wrote the entries, each a glob. */
+  host?: string;
+  user?: string;
+  agent?: string;
   limit?: number;
   /** How many of the most recent matches to skip, for the next page. */
   offset?: number;
+};
+
+/** What `list` looks for: the filters, the search terms, and the field to count the matches by. */
+export type Query = Filters & {
+  /** Each term is a regex that must match one line of the entry. */
+  terms?: ReadonlyArray<string>;
+  /** Whether the terms are plain text rather than regexes. */
+  isFixed?: boolean;
+  by?: ByField;
 };
 
 /** Why a value cannot go to the CLI, as the model or the person reads it. */
 export class InputError extends Error {}
 
 const ID = /^\d{4}-\d{2}-\d{2}T\d{6}Z$/;
-
-/** The most lines a query asks for, so one call cannot fill the agent's context. */
-export const MAX_LIMIT = 200;
-
-/** The most characters of one CLI answer handed on, for the same reason. */
-export const MAX_OUTPUT = 40_000;
 
 /** Whether a string is an entry id, the file name without `.md`. */
 export const isEntryId = (value: string): boolean => ID.test(value);
@@ -50,56 +78,80 @@ function plain(name: string, value: string): string {
   return trimmed;
 }
 
+/** The filters that name who and where, which `read` takes for a period as `list` does, in the order the help lists them. */
+const SCOPE_FILTERS = ['project', 'cwd', 'host', 'user', 'agent'] as const;
+
+/** The flags of the filters that name who and where. */
+function scopeArgs(filters: Filters): Array<string> {
+  return SCOPE_FILTERS.flatMap((name) => {
+    const value = filters[name];
+    return value === undefined ? [] : [`--${name}`, plain(name, value)];
+  });
+}
+
 /**
  * The filter flags, in the order the help lists them. `project` `.` is the
  * project of the directory the CLI runs in, so the caller runs it where the
- * session is; `--cwd` would filter by directory instead.
+ * session is.
  */
-function filterArgs(filters: Filters, maxLimit = MAX_LIMIT): Array<string> {
+function filterArgs(filters: Filters): Array<string> {
   const args: Array<string> = [];
   if (filters.date !== undefined) args.push('--date', plain('date', filters.date));
   if (filters.since !== undefined) args.push('--since', plain('since', filters.since));
   if (filters.until !== undefined) args.push('--until', plain('until', filters.until));
-  if (filters.project !== undefined) args.push('--project', plain('project', filters.project));
-  const limit = Math.min(Math.max(Math.trunc(filters.limit ?? 50), 1), maxLimit);
-  args.push('--limit', String(limit));
-  const offset = Math.max(Math.trunc(filters.offset ?? 0), 0);
+  return [...args, ...scopeArgs(filters)];
+}
+
+/** The offset as the CLI gets it: a whole number, never below 0. A note that names the next offset counts from this one too. */
+export const offsetOf = (filters: Filters): number => Math.max(Math.trunc(filters.offset ?? 0), 0);
+
+/** The page flags: the limit, within the cap, and the offset when there is one. */
+function pageArgs(filters: Filters, maxLimit: number): Array<string> {
+  const args = ['--limit', String(Math.min(Math.max(Math.trunc(filters.limit ?? DEFAULT_LIMIT), 1), maxLimit))];
+  const offset = offsetOf(filters);
   if (offset > 0) args.push('--offset', String(offset));
   return args;
 }
 
 /**
- * `list` with the filters. The agent's lists stay within the cap; the pane,
- * which draws only the rows in view, passes a higher one.
+ * `list` with the terms and the filters. The agent's lists stay within the
+ * cap; the pane, which draws only the rows in view, passes a higher one. A
+ * count reads every match, so it takes no page: the CLI refuses a limit or an
+ * offset with `by`.
  */
-export const listArgs = (filters: Filters, maxLimit = MAX_LIMIT): Array<string> => [
-  'list',
-  ...filterArgs(filters, maxLimit),
-];
-
-/**
- * `list` for one text with the filters. `--fixed`, because the tool looks for
- * the text as it is, and the CLI otherwise reads it as a regex.
- */
-export const searchArgs = (text: string, filters: Filters): Array<string> => [
-  'list',
-  '--fixed',
-  plain('text', text),
-  ...filterArgs(filters),
-];
-
-/**
- * `read` for one entry id. The CLI also takes a shorter prefix, but one that
- * matches several entries is an error there, and `list` with a date gives a
- * day's entries, so only a whole id passes.
- */
-export function readArgs(id: string): Array<string> {
-  const value = id.trim();
-  if (!ID.test(value)) throw new InputError(`not an entry id: ${value}`);
-  return ['read', value];
+export function listArgs(query: Query, maxLimit = MAX_LIMIT): Array<string> {
+  const terms = (query.terms ?? []).map((term) => plain('term', term));
+  const args = ['list', ...terms, ...(query.isFixed ? ['--fixed'] : []), ...filterArgs(query)];
+  if (query.by === undefined) return [...args, ...pageArgs(query, maxLimit)];
+  if (!BY_FIELDS.includes(query.by)) throw new InputError(`by must be one of ${BY_FIELDS.join(', ')}: ${query.by}`);
+  /** The default offset 0 pages nothing, so a count takes it, as Pi does. */
+  if (query.limit !== undefined || (query.offset !== undefined && query.offset !== 0)) {
+    throw new InputError('by counts every match, so leave out limit and offset');
+  }
+  return [...args, '--by', query.by];
 }
 
-/** The flags that name a session to `context`: where it works, its id, and the agent and model in it. */
+/**
+ * `read` for `latest`, one or more entry ids (each whole or a prefix that
+ * matches one entry), or one period. Only a period takes the filters and a
+ * page: the CLI refuses them with anything else, so they are left out there.
+ */
+export function readArgs(which: ReadonlyArray<string>, filters: Filters = {}): Array<string> {
+  if (which.length === 0) {
+    throw new InputError(
+      'which is missing. The read tool takes which, a list: ["latest"], one or more entry ids, or one period such as ["2026-10"]. A period also takes project, cwd, host, user, agent, limit and offset.',
+    );
+  }
+  const args = ['read', ...which.map((item) => plain('which', item))];
+  if (which.length !== 1 || !isPeriod(which[0]!)) return args;
+  args.push(...scopeArgs(filters));
+  if (filters.limit !== undefined) args.push('--limit', String(Math.max(Math.trunc(filters.limit), 1)));
+  const offset = offsetOf(filters);
+  if (offset > 0) args.push('--offset', String(offset));
+  return args;
+}
+
+/** The flags that name a session to `context` and `write`: where it works, its id, and the agent and model in it. */
 function sessionArgs(cwd: string, sessionId: string | undefined, agent: string | undefined): Array<string> {
   const args = ['--cwd', cwd];
   if (sessionId) args.push('--session-id', sessionId);
@@ -107,11 +159,43 @@ function sessionArgs(cwd: string, sessionId: string | undefined, agent: string |
   return args;
 }
 
-/** `context`, the rules for writing the journal, for the session they are given to. */
-export const contextArgs = (cwd: string, sessionId: string | undefined, agent: string | undefined): Array<string> => [
-  'context',
-  ...sessionArgs(cwd, sessionId, agent),
-];
+/**
+ * `context`, the rules for writing the journal, for the session they are given
+ * to. With a tool prefix, the variant that writes and reads through the tools
+ * of that name instead of files.
+ */
+export const contextArgs = (
+  cwd: string,
+  sessionId: string | undefined,
+  agent: string | undefined,
+  toolPrefix?: string,
+): Array<string> => ['context', ...sessionArgs(cwd, sessionId, agent), ...(toolPrefix ? ['--tools', toolPrefix] : [])];
+
+/**
+ * `write` of one entry from its summary and body, for the session that writes
+ * it. The CLI sets the date, the id and the project of the directory itself.
+ * It does not sync: the caller does that on its own, so a push never holds up
+ * the write.
+ */
+export function writeArgs(
+  summary: string,
+  body: string,
+  cwd: string,
+  sessionId: string | undefined,
+  agent: string | undefined,
+): Array<string> {
+  const line = summary.trim();
+  const problem = summaryProblem(line);
+  if (problem) throw new InputError(problem);
+  return ['write', `--summary=${line}`, `--body=${body.trim()}`, ...sessionArgs(cwd, sessionId, agent), '--no-sync'];
+}
+
+/** The id of the entry `write` made, from the path it prints. */
+export function writtenIdOf(stdout: string): string | undefined {
+  const name = stdout.trim().split('\n').at(-1)?.split('/').pop() ?? '';
+  const id = name.replace(/\.md$/, '');
+  return ID.test(id) ? id : undefined;
+}
 
 /** `context --recall`, the text a reader of the journal is given, for the session the question comes from. */
 export const recallArgs = (cwd: string, sessionId: string | undefined, agent: string | undefined): Array<string> => [
@@ -167,9 +251,3 @@ export const sanitize = (text: string): string =>
     .split('\n')
     .map((line) => line.replaceAll('\t', '  ').replace(/[\p{Cc}\p{Cf}]/gu, ''))
     .join('\n');
-
-/** CLI output as a tool hands it on: whole when it fits, cut with a note when not. */
-export function capped(text: string): string {
-  if (text.length <= MAX_OUTPUT) return text;
-  return `${text.slice(0, MAX_OUTPUT)}\n… cut at ${MAX_OUTPUT} characters; narrow the filters to see the rest.`;
-}

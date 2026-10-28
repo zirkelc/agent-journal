@@ -14,6 +14,8 @@ export type Script = {
   list?: string | ((argv: ReadonlyArray<string>) => string);
   read?: string;
   context?: string;
+  /** What `write` prints: the new entry's path. */
+  write?: string;
   /** Whether the config turns sync on, as `config` prints it. */
   isSyncOn?: boolean;
   /** What `sync` prints; off when not given. */
@@ -31,10 +33,18 @@ export type Script = {
   failsOnce?: string;
   /** The exit code of a subcommand that prints its output and still fails, such as a sync whose push failed. */
   exitCodes?: Record<string, number>;
+  /** What a subcommand prints on stderr, such as the note of `list` that names the offset of older matches. */
+  stderr?: Record<string, string>;
   /** The main conversation as its next request reads it: the text of each message. */
   conversation?: Array<string>;
   /** A spawn waits for this before it answers, so a question can stay open while a test asks again. */
   holdSpawn?: Promise<void>;
+  /** A tool that a deny rule took out of the session, so the engine refuses to check it. */
+  removed?: Array<string>;
+  /** What the engine decides for a check of a tool the plugin did not register, such as Agent. */
+  otherVerdict?: 'allow' | 'ask' | 'deny';
+  /** The environment of the session, as the plugin reads it. */
+  env?: Record<string, string>;
   /** Where a path lands once links are followed, or undefined when it does not exist. */
   lands?: (path: string) => string | undefined;
 };
@@ -56,6 +66,7 @@ export function world(on: On, script: Script = {}) {
   const filled: Array<string> = [];
 
   const clock = mock.clock(on, { now: 0 });
+  mock.env(on, script.env ?? {});
   on('session.start', ($, e) => ({ cwd: e.cwd }));
   on('session.end', ($, e) => ({ sessionId: e.sessionId }));
   on('session.cwd', () => ({ value: '/work' }));
@@ -69,6 +80,19 @@ export function world(on: On, script: Script = {}) {
   });
   on('command.register', ($, e) => (registered.commands.push(e.name), { value: { command: e.name } }));
   on('tool.register', ($, e) => (registered.tools.push(e.name), { value: { tool: toolName(e.name) } }));
+  /** The tool of each permission check, in order: in auto mode, a check can go to the classifier. */
+  const checks: Array<string> = [];
+  /**
+   * A registered tool is in the session, so the engine puts a check of it to
+   * the person, as it does without a rule. A tool that a deny rule removed is
+   * not in the session, and the engine refuses to check it.
+   */
+  on('tool.check', ($, e, next) => {
+    checks.push(e.tool);
+    if (script.removed?.includes(e.tool)) throw new Error(`no tool named "${e.tool}" in this session`);
+    if (registered.tools.some((name) => toolName(name) === e.tool)) return { decision: 'ask' };
+    return script.otherVerdict ? { decision: script.otherVerdict } : next(e);
+  });
   on('agent.register', ($, e) => (registered.agents.push(e), { value: { agent: `${PLUGIN}:${e.name}` } }));
   /** Only the engine starts an agent and gives its id, so a spawn answered here never carries one. */
   on('agent.spawn', async ($, e) => {
@@ -143,7 +167,8 @@ export function world(on: On, script: Script = {}) {
           : command === 'list' && typeof script.list === 'function'
             ? script.list(e.argv)
             : (((script as Record<string, unknown>)[command] as string | undefined) ?? '');
-    return { value: { exitCode: script.exitCodes?.[command] ?? 0, stdout, stderr: '' } } as never;
+    const stderr = script.stderr?.[command] ?? '';
+    return { value: { exitCode: script.exitCodes?.[command] ?? 0, stdout, stderr } } as never;
   });
 
   /** The CLI runs a test asks about: every one but the rules and the config read ahead at the session's start. */
@@ -153,6 +178,7 @@ export function world(on: On, script: Script = {}) {
   return {
     runs,
     queries,
+    checks,
     opened,
     spawned,
     registered,

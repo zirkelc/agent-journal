@@ -34,6 +34,8 @@ export type Entry = {
   project?: string;
   /** The working directory, relative to the home directory. */
   dir: string;
+  /** The machine of the session, when it is not the one that the config names. */
+  host?: string;
   agent: string;
   summary: string;
   body: string;
@@ -275,6 +277,17 @@ const KEYS: Array<Entry> = [
     summary: 'Wrote the postmortem for the ingest outage and set the review for Monday.',
     body: 'The postmortem has the timeline, the root cause and 4 actions. The biggest action is to check every cron that a migration turns off.',
   },
+  // The cause of the checkout timeouts is only in the body.
+  {
+    key: 'D1',
+    day: -34,
+    time: '15:20',
+    project: 'billing-api',
+    dir: 'Developer/billing-api',
+    agent: CLAUDE,
+    summary: 'Found why checkout hung under load and fixed it, with one change to the nightly job and one setting.',
+    body: 'The nightly revenue report held a lock on the ledger_snapshots table for up to 4 minutes, and every checkout that wrote a snapshot waited for it. The report reads from the replica now, and checkout has a lock wait timeout of 2 seconds, so it fails fast instead of hanging.',
+  },
 ];
 
 /** The entries of the years before that the cases ask about. */
@@ -391,6 +404,282 @@ const OLD_KEYS: Array<Entry> = [
     summary: 'Fixed the currency rounding of the totals: each line now rounds half to even, as the accountants asked.',
     body: 'The totals were 1 cent off on about 1 in 400 bills, because each line rounded half up and the sum of the lines did not match the tax report. The accountants use half to even, so we do too.',
   },
+  // The cache in front of the blog: the later summary does not name it.
+  {
+    key: 'V1',
+    day: -700,
+    time: '21:15',
+    project: 'blog',
+    dir: 'Developer/blog',
+    agent: 'claude/claude-opus-4-1',
+    summary: 'Put a caching proxy in front of the blog, so that a link from a big site does not take it down again.',
+    body: 'Varnish runs in front of the blog now and keeps each page for 10 minutes. The last spike of visitors from a link took the small server down in under a minute.',
+  },
+  {
+    key: 'V2',
+    day: -385,
+    time: '20:40',
+    project: 'blog',
+    dir: 'Developer/blog',
+    agent: 'claude/claude-opus-4-5',
+    summary: 'Made the hosting of the blog simpler, with one service less to keep running.',
+    body: 'Varnish is gone. The pages are static files now, and Bunny CDN caches them at its edge servers, so the server only builds the pages and uploads them.',
+  },
+  // The database backups of homelab, changed three times, among many entries about the file backups.
+  {
+    key: 'W1',
+    day: -600,
+    time: '22:05',
+    project: 'homelab',
+    dir: 'homelab',
+    agent: 'claude/claude-opus-4-5',
+    summary: 'The database on the home server is backed up continuously now, not once a night.',
+    body: 'WAL-G sends the Postgres write-ahead log to the B2 bucket every minute, so a crash loses at most a minute of data. The nightly file backups stay as they are.',
+  },
+  {
+    key: 'W2',
+    day: -420,
+    time: '19:30',
+    project: 'homelab',
+    dir: 'homelab',
+    agent: 'claude/claude-opus-4-5',
+    summary: 'Back to one database backup a night, because the continuous one cost too much.',
+    body: 'WAL-G uploaded about 40 GB a month, mostly the log of the photo index, and the B2 bill tripled. The database goes into the nightly file backup as a dump again.',
+  },
+  {
+    key: 'W3',
+    day: -95,
+    time: '18:50',
+    project: 'homelab',
+    dir: 'homelab',
+    agent: CLAUDE,
+    summary: 'The continuous database backup is back, now small enough to keep.',
+    body: 'WAL-G again, with compression and one full base backup a week. The photo index moved to its own database without a backup, since it can be built again. The uploads are about 6 GB a month now.',
+  },
+];
+
+/** The entries of the cases about long histories: a first of many, a count, a decision that changed often, a near miss, and another machine. */
+const LONG_KEYS: Array<Entry> = [
+  // The first rate limit of nebula, under about 300 later entries about rate limits.
+  {
+    key: 'R1',
+    day: -1_090,
+    time: '15:10',
+    project: 'nebula',
+    dir: 'Developer/nebula',
+    agent: 'claude/claude-opus-4-1',
+    summary:
+      'Put the first rate limit on the public ingest endpoint: a token bucket per API key, answered with 429 and a Retry-After header.',
+    body: 'Each API key gets 200 requests per second with bursts up to 400, kept in memory on each API node for now. A client over the limit gets 429 with a Retry-After header. One test customer sent 5,000 requests per second during the load test, which is why this came before the importer.',
+  },
+  // The nightly DHL tracking import of acme-dashboard: 6 failures in the last 12 months, 2 before, and 3 entries that are no failure.
+  {
+    key: 'T1',
+    day: -520,
+    time: '08:40',
+    project: 'acme-dashboard',
+    dir: 'Developer/acme-dashboard',
+    agent: 'claude/claude-opus-4-5',
+    summary: 'The nightly DHL tracking import failed, because the DHL sandbox URL was still in the production config.',
+    body: 'Every shipment kept its status from the day before. Fixed the config and ran the import by hand at 09:00.',
+  },
+  {
+    key: 'T2',
+    day: -430,
+    time: '09:15',
+    project: 'acme-dashboard',
+    dir: 'Developer/acme-dashboard',
+    agent: 'claude/claude-opus-4-5',
+    summary: 'The nightly DHL tracking import failed on a full disk of the worker, where the raw responses were kept.',
+    body: 'The worker kept every raw response for debugging. It keeps 3 days now, and the import ran again by hand.',
+  },
+  {
+    key: 'T3',
+    day: -350,
+    time: '08:55',
+    project: 'acme-dashboard',
+    dir: 'Developer/acme-dashboard',
+    agent: 'claude/claude-opus-5',
+    summary:
+      'The nightly DHL tracking import failed: DHL changed the date format of the status field, and every row was rejected.',
+    body: 'The parser now takes both formats. No shipment got a status that night, so support answered tickets from the DHL site.',
+  },
+  {
+    key: 'T4',
+    day: -300,
+    time: '14:20',
+    project: 'acme-dashboard',
+    dir: 'Developer/acme-dashboard',
+    agent: 'claude/claude-opus-5',
+    summary: 'Moved the DHL tracking import from 02:00 to 04:00, so that it no longer runs during the database backup.',
+    body: 'Nothing failed. The import was slow during the backup, and the move makes it about twice as fast.',
+  },
+  {
+    key: 'T5',
+    day: -260,
+    time: '08:35',
+    project: 'acme-dashboard',
+    dir: 'Developer/acme-dashboard',
+    agent: 'claude/claude-opus-5',
+    summary:
+      'The DHL tracking import stopped halfway, because the API key had expired. Renewed the key and ran it again by hand.',
+    body: 'About half of the shipments had no new status until 10:00. The key expires once a year, and a reminder is in the calendar now.',
+  },
+  {
+    key: 'T6',
+    day: -190,
+    time: '09:05',
+    project: 'acme-dashboard',
+    dir: 'Developer/acme-dashboard',
+    agent: 'claude/claude-opus-5',
+    summary:
+      'Shipments showed old DHL statuses in the morning: the nightly import hit the new DHL limit of 5,000 calls a night.',
+    body: 'DHL lowered the limit without notice. The import now asks only for shipments that are not delivered, which is about 3,000 calls.',
+  },
+  {
+    key: 'T7',
+    day: -140,
+    time: '16:30',
+    project: 'acme-dashboard',
+    dir: 'Developer/acme-dashboard',
+    agent: CLAUDE,
+    summary: 'Added backoff to the DHL tracking import, and a test that runs it against recorded DHL responses.',
+    body: 'Nothing failed. The backoff waits 1, 4 and 16 seconds between tries, and the test covers the two date formats.',
+  },
+  {
+    key: 'T8',
+    day: -95,
+    time: '08:50',
+    project: 'acme-dashboard',
+    dir: 'Developer/acme-dashboard',
+    agent: CLAUDE,
+    summary:
+      'The DHL tracking import did not run last night: the cron container was not started again after the deploy.',
+    body: 'The deploy script now starts the cron container too, and an alert fires when the import has not run by 06:00.',
+  },
+  {
+    key: 'T9',
+    day: -45,
+    time: '09:20',
+    project: 'acme-dashboard',
+    dir: 'Developer/acme-dashboard',
+    agent: CLAUDE,
+    summary:
+      'The DHL tracking import failed again, this time on a shipment with no events at all, which the parser did not expect.',
+    body: 'One shipment broke the whole run. The parser skips such a shipment now and logs it, and the run continues.',
+  },
+  {
+    key: 'T10',
+    day: -30,
+    time: '11:00',
+    project: 'acme-dashboard',
+    dir: 'Developer/acme-dashboard',
+    agent: CLAUDE,
+    summary: 'Checked the DHL tracking import after the DHL API update: it ran clean every night for a week.',
+    body: 'Nothing failed. The new API version returns the same fields, so no change was needed.',
+  },
+  {
+    key: 'T11',
+    day: -12,
+    time: '09:40',
+    project: 'acme-dashboard',
+    dir: 'Developer/acme-dashboard',
+    agent: CLAUDE,
+    summary:
+      'Support saw no new DHL statuses this morning. The import failed on timeouts of the DHL API, and the backoff gave up after three tries.',
+    body: 'DHL had an outage from 02:00 to 05:00. The import now tries once more at 07:00 when the night run failed.',
+  },
+  // The linter of billing-api changed three times. The summaries of the last two do not name the tools.
+  {
+    key: 'L1',
+    day: -850,
+    time: '10:30',
+    project: 'billing-api',
+    dir: 'Developer/billing-api',
+    agent: 'claude/claude-opus-4-1',
+    summary: 'Set up ESLint and Prettier for billing-api, with a lint step in CI that fails on any warning.',
+    body: 'The CI lint step takes about 50 seconds. A custom ESLint rule forbids floating point arithmetic on amount fields.',
+  },
+  {
+    key: 'L2',
+    day: -560,
+    time: '15:45',
+    project: 'billing-api',
+    dir: 'Developer/billing-api',
+    agent: 'claude/claude-opus-4-5',
+    summary:
+      'Replaced ESLint and Prettier with Biome in billing-api: one tool and one config, and the CI lint step went from 50 to 4 seconds.',
+    body: 'Biome formats nearly like Prettier, so the diff was small. The custom rule for amount fields is gone for now, and a review checklist item takes its place.',
+  },
+  {
+    key: 'L3',
+    day: -300,
+    time: '11:10',
+    project: 'billing-api',
+    dir: 'Developer/billing-api',
+    agent: 'claude/claude-opus-5',
+    summary:
+      'Undid the lint change from last year, because a rule that we need for the money types had no counterpart there.',
+    body: 'Back to ESLint and Prettier. A float rounding bug in a refund got through review, which the old custom rule for amount fields would have caught. Lint takes 50 seconds again.',
+  },
+  {
+    key: 'L4',
+    day: -70,
+    time: '14:05',
+    project: 'billing-api',
+    dir: 'Developer/billing-api',
+    agent: CLAUDE,
+    summary: 'Changed the lint setup once more, and kept the rule for the money types as a small plugin of its own.',
+    body: 'oxlint and oxfmt now. oxlint runs the custom rule for amount fields as a JS plugin, and the lint step takes 3 seconds. ESLint, Prettier and their configs are gone.',
+  },
+  // Stripe Connect was looked at once and not adopted.
+  {
+    key: 'P1',
+    day: -200,
+    time: '13:25',
+    project: 'billing-api',
+    dir: 'Developer/billing-api',
+    agent: 'claude/claude-opus-5',
+    summary:
+      'Looked at Stripe Connect for the reseller payouts and decided against it: the resellers keep their monthly bank transfer.',
+    body: 'Connect would make every reseller go through the Stripe onboarding, and two of the largest ones said no to that. The monthly bank transfer stays, with the payout report as a CSV.',
+  },
+  // Work on another machine last week. Only the host field says where it ran.
+  {
+    key: 'H1',
+    day: -5,
+    time: '10:15',
+    project: 'nebula',
+    dir: 'Developer/nebula',
+    host: 'build-box',
+    agent: CLAUDE,
+    summary:
+      'Profiled the ingest workers under load with perf: the JSON parser takes 40 percent of the CPU, more than the writes.',
+    body: 'A parser that reads only the fields we index could halve the CPU. Nothing is changed yet.',
+  },
+  {
+    key: 'H2',
+    day: -4,
+    time: '14:30',
+    project: 'chunkdown',
+    dir: 'Developer/oss/chunkdown',
+    host: 'build-box',
+    agent: CLAUDE,
+    summary:
+      'Ran the chunkdown benchmark suite on a 2 GB corpus: splitting took 11 seconds with 32 workers, 9 times faster than on one core.',
+    body: 'The speedup stops at about 24 workers, because the merge of the results runs on one thread.',
+  },
+  {
+    key: 'H3',
+    day: -3,
+    time: '17:50',
+    dir: 'ops',
+    host: 'build-box',
+    agent: CLAUDE,
+    summary:
+      'Installed a self-hosted GitHub Actions runner as a systemd service, so that the long test jobs no longer use paid minutes.',
+    body: 'The runner has its own user and no access to the home folder. It takes the jobs with the label big.',
+  },
 ];
 
 /** A slot of the filler: when and where an entry is, without its text. */
@@ -463,9 +752,53 @@ export const RULES: Array<Rule> = [
     why: 'The README GIFs of agent-journal were last recorded on day -12, from vhs tapes.',
   },
   {
+    pattern: /ledger_snapshot/i,
+    words: 'the ledger_snapshots table',
+    why: 'One entry has the cause of the checkout timeouts in its body.',
+  },
+  {
+    pattern: /varnish|bunny/i,
+    words: 'Varnish, Bunny CDN',
+    why: 'Two entries say which cache is in front of the blog.',
+  },
+  {
+    pattern: /wal-g|write-ahead log|postgres/i,
+    words: 'WAL-G, a write-ahead log, Postgres',
+    isAllowed: (slot) => slot.project !== 'homelab',
+    why: 'In homelab, only three entries are about the database backups.',
+  },
+  {
     pattern: /http\/3|protobuf|retry wrapper/i,
     words: 'HTTP/3, protobuf, a retry wrapper',
     why: 'Each is one of the failed attempts that a case asks about.',
+  },
+  {
+    pattern: /rate.?limit|token bucket|throttl/i,
+    words: 'a rate limit, a token bucket, throttling',
+    isAllowed: (slot) => slot.project !== 'nebula' || slot.day > -1_090,
+    why: 'The first rate limit of nebula came on day -1090.',
+  },
+  {
+    pattern: /\bdhl\b/i,
+    words: 'DHL',
+    isAllowed: (slot) => slot.day < -1_000,
+    why: 'Eleven entries say when the DHL tracking import of acme-dashboard failed.',
+  },
+  {
+    pattern: /eslint|prettier|biome|oxlint|oxfmt/i,
+    words: 'ESLint, Prettier, Biome, oxlint, oxfmt',
+    isAllowed: (slot) => slot.project !== 'billing-api',
+    why: 'Four entries say which linter billing-api used when.',
+  },
+  {
+    pattern: /stripe connect|connected account/i,
+    words: 'Stripe Connect, connected accounts',
+    why: 'One entry says that billing-api decided against Stripe Connect.',
+  },
+  {
+    pattern: /build-box/i,
+    words: 'build-box',
+    why: 'The entries from that machine name it only in their host field.',
   },
   {
     pattern:
@@ -622,7 +955,7 @@ export function dayOf(entry: Entry, now: Date): number {
 
 /** The entries that the cases ask about, written by hand. */
 export function keyEntries(): Array<Entry> {
-  return [...KEYS, ...OLD_KEYS];
+  return [...KEYS, ...OLD_KEYS, ...LONG_KEYS];
 }
 
 const CONTENT = new URL('content/', import.meta.url);
@@ -666,7 +999,7 @@ export function buildEntries(): Array<Entry> {
       filler.push({ ...slot, ...(branch ? { dir: `${project.dir}.worktrees/${branch}` } : {}), summary, body });
     });
   }
-  built = [...KEYS, ...OLD_KEYS, ...filler].sort(order);
+  built = [...KEYS, ...OLD_KEYS, ...LONG_KEYS, ...filler].sort(order);
   return built;
 }
 
@@ -674,6 +1007,6 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const entries = buildEntries();
   const chars = entries.reduce((sum, entry) => sum + entry.summary.length + entry.body.length, 0);
   console.log(
-    `${entries.length} entries, ${KEYS.length + OLD_KEYS.length} of them key entries, ${(chars / 1e6).toFixed(1)} million characters of text`,
+    `${entries.length} entries, ${KEYS.length + OLD_KEYS.length + LONG_KEYS.length} of them key entries, ${(chars / 1e6).toFixed(1)} million characters of text`,
   );
 }

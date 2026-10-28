@@ -2,6 +2,20 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ExecResult, ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
+import {
+  capped,
+  DEFAULT_LIMIT,
+  fitList,
+  isCut,
+  isPeriod,
+  isToolsOn,
+  MAX_LIMIT,
+  MAX_OUTPUT,
+  summaryProblem,
+  TOOLS_ENV,
+  withNote,
+  withOlder,
+} from '../lib/tools.ts';
 
 /**
  * The Pi extension of Agent Journal.
@@ -25,20 +39,10 @@ import { Type } from 'typebox';
 export const CLI = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'agent-journal');
 
 /** What each tool name starts with. The rules name the tools with it. */
-export const TOOL_PREFIX = 'journal_';
+export const TOOL_PREFIX = 'agent_journal_';
 export const TOOL_WRITE = `${TOOL_PREFIX}write`;
 export const TOOL_LIST = `${TOOL_PREFIX}list`;
 export const TOOL_READ = `${TOOL_PREFIX}read`;
-
-/**
- * The environment variable that turns the tools off: `off`, `0` or `false`.
- * Without the tools, the model writes and reads the entries as files.
- */
-export const TOOLS_ENV = 'AGENT_JOURNAL_TOOLS';
-
-/** Whether the journal tools are on for this value of TOOLS_ENV. They are on unless it turns them off. */
-export const isToolsOn = (value: string | undefined): boolean =>
-  !['off', '0', 'false'].includes(value?.trim().toLowerCase() ?? '');
 
 /** The name of the system prompt section with the rules. Pi puts the section in a tag with this name. */
 export const SECTION = 'agent_journal';
@@ -58,12 +62,8 @@ export const END_SYNC_TIMEOUT_MS = 5_000;
 /** The exit code of a `sync` that made the commit, or had none to make, but could not pull or push. */
 const SYNC_REMOTE_FAILED = 3;
 
-/** How many entries a list gives when the model does not say, and the most it can ask for. */
-export const DEFAULT_LIMIT = 50;
-export const MAX_LIMIT = 200;
-
-/** The most characters a tool gives back, so that one result cannot fill the context. */
-export const MAX_OUTPUT = 40_000;
+/** The limits and the output of the journal tools, which the Claude Code plugin shares. */
+export { capped, DEFAULT_LIMIT, fitList, isCut, isToolsOn, MAX_LIMIT, MAX_OUTPUT, TOOLS_ENV, withNote, withOlder };
 
 const FILTERS = {
   date: Type.Optional(
@@ -157,85 +157,6 @@ export function filterArgs(filters: Filters): Array<string> {
   args.push('--limit', String(Math.min(filters.limit ?? DEFAULT_LIMIT, MAX_LIMIT)));
   if (filters.offset) args.push('--offset', String(filters.offset));
   return args;
-}
-
-/**
- * The output of a CLI run, with the note on stderr that says which older
- * matches the limit left out. The note names the flag of the CLI, and the
- * model calls a tool, so it names the parameter instead.
- */
-export function withNote(stdout: string, stderr: string): string {
-  const note = stderr.trim().replace(/--offset (\d+) for older ones/, 'call again with offset $1 for older ones');
-  return [stdout.trim(), note].filter((part) => part !== '').join('\n');
-}
-
-/**
- * A list that is longer than MAX_OUTPUT, cut at whole lines. The list is
- * oldest first, so the oldest lines go, and the note says which offset gives
- * them, as the note of the CLI does for the limit. Null when the list fits.
- */
-export function fitList(stdout: string, stderr: string, offset = 0): string | null {
-  const text = withNote(stdout, stderr);
-  if (text.length <= MAX_OUTPUT) return null;
-  const lines = stdout.trim().split('\n');
-  const note = (shown: number) =>
-    `matches ${offset + 1} to ${offset + shown}, counted from the newest; call again with offset ${offset + shown} for older ones`;
-  let size = note(lines.length).length;
-  let kept = 0;
-  while (kept < lines.length && size + lines[lines.length - 1 - kept]!.length + 1 <= MAX_OUTPUT) {
-    size += lines[lines.length - 1 - kept]!.length + 1;
-    kept++;
-  }
-  return [...lines.slice(lines.length - kept), note(kept)].join('\n');
-}
-
-/** The last line of a list that the limit cut, as the tool gives it. */
-const CUT_NOTE = /^matches (\d+) to (\d+), counted from the newest; call again with offset (\d+) for older ones$/;
-
-/** Whether a list, as the tool gives it, left older matches out. */
-export const isCut = (text: string): boolean => CUT_NOTE.test(text.split('\n').at(-1) ?? '');
-
-/**
- * A cut list whose last line also says how many older matches it left out and
- * the day of the oldest, from the counts of the same list by date. A model that
- * sees only "for older ones" often answers from the newest page alone. The
- * longer note can push the list past MAX_OUTPUT, so the oldest lines go until
- * it fits. The text stays as it is when the counts do not give both.
- */
-export function withOlder(text: string, counts: string): string {
-  const lines = text.split('\n');
-  const found = CUT_NOTE.exec(lines.at(-1) ?? '');
-  if (!found) return text;
-  const from = Number(found[1]);
-  const total = Number(/^total\t(\d+)$/m.exec(counts)?.[1]);
-  const oldest = counts
-    .split('\n')
-    .map((row) => /^\d+\t(\d{4}-\d{2}-\d{2})$/.exec(row)?.[1])
-    .filter((day) => day !== undefined)
-    .sort()[0];
-  if (!Number.isFinite(total) || !oldest) return text;
-  const note = (shown: number) => {
-    const next = from - 1 + shown;
-    const older = total - next;
-    const left =
-      older === 1
-        ? `1 older match, back to ${oldest}, is not in this result: call again with offset ${next} before you answer about it.`
-        : `${older} older matches, back to ${oldest}, are not in this result: call again with offset ${next} before you answer about them.`;
-    return `matches ${from} to ${next} of ${total}, counted from the newest. ${left}`;
-  };
-  const rows = lines.slice(0, -1);
-  if (total - (from - 1 + rows.length) <= 0) return text;
-  while (rows.length > 0 && [...rows, note(rows.length)].join('\n').length > MAX_OUTPUT) rows.shift();
-  return [...rows, note(rows.length)].join('\n');
-}
-
-/** A period that `read` takes: a local day, month or year, or today or yesterday. */
-const PERIOD = /^(today|yesterday|\d{4}(-\d{2}(-\d{2})?)?)$/;
-
-/** A tool's text, cut at MAX_OUTPUT characters with a note that says so. */
-export function capped(text: string): string {
-  if (text.length <= MAX_OUTPUT) return text;
-  return `${text.slice(0, MAX_OUTPUT)}\n… cut at ${MAX_OUTPUT} characters; narrow the filters to see the rest.`;
 }
 
 /** The first line of a text, or an empty string. */
@@ -359,7 +280,10 @@ export default function agentJournal(pi: ExtensionAPI) {
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
       async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-        const args = ['write', `--summary=${params.summary.trim()}`, `--body=${params.body.trim()}`, '--cwd', ctx.cwd];
+        const summary = params.summary.trim();
+        const problem = summaryProblem(summary);
+        if (problem) throw new Error(problem);
+        const args = ['write', `--summary=${summary}`, `--body=${params.body.trim()}`, '--cwd', ctx.cwd];
         const sessionId = ctx.sessionManager.getSessionId();
         if (sessionId) args.push('--session-id', sessionId);
         args.push('--agent', agentOf(ctx), '--no-sync');
@@ -452,22 +376,38 @@ export default function agentJournal(pi: ExtensionAPI) {
       }),
       annotations: { readOnlyHint: true, openWorldHint: false },
       async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-        const args = ['read', ...params.which.map((item) => item.trim()), ...scopeArgs(params)];
-        if (params.limit) args.push('--limit', String(params.limit));
-        if (params.offset) args.push('--offset', String(params.offset));
-        /** Exit 1 means that nothing matches, which is an answer. */
+        const which = params.which.map((item) => item.trim());
+        const period = which.length === 1 && isPeriod(which[0]!) ? which[0]! : '';
+        /** Only a period takes the filters and a page: the CLI refuses them with anything else. */
+        const args = ['read', ...which];
+        if (period) {
+          args.push(...scopeArgs(params));
+          if (params.limit) args.push('--limit', String(params.limit));
+          if (params.offset) args.push('--offset', String(params.offset));
+        }
+        /**
+         * Exit 1 is an answer: nothing matches, or an id prefix matches several
+         * entries, whose ids the model needs to read the one it means.
+         */
         const run = await runTool(args, ctx, [1]);
-        if (run.code === 1) return textResult(`No entries match. ${firstLine(run.stderr)}`.trim());
+        if (run.code === 1) return textResult(capped(run.stderr.trim() || 'No entries match.'));
         const text = withNote(run.stdout, run.stderr);
-        const period = params.which.length === 1 ? params.which[0]!.trim() : '';
-        if (text.length <= MAX_OUTPUT || !PERIOD.test(period)) return textResult(capped(text));
-        /** Cut text would lose the last entries without a word, so a long period gives its summaries instead. */
-        const { project, cwd, host, user, agent } = params;
+        if (text.length <= MAX_OUTPUT || !period) return textResult(capped(text));
+        /** Cut text would lose the last entries without a word, so a long period gives the summaries of the same page instead. */
+        const { project, cwd, host, user, agent, limit, offset } = params;
         const list = await runTool(
-          ['list', ...filterArgs({ date: period, project, cwd, host, user, agent, limit: MAX_LIMIT })],
+          ['list', ...filterArgs({ date: period, project, cwd, host, user, agent, limit: limit ?? MAX_LIMIT, offset })],
           ctx,
         );
-        const summaries = fitList(list.stdout, list.stderr) ?? withNote(list.stdout, list.stderr);
+        const cut = fitList(list.stdout, list.stderr, offset) ?? withNote(list.stdout, list.stderr);
+        /** The same period counted by day, for the note on what the cap left out, as a list gives it. Without the count, the short note stays. */
+        const counted = isCut(cut)
+          ? await runTool(
+              ['list', ...filterArgs({ date: period, project, cwd, host, user, agent, by: 'date' })],
+              ctx,
+            ).catch(() => null)
+          : null;
+        const summaries = counted ? withOlder(cut, counted.stdout) : cut;
         return textResult(
           capped(
             `The entries of ${period} are ${text.length} characters, more than one result holds. Their summaries follow; read the ones you need by id.\n${summaries}`,

@@ -17,7 +17,7 @@ import {
   type Filters,
 } from './cli.js';
 import type { Host } from './host.js';
-import { CLI_IN_CHECKOUT, RULES_MARK } from './names.js';
+import { CLI_IN_CHECKOUT, RULES_MARK, TOOL_PREFIX } from './names.js';
 import type { PaneActions } from './pane-view.js';
 
 /**
@@ -61,16 +61,35 @@ export function rulesKeeper(host: Host) {
   /** The session the rules were last handed to a prompt in, while that prompt may still wait to enter. */
   let handedTo: string | null = null;
 
-  async function keyOf(): Promise<{ key: string; session: SessionNames }> {
-    const session = await sessionOf(host);
-    return { key: `${session.sessionId}\n${session.cwd}\n${session.agent}`, session };
+  type Key = { key: string; session: SessionNames; hasTools: boolean };
+
+  async function keyOf(): Promise<Key> {
+    const [session, hasTools] = await Promise.all([sessionOf(host), host.canCallTools().catch(() => false)]);
+    return { key: `${session.sessionId}\n${session.cwd}\n${session.agent}\n${hasTools}`, session, hasTools };
+  }
+
+  /**
+   * The key of one check, worked out at most once and only when the check
+   * needs it. Each time costs a permission check of each tool, which in auto
+   * mode can go to the classifier, and a failed one in the middle of a check
+   * would give it two keys.
+   */
+  function keyOnce(): () => Promise<Key> {
+    let found: Promise<Key> | null = null;
+    return () => (found ??= keyOf());
   }
 
   /** The rules for the session as it is now; empty when the CLI cannot give them, which the next call tries again. */
-  async function rules(): Promise<string> {
-    const { key, session } = await keyOf();
+  async function rules(currentKey: () => Promise<Key> = keyOnce()): Promise<string> {
+    const { key, session, hasTools } = await currentKey();
     if (made?.key !== key) {
-      const ran = runCli(host, contextArgs(session.cwd, session.sessionId, session.agent));
+      /**
+       * The variant that writes and reads through this mod's tools, rather than
+       * files and a shell. A person who denies one of the tools gets the
+       * variant for files, as a session without the tools needs.
+       */
+      const toolPrefix = hasTools ? TOOL_PREFIX : undefined;
+      const ran = runCli(host, contextArgs(session.cwd, session.sessionId, session.agent, toolPrefix));
       const making = { key, rules: ran.then((run) => (run.exitCode === 0 ? run.stdout.trim() : '')) };
       made = making;
       void making.rules.then((text) => {
@@ -88,15 +107,16 @@ export function rulesKeeper(host: Host) {
   }
 
   /** Whether the conversation holds the rules, or a prompt that carries them waits to enter it. */
-  async function isGiven(): Promise<boolean> {
-    if (handedTo !== null && handedTo === (await keyOf()).key) return true;
+  async function isGiven(currentKey: () => Promise<Key>): Promise<boolean> {
+    if (handedTo !== null && handedTo === (await currentKey()).key) return true;
     return host.conversationHas(RULES_MARK);
   }
 
   function deliver(): Promise<RulesOutcome> {
     return exclusive(async () => {
-      if (await isGiven()) return 'present';
-      const text = await rules();
+      const currentKey = keyOnce();
+      if (await isGiven(currentKey)) return 'present';
+      const text = await rules(currentKey);
       if (text === '') return 'none';
       await host.appendNote(`${RULES_MARK}\n${text}`);
       return 'delivered';
@@ -106,10 +126,11 @@ export function rulesKeeper(host: Host) {
   /** The rules as a block of context for the prompt being submitted, marked, or null when they are given already or the CLI gives none. */
   function forPrompt(): Promise<string | null> {
     return exclusive(async () => {
-      if (await isGiven()) return null;
-      const text = await rules();
+      const currentKey = keyOnce();
+      if (await isGiven(currentKey)) return null;
+      const text = await rules(currentKey);
       if (text === '') return null;
-      handedTo = (await keyOf()).key;
+      handedTo = (await currentKey()).key;
       return `${RULES_MARK}\n${text}`;
     });
   }
@@ -618,17 +639,20 @@ export function stepOf(
   const n = result.entries.length;
   const count = (one: string, many: string) => `${n} ${n === 1 ? one : many}`;
   const parts = (head: string) => [head, where, range].filter(Boolean).join(' · ');
-  if (tool.endsWith('__list'))
-    return result.isOk ? parts(`Listed ${count('entry', 'entries')}`) : `${parts('Listing')}${FAILED_STEP}`;
-  if (tool.endsWith('__search')) {
-    const query = `"${text(input.text)}"`;
+  if (tool.endsWith('__list')) {
+    const terms = Array.isArray(input.terms) ? input.terms.filter((term) => typeof term === 'string') : [];
+    if (terms.length === 0)
+      return result.isOk ? parts(`Listed ${count('entry', 'entries')}`) : `${parts('Listing')}${FAILED_STEP}`;
+    const query = terms.map((term) => `"${term}"`).join(' ');
     return result.isOk
       ? parts(`Searched ${query} · ${count('match', 'matches')}`)
       : `${parts(`Searching ${query}`)}${FAILED_STEP}`;
   }
   if (tool.endsWith('__read')) {
-    const id = text(input.id);
+    const which = Array.isArray(input.which) ? input.which.map(text) : [text(input.which)];
+    const id = which.join(', ');
     if (!result.isOk) return `Reading ${id}${FAILED_STEP}`;
+    if (which.length !== 1) return `Read ${count('entry', 'entries')}`;
     const known = [...result.entries, ...seen].find((entry) => entry.id === id);
     if (known?.summary) return `Read: ${known.summary}`;
     const instant = instantOf(id);
@@ -642,7 +666,7 @@ export function stepOf(
 /** Shows one entry in full. */
 export async function openEntry(host: Host, id: string): Promise<void> {
   await host.opened.update((): JournalOpened => ({ id, status: 'loading', text: '' }));
-  const ran = await runCli(host, readArgs(id));
+  const ran = await runCli(host, readArgs([id]));
   await host.opened.update((opened): JournalOpened => {
     if (opened?.id !== id) return opened;
     return ran.exitCode === 0

@@ -27,29 +27,24 @@ import {
 } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
-import { basename, delimiter, dirname, join, resolve } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { type Case, fill, loadCases, materialize, type Placed } from '../dataset.ts';
-import { grade, ID, type Session } from '../grade.ts';
-
-/**
- * Time zones east of UTC, so that a local day starts on the UTC date before
- * it. That is what the cases about yesterday test. An entry of today is at
- * 00:30, and the last entry is 20 minutes before the run, so the run takes the
- * first zone where it is now between 03:00 and 22:59. With three zones, that
- * is one at every hour of the day, and the eval can run at any time, also on CI.
- */
-const ZONES = ['Europe/Berlin', 'Asia/Dubai', 'Asia/Tokyo'];
-
-export function pickZone(now: Date): string {
-  const hourIn = (timeZone: string) =>
-    Number(new Intl.DateTimeFormat('en-US', { timeZone, hour: 'numeric', hourCycle: 'h23' }).format(now));
-  const zone = ZONES.find((timeZone) => hourIn(timeZone) >= 3 && hourIn(timeZone) <= 22);
-  if (!zone) throw new Error('No time zone has a time of day between 03:00 and 22:59 now.');
-  return zone;
-}
+import { grade, type Session } from '../grade.ts';
+import {
+  cleanPath,
+  HOST,
+  isClean,
+  type Mode,
+  pickZone,
+  pool,
+  type Record_,
+  strayEntries,
+  type ToolCall,
+  USER,
+} from '../runner.ts';
 
 /** The time zone of every session and of the grader, so that both see the same local days. */
 const TZ = pickZone(new Date());
@@ -58,32 +53,8 @@ process.env.TZ = TZ;
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const PI = join(ROOT, 'node_modules', '.bin', 'pi');
 const EXTENSION = join(ROOT, 'pi', 'extensions', 'agent-journal.ts');
-const HOST = 'eval-host';
-const USER = 'eval-user';
 /** How long one message may take before the session counts as stuck. */
 const MESSAGE_TIMEOUT_MS = 5 * 60_000;
-
-export type Mode = 'tools' | 'files';
-
-type ToolCall = { name: string; args: unknown; outChars: number; isError: boolean };
-
-export type Record_ = {
-  case: string;
-  kind: Case['kind'];
-  mode: Mode;
-  repeat: number;
-  model: string;
-  timeZone: string;
-  score: number;
-  checks: ReturnType<typeof grade>['checks'];
-  answer: string;
-  written: Array<string>;
-  toolCalls: Array<ToolCall>;
-  tokens: { input: number; output: number; cacheRead: number; cacheWrite: number; total: number };
-  cost: number;
-  durationMs: number;
-  error?: string;
-};
 
 const { values } = parseArgs({
   options: {
@@ -95,20 +66,6 @@ const { values } = parseArgs({
     out: { type: 'string' },
   },
 });
-
-/** PATH without a folder that has the CLI, so that the model without the tools finds no `agent-journal` either. */
-function cleanPath(): string {
-  return (process.env.PATH ?? '')
-    .split(delimiter)
-    .filter((dir) => {
-      try {
-        return !readdirSync(dir).some((name) => name === 'agent-journal' || name === 'aj');
-      } catch {
-        return true;
-      }
-    })
-    .join(delimiter);
-}
 
 /** A home directory with the journal, the config and the case's working directory. */
 function prepare(test: Case, now: Date) {
@@ -286,7 +243,12 @@ async function runOne(test: Case, mode: Mode, repeat: number, model: string): Pr
     }
   }
 
-  const stray = strayEntries(run, toolCalls);
+  const stray = strayEntries(run, toolCalls, (call) => {
+    if (!['write', 'edit'].includes(call.name)) return undefined;
+    const raw = (call.args as { path?: unknown } | undefined)?.path;
+    /** The tools read `~` as the home of the session and drop a leading `@`. */
+    return typeof raw === 'string' ? raw.replace(/^@/, '').replace(/^~(?=$|\/)/, run.home) : undefined;
+  });
   // A file outside the folder of the session would be found by the next session, so it moves in, as evidence.
   for (const path of stray.filter((item) => !item.startsWith(`${run.base}/`))) {
     mkdirSync(join(run.base, 'stray'), { recursive: true });
@@ -331,63 +293,12 @@ async function runOne(test: Case, mode: Mode, repeat: number, model: string): Pr
    * holds a copy of the whole journal. A session with no scored check proves
    * nothing, so it keeps its folder too.
    */
-  const isClean = record.checks.every((check) => check.isPassed);
-  const isScored = record.checks.some((check) => check.isScored !== false);
-  if (!error && isClean && isScored) {
+  if (isClean(record)) {
     await rm(run.base, { recursive: true, force: true });
     return record;
   }
   writeFileSync(join(run.base, 'events.jsonl'), pi.events.map((event) => JSON.stringify(event)).join('\n'));
   return { ...record, ...({ workdir: run.base } as object) };
-}
-
-/**
- * The entry files that a session wrote outside the journal folder. The files
- * on disk show every such entry in the folder of the session, however it was
- * written. A write or edit tool can also put one outside that folder, which
- * only its path shows: the tools read `~` as the home of the session and drop
- * a leading `@`.
- */
-function strayEntries(
-  run: { base: string; home: string; cwd: string; journalDir: string },
-  toolCalls: Array<ToolCall>,
-) {
-  const found = new Set<string>();
-  const walk = (dir: string): void => {
-    for (const item of readdirSync(dir, { withFileTypes: true })) {
-      const path = join(dir, item.name);
-      if (item.isDirectory()) {
-        if (path !== run.journalDir) walk(path);
-      } else if (ID.test(item.name)) {
-        found.add(path);
-      }
-    }
-  };
-  walk(run.base);
-  for (const call of toolCalls) {
-    if (call.isError || !['write', 'edit'].includes(call.name)) continue;
-    const raw = (call.args as { path?: unknown } | undefined)?.path;
-    if (typeof raw !== 'string') continue;
-    const path = raw.replace(/^@/, '').replace(/^~(?=$|\/)/, run.home);
-    const absolute = resolve(run.cwd, path);
-    if (ID.test(basename(absolute)) && dirname(absolute) !== run.journalDir && existsSync(absolute))
-      found.add(absolute);
-  }
-  return [...found].sort();
-}
-
-/** Runs the jobs with at most `limit` at a time. */
-async function pool<T>(jobs: Array<() => Promise<T>>, limit: number): Promise<Array<T>> {
-  const results: Array<T> = [];
-  let index = 0;
-  const worker = async () => {
-    while (index < jobs.length) {
-      const mine = index++;
-      results[mine] = await jobs[mine]!();
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(limit, jobs.length) }, worker));
-  return results;
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

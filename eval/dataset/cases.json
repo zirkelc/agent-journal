@@ -182,6 +182,102 @@
       "why": "Three filler entries about attempts that were dropped, among about 70 entries about Redis in those 60 days. Many of the others say that memory or a rate 'dropped', so a search for the word alone finds the wrong ones."
     },
     {
+      "id": "recall-root-cause",
+      "kind": "recall",
+      "dir": "Developer/billing-api",
+      "git": true,
+      "messages": [
+        "Checkout in this project hung under load a few weeks ago. What was the cause, and what did we change?"
+      ],
+      "expect": {
+        "all": ["ledger_snapshots", "replica", "lock wait|2 ?s(ec|econds)?\\b|fails? fast"]
+      },
+      "why": "The summary of the fix says only that checkout was fixed with one change and one setting. The cause and both changes are only in the body, so the session must read the entry, not only list the summaries."
+    },
+    {
+      "id": "recall-current-state",
+      "kind": "recall",
+      "dir": "Developer/blog",
+      "git": true,
+      "messages": ["We changed the cache in front of this blog at some point. Which cache does it use now?"],
+      "expect": {
+        "all": ["bunny"]
+      },
+      "why": "An old entry put Varnish in front of the blog. A later one, whose summary only says that the hosting is simpler, removed Varnish for Bunny CDN. A session that reads only the summaries, or only the first entry that names a cache, answers Varnish."
+    },
+    {
+      "id": "recall-dates-of-backups",
+      "kind": "recall",
+      "dir": "homelab",
+      "git": true,
+      "messages": ["When did the backup of the database on the home server change, and what changed each time?"],
+      "expect": {
+        "all": ["wal-g", "40 ?gb|bill|cost", "compress"],
+        "date_of": ["W1", "W2", "W3"]
+      },
+      "why": "Three changes of the database backup over a year and a half, each with its day, among about 100 entries about the restic file backups, some of which copy other databases. Only the bodies name WAL-G, and the reason of each change."
+    },
+    {
+      "id": "recall-first-of-many",
+      "kind": "recall",
+      "dir": "Developer/nebula",
+      "git": true,
+      "messages": ["When did we first add a rate limit to this project, and what did it limit?"],
+      "expect": {
+        "all": ["ingest endpoint|ingest api|per api key"],
+        "date_of": "R1"
+      },
+      "why": "About 300 later entries talk about rate limits, so the first one is far behind the newest matches. A search that stops at its first page of results misses it."
+    },
+    {
+      "id": "recall-count-failures",
+      "kind": "recall",
+      "dir": "Developer/acme-dashboard",
+      "git": true,
+      "messages": ["How many times did the nightly DHL tracking import fail in the last 12 months?"],
+      "expect": {
+        "all": ["\\b(6|six) (times|failures|failed|nights|runs)|fail(ed|ures)?\\D{0,20}\\b(6|six)\\b"]
+      },
+      "why": "Eleven entries are about the import. Six failures are in the last 12 months, two are older, and three entries are about the import without a failure. Not every failure says failed in its summary."
+    },
+    {
+      "id": "recall-latest-of-many-changes",
+      "kind": "recall",
+      "dir": "Developer/billing-api",
+      "git": true,
+      "messages": ["We changed the linter of this project a few times. Which one do we use now, and since when?"],
+      "expect": {
+        "all": ["oxlint"],
+        "date_of": "L4"
+      },
+      "why": "The linter changed three times. The summaries of the last two changes do not name the tools, so only the body of the last entry gives the answer."
+    },
+    {
+      "id": "recall-near-miss",
+      "kind": "recall",
+      "dir": "Developer/billing-api",
+      "git": true,
+      "messages": ["When did we move the reseller payouts of this project to Stripe Connect?"],
+      "expect": {
+        "negative": true,
+        "all": ["decided against|did not|didn't|never|not (move|moved|switch|adopt)"],
+        "date_of": "P1"
+      },
+      "why": "The question assumes a move that never happened. One entry looked at Stripe Connect and decided against it, among about 250 entries about Stripe."
+    },
+    {
+      "id": "recall-other-host",
+      "kind": "recall",
+      "dir": "Developer/nebula",
+      "git": true,
+      "messages": ["What did I do on the machine build-box in the last 7 days?"],
+      "expect": {
+        "all": ["perf|json parser", "benchmark|corpus", "runner|systemd"],
+        "none": ["idempotency|refund", "berkeley mono"]
+      },
+      "why": "Three entries of the last week ran on build-box, in three projects. Only their host field says so, and the other entries of that week ran on this machine."
+    },
+    {
       "id": "write-milestone",
       "kind": "write",
       "dir": "Developer/billing-api",

@@ -101,7 +101,7 @@ export function render(placed: Placed, home: { host: string; user: string }, ind
     ...(entry.project ? [`project: ${entry.project}`] : []),
     `summary: "${entry.summary}"`,
     `cwd: ~/${entry.dir}`,
-    `host: "${home.host}"`,
+    `host: "${entry.host ?? home.host}"`,
     `user: "${home.user}"`,
     `agent: ${entry.agent}`,
     `session_id: ${sessionIdOf(index)}`,
