@@ -166,7 +166,7 @@ export function filterArgs(filters: Filters): Array<string> {
  */
 export function withNote(stdout: string, stderr: string): string {
   const note = stderr.trim().replace(/--offset (\d+) for older ones/, 'call again with offset $1 for older ones');
-  return note === '' ? stdout.trim() : `${stdout.trim()}\n${note}`;
+  return [stdout.trim(), note].filter((part) => part !== '').join('\n');
 }
 
 /**
@@ -402,7 +402,7 @@ export default function agentJournal(pi: ExtensionAPI) {
         if (dashed) throw new Error(`A term cannot start with "-": ${dashed}. Write [-] for the dash.`);
         const args = ['list', ...terms, ...(params.fixed ? ['--fixed'] : []), ...filterArgs(params)];
         const run = await runTool(args, ctx);
-        if (params.by) return textResult(capped(run.stdout.trim()));
+        if (params.by) return textResult(capped(withNote(run.stdout, run.stderr)));
         const text = fitList(run.stdout, run.stderr, params.offset) ?? withNote(run.stdout, run.stderr);
         if (!isCut(text)) return textResult(capped(text || 'No entries match.'));
         /** The same list counted by day, for the note on what the cut left out. Without the count, the short note stays. */
