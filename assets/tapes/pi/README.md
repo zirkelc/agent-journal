@@ -1,6 +1,6 @@
 # Pi recording
 
-The tape in this folder records the image of the Pi section in the [README](../../../README.md) with [vhs](https://github.com/charmbracelet/vhs). It is a live take of the [Claude Code take](../claude-code) in [Pi](https://pi.dev), without the pane. Pi changes `retry()` in a sample repository and writes a journal entry with its `journal_write` tool. Then Pi quits, a new Pi session starts, and Pi answers a question about an older decision from the journal with `journal_list` and `journal_read`.
+The tape in this folder records the image of the Pi section in the [README](../../../README.md) with [vhs](https://github.com/charmbracelet/vhs). It is a live take of the [Claude Code take](../claude-code) in [Pi](https://pi.dev), without the pane. Pi changes `retry()` in a sample repository and writes a journal entry with its `agent_journal_write` tool. Then Pi quits, a new Pi session starts, and Pi answers a question about an older decision from the journal with `agent_journal_list` and `agent_journal_read`.
 
 ## Record
 

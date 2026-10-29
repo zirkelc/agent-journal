@@ -63,7 +63,9 @@ Sleep 1500ms
 Type "Why did we leave backoff out before?"
 Sleep 500ms
 Enter
-Wait+Screen@300s /Why did we leave backoff out before\?[\s\S]*· done /
+# The new session starts on a clear screen, and a long answer can scroll the
+# question off it, so the first "· done" is the answer.
+Wait+Screen@300s /· done /
 Sleep 3s
 Screenshot out/main-recall.png
 Sleep 5500ms
