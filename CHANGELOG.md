@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.8.0](https://github.com/zirkelc/agent-journal/compare/v0.7.0...v0.8.0) (2026-10-29)
+
+
+### Features
+
+* **claude-code:** show the journal tool calls short in the transcript ([924156a](https://github.com/zirkelc/agent-journal/commit/924156a521ac2e3f68963c692ac8c87e3902a938))
+
+
+### Documentation
+
+* record the Claude Code and Pi images again with the journal tools ([1bef901](https://github.com/zirkelc/agent-journal/commit/1bef9013730d9d443b0b1dfe3be7d7fa4149dbae))
+
 ## [0.7.0](https://github.com/zirkelc/agent-journal/compare/v0.6.0...v0.7.0) (2026-10-28)
 
 
