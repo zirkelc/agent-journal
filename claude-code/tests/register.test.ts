@@ -1024,6 +1024,71 @@ describe('register', () => {
     expect(second.includes('Kept across the clear')).toBe(true);
   });
 
+  test('a journal tool result is drawn as one cut line per entry, in full when expanded, and other results as they are', async ($, on) => {
+    // Arrange
+    world(on);
+    const passed: Array<unknown> = [];
+    on('ui.render', { component: 'ToolResult' }, async (engine, e) => {
+      passed.push((e.props as { output: unknown }).output);
+      const { Text } = await engine.ui.resolve(e);
+      return h(Text, null, 'drawn') as never;
+    });
+    await $.session.start(SESSION);
+    const result = (tool: string, output: unknown, extra: object = {}) =>
+      ({
+        component: 'ToolResult',
+        surface: 'terminal',
+        requestId: 't1',
+        props: { tool_use_id: 't1', tool, output, isErrored: false, ...extra },
+      }) as never;
+
+    // Act
+    const listed = await $.ui.render(
+      result(toolName(TOOL_LIST), '2026-10-07T142000Z\tacme-dashboard\tExport timed out.\n'),
+    );
+    const read = await $.ui.render(result(toolName(TOOL_READ), [{ type: 'text', text: '3\tacme-dashboard' }]));
+    await $.ui.render(result('Bash', { stdout: 'a\tb', stderr: '' }));
+    await $.ui.render(
+      result(toolName(TOOL_LIST), '2026-10-07T142000Z\tacme-dashboard\tExport timed out.', { isExpanded: true }),
+    );
+
+    // Assert
+    expect(textOf(listed).includes('2026-10-07  Export timed out.')).toBe(true);
+    expect(textOf(read).includes('3  acme-dashboard')).toBe(true);
+    expect([listed, read].every((tree) => JSON.stringify(tree).includes('"truncate-end"'))).toBe(true);
+    expect(passed).toEqual([{ stdout: 'a\tb', stderr: '' }, '2026-10-07T142000Z  acme-dashboard  Export timed out.']);
+  });
+
+  test('a write is drawn as its summary, with no input, and in full when expanded', async ($, on) => {
+    // Arrange
+    world(on);
+    const drawn: Array<unknown> = [];
+    on('ui.render', { component: 'ToolUse' }, async (engine, e) => {
+      drawn.push((e.props as { input: unknown }).input);
+      const { Text } = await engine.ui.resolve(e);
+      return h(Text, null, 'drawn') as never;
+    });
+    on('ui.render', { component: 'ToolResult' }, async (engine, e) => {
+      drawn.push((e.props as { output: unknown }).output);
+      const { Text } = await engine.ui.resolve(e);
+      return h(Text, null, 'drawn') as never;
+    });
+    await $.session.start(SESSION);
+    const input = { summary: 'Added backoff to retry().', body: 'A long body.' };
+    const props = { tool_use_id: 't1', tool: toolName(TOOL_WRITE), isRunning: false, isErrored: false };
+    const draw = (component: string, extra: object) =>
+      $.ui.render({ component, surface: 'terminal', requestId: 't1', props: { ...props, ...extra } } as never);
+
+    // Act
+    await draw('ToolUse', { input });
+    await draw('ToolResult', { output: '2026-10-28T151117Z' });
+    await draw('ToolUse', { input, isExpanded: true });
+    await draw('ToolResult', { output: '2026-10-28T151117Z', isExpanded: true });
+
+    // Assert
+    expect(drawn).toEqual([{}, 'Added backoff to retry().', input, '2026-10-28T151117Z']);
+  });
+
   test('the list scrolls its own rows, keeps the engine\u2019s window, and loads the next page near its end', async ($, on) => {
     // Arrange
     const entries = Array.from({ length: 230 }, (_, at) => {

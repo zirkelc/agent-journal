@@ -23,7 +23,7 @@ import {
   writtenIdOf,
   type Query,
 } from './cli.js';
-import { ALL_DATES, entryOfText } from './format.js';
+import { ALL_DATES, entryOfText, shortResult } from './format.js';
 import type { Host } from './host.js';
 import {
   actionsOf,
@@ -105,6 +105,8 @@ export const register: Register = (on) => {
   let sync: ReturnType<typeof syncer> | null = null;
   /** Whether a draw has already asked for the load of a list that was never loaded. */
   let isIdleLoadQueued = false;
+  /** The summary of each write the transcript drew, by the call's id, for the result line under it. */
+  const writtenSummaries = new Map<string, string>();
 
   const load = (isFresh?: boolean) => loader?.load(isFresh) ?? Promise.resolve();
 
@@ -450,6 +452,64 @@ export const register: Register = (on) => {
     };
   });
 
+  /**
+   * A write's row is short: it shows no input, and its result line is the
+   * entry's summary, not its id. The expanded view (ctrl+o) shows all.
+   */
+  on('ui.render', { component: 'ToolUse' }, ($, e, next) => {
+    const props = e.props as { tool_use_id: string; tool: string; input: unknown; isExpanded?: boolean };
+    if (props.tool !== toolName(TOOL_WRITE) || props.isExpanded) return next(e);
+    const { summary } = (props.input ?? {}) as { summary?: unknown };
+    if (typeof summary === 'string') writtenSummaries.set(props.tool_use_id, summary);
+    return next({ ...e, props: { ...e.props, input: {} } } as typeof e);
+  });
+
+  /**
+   * The results of the tools that read the journal are drawn short: each
+   * entry as its local day and summary, one line each, cut at the edge.
+   * Claude Code wraps a tool result after a count of characters, not between
+   * words, so a wrapped line can break inside a word. The model reads the
+   * full result, with its ids and its tabs. The expanded view shows it all,
+   * with spaces for the tabs: Claude Code counts a tab as one column when it
+   * wraps but draws it wider, so a line with tabs runs past the edge.
+   */
+  on('ui.render', { component: 'ToolResult' }, async ($, e, next) => {
+    const props = e.props as {
+      tool_use_id: string;
+      tool: string;
+      output: unknown;
+      isErrored: boolean;
+      isExpanded?: boolean;
+    };
+    if (props.tool === toolName(TOOL_WRITE)) {
+      const summary = writtenSummaries.get(props.tool_use_id);
+      if (props.isExpanded || props.isErrored || summary === undefined) return next(e);
+      return next({ ...e, props: { ...e.props, output: summary } } as typeof e);
+    }
+    if (props.tool !== toolName(TOOL_LIST) && props.tool !== toolName(TOOL_READ)) return next(e);
+    if (props.isExpanded) {
+      const spaced = (text: string) => text.replaceAll('\t', '  ');
+      return next({ ...e, props: { ...e.props, output: mappedText(props.output, spaced) } } as typeof e);
+    }
+    const text = textOfOutput(props.output);
+    if (text === undefined) return next(e);
+    const { Box, Text } = await $.ui.resolve(e);
+    const lines = shortResult(text).replace(/\n+$/, '').split('\n');
+    // The mark and the indent of the engine's own result block, which a tree of the hook's own does not get.
+    return (
+      <Box flexDirection="row">
+        <Text dimColor>{'  ⎿  '}</Text>
+        <Box flexDirection="column" flexGrow={1} flexShrink={1}>
+          {lines.map((line, at) => (
+            <Text key={String(at)} wrap="truncate-end">
+              {line}
+            </Text>
+          ))}
+        </Box>
+      </Box>
+    );
+  });
+
   on('command.run', { command: 'agent-journal' }, async ($, e, next) => {
     if (!host) return next(e);
     /** Text after the command is a question only while the pane answers questions. */
@@ -621,6 +681,24 @@ export const register: Register = (on) => {
     });
   });
 };
+
+/** The text of a tool result: a string, or the text blocks of one joined. Undefined for any other shape. */
+function textOfOutput(output: unknown): string | undefined {
+  if (typeof output === 'string') return output;
+  if (!Array.isArray(output)) return undefined;
+  const texts = output.map((block: unknown) => (block as { type?: unknown; text?: unknown } | null)?.text);
+  return texts.every((text) => typeof text === 'string') ? texts.join('\n') : undefined;
+}
+
+/** A tool result with its text changed: a string, or the text blocks of one. Any other shape stays as it is. */
+function mappedText(output: unknown, map: (text: string) => string): unknown {
+  if (typeof output === 'string') return map(output);
+  if (!Array.isArray(output)) return output;
+  return output.map((block: unknown) => {
+    const { type, text } = (block ?? {}) as { type?: unknown; text?: unknown };
+    return type === 'text' && typeof text === 'string' ? { ...(block as object), text: map(text) } : block;
+  });
+}
 
 /** The current project's name: the last part of the repository's root, or null outside one. */
 const projectOf = (repo: { root: string } | null): string | null =>

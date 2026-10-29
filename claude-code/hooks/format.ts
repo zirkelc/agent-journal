@@ -233,6 +233,38 @@ export function entryOfText(text: string): Array<{ id: string; project: string; 
   return [{ id: shaped, project: fields.project ?? '', summary: fields.summary ?? '' }];
 }
 
+const LIST_ROW = /^(\d{4}-\d{2}-\d{2}T\d{6}Z)\t[^\t]*\t([^\t]*)/;
+
+/**
+ * A result of the journal tools as the transcript shows it: each entry as its
+ * local day and summary, in place of a list row or a whole entry of a read.
+ * The bodies of a read are left out, and any other line stays, with spaces
+ * for its tabs.
+ */
+export function shortResult(text: string, timeZone?: string): string {
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  const out: Array<string> = [];
+  const dayOf = (instant: Date | undefined) =>
+    instant && !Number.isNaN(instant.getTime()) ? localDayTime(instant, timeZone).day : '';
+  let at = 0;
+  while (at < lines.length) {
+    const line = lines[at]!;
+    const end = line === '---' ? lines.indexOf('---', at + 1) : -1;
+    if (end !== -1) {
+      const { fields } = parseEntry(lines.slice(at, end + 1).join('\n'));
+      out.push(`${dayOf(fields.date ? new Date(fields.date) : undefined)}  ${fields.summary ?? ''}`);
+      // The body runs up to the next entry.
+      at = end + 1;
+      while (at < lines.length && lines[at] !== '---') at += 1;
+      continue;
+    }
+    const row = LIST_ROW.exec(line);
+    out.push(row ? `${dayOf(instantOf(row[1]!))}  ${row[2]}` : line.replaceAll('\t', '  '));
+    at += 1;
+  }
+  return out.join('\n');
+}
+
 /** An answer split into the text to show and the entries its last `Sources:` line names. */
 export type SplitAnswer = { text: string; ids: Array<string> };
 

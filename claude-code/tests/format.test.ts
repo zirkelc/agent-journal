@@ -2,6 +2,7 @@ import { describe, expect, test } from 'claude-code/testing';
 import {
   colorOf,
   column,
+  shortResult,
   dayHeading,
   instantOf,
   isLatest,
@@ -149,5 +150,43 @@ describe('format', () => {
 
     // Assert
     expect(result).toEqual({ text: 'See 2026-10-05T143000Z for the fix.', ids: ['2026-10-05T143000Z'] });
+  });
+
+  test('a list result is shown as the local day and the summary of each entry, and its other lines with spaces', () => {
+    // Arrange
+    const listed = [
+      '2026-10-04T223000Z\tacme-dashboard\tExport timed out.\t',
+      '2026-10-07T142000Z\tacme-dashboard\tMoved it to a worker.\tthe body line that matched',
+      'Older matches: offset 2.',
+    ].join('\n');
+
+    // Act
+    const result = shortResult(listed, 'Europe/Berlin');
+
+    // Assert
+    expect(result).toBe(
+      ['2026-10-05  Export timed out.', '2026-10-07  Moved it to a worker.', 'Older matches: offset 2.'].join('\n'),
+    );
+  });
+
+  test('a read result is shown as the local day and the summary of each entry, without the bodies', () => {
+    // Arrange
+    const entry = (date: string, summary: string) =>
+      ['---', `date: ${date}`, 'project: "acme-dashboard"', `summary: "${summary}"`, '---', '', 'A body.'].join('\n');
+    const read = `${entry('2026-10-04T22:30:00Z', 'Export timed out.')}\n\n${entry('2026-10-07T14:20:00Z', 'A \\"quoted\\" word.')}`;
+
+    // Act
+    const result = shortResult(read, 'Europe/Berlin');
+
+    // Assert
+    expect(result).toBe(['2026-10-05  Export timed out.', '2026-10-07  A "quoted" word.'].join('\n'));
+  });
+
+  test('a count of a list keeps its lines, with spaces for its tabs', () => {
+    // Act
+    const result = shortResult('2\tacme-dashboard\n1\tmy-awesome-lib\ntotal\t3', 'Europe/Berlin');
+
+    // Assert
+    expect(result).toBe('2  acme-dashboard\n1  my-awesome-lib\ntotal  3');
   });
 });
