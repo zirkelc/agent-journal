@@ -5,7 +5,7 @@
   <img src="../assets/claude-code-session-light.gif" alt="Claude Code writes a journal entry while the journal pane is open, and the entry appears at the top of the pane and is opened there. Then a new session opens the pane again and answers why an older decision was made, from the journal" />
 </picture>
 
-This folder is the Claude Code plugin of [Agent Journal](../README.md). It is a [mod](https://code.claude.com/docs/en/plugins/mods/overview) that Claude Code loads itself. The plugin gives each session the rules for the journal and three tools to read and write it, opens the journal pane with `/agent-journal`, and syncs the journal with git when you turn sync on.
+The Claude Code plugin of [Agent Journal](../README.md) is a [mod](https://code.claude.com/docs/en/plugins/mods/overview) that Claude Code loads itself. It gives each session the rules for the journal and three tools to read and write it, opens the journal pane with `/agent-journal`, and syncs the journal with git when you turn sync on.
 
 > [!NOTE]
 > This page describes only the Claude Code plugin. For the entry format, the configuration, git sync and the CLI, see the [main README](../README.md).
