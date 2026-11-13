@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.9.0](https://github.com/zirkelc/agent-journal/compare/v0.8.0...v0.9.0) (2026-11-13)
+
+
+### Features
+
+* record the branch and the commit in each entry ([#11](https://github.com/zirkelc/agent-journal/issues/11)) ([bc535fb](https://github.com/zirkelc/agent-journal/commit/bc535fbe5ed4f373533df1a8b034663defc105bc))
+
+
+### Documentation
+
+* shorten the Pi README and leave the details to the main README ([9315e36](https://github.com/zirkelc/agent-journal/commit/9315e36e0eb065050d1de4ae79cf272e691710ce))
+
 ## [0.8.0](https://github.com/zirkelc/agent-journal/compare/v0.7.0...v0.8.0) (2026-10-29)
 
 
