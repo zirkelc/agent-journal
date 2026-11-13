@@ -528,11 +528,18 @@ describe('register', () => {
     expect(lines.at(-1)!.startsWith(`matches 3 to ${2 + shown} of 1003, counted from the newest.`)).toBe(true);
   });
 
-  test('list, and read for a period, pass the directory, host, user and agent filters to the CLI', async ($, on) => {
+  test('list, and read for a period, pass the branch, commit, directory, host, user and agent filters to the CLI', async ($, on) => {
     // Arrange
     const kept = world(on, { list: line('2026-10-05T143000Z', 'repo', 'Did a thing'), read: 'An entry.\n' });
     await $.session.start(SESSION);
-    const filters = { cwd: '~/Developer/repo', host: 'build-box', user: 'me', agent: 'claude-opus-*' };
+    const filters = {
+      branch: 'fix-*',
+      commit: '3f2a9c1',
+      cwd: '~/Developer/repo',
+      host: 'build-box',
+      user: 'me',
+      agent: 'claude-opus-*',
+    };
 
     // Act
     await $.tool.call({ tool: toolName(TOOL_LIST), since: '7d', ...filters } as never);
@@ -540,7 +547,20 @@ describe('register', () => {
     const refused = await $.tool.call({ tool: toolName(TOOL_LIST), host: '--all' } as never);
 
     // Assert
-    const flags = ['--cwd', '~/Developer/repo', '--host', 'build-box', '--user', 'me', '--agent', 'claude-opus-*'];
+    const flags = [
+      '--branch',
+      'fix-*',
+      '--commit',
+      '3f2a9c1',
+      '--cwd',
+      '~/Developer/repo',
+      '--host',
+      'build-box',
+      '--user',
+      'me',
+      '--agent',
+      'claude-opus-*',
+    ];
     expect(kept.queries().map((run) => run.argv.slice(1))).toEqual([
       ['list', '--since', '7d', ...flags, '--limit', '50'],
       ['read', '2026-10-22', ...flags],
@@ -548,7 +568,7 @@ describe('register', () => {
     expect(JSON.stringify(refused)).toContain('host must not start with');
   });
 
-  test('the list and read tools offer the directory, host, user and agent filters', () => {
+  test('the list and read tools offer the branch, commit, directory, host, user and agent filters', () => {
     // Arrange
     const [list, read] = TOOL_SPECS;
 
@@ -563,6 +583,8 @@ describe('register', () => {
       'since',
       'until',
       'project',
+      'branch',
+      'commit',
       'cwd',
       'host',
       'user',
@@ -571,7 +593,18 @@ describe('register', () => {
       'offset',
       'by',
     ]);
-    expect(keys[1]).toEqual(['which', 'project', 'cwd', 'host', 'user', 'agent', 'limit', 'offset']);
+    expect(keys[1]).toEqual([
+      'which',
+      'project',
+      'branch',
+      'commit',
+      'cwd',
+      'host',
+      'user',
+      'agent',
+      'limit',
+      'offset',
+    ]);
   });
 
   test('a list that fills the result keeps its whole note on the older matches, and gives up its oldest lines for it', () => {

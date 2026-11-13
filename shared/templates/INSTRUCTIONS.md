@@ -123,8 +123,8 @@ Read the journal when the user asks about past work. Not otherwise, and never at
 
 Read it with the journal's own tools, never with a shell or a file read of the journal folder. Load them by these names first if they are not loaded yet. Every day they take is a local day in the user's time zone, so a day the user names goes in as it is.
 
-- `__TOOLS__list` lists entries, oldest first, one line each with the id, the project and the summary. It filters by `project` (`.` is the current project), by `date` (one year, month or day, `today` or `yesterday`), by `since` and `until` (a day, `today`, a number of days back such as `7d`, or a time), and by `cwd`, `host`, `user` and `agent`. It gives the 50 most recent matches, or up to 200 with `limit`, and a last line then names the `offset` that gives the older ones. With `terms`, it searches the summaries and the bodies: each term is a regex that ignores case, an entry must match every term, and each line also gets the body line that matched. With `by`, it lists no entries but counts every match for each project or day, with a total.
-- `__TOOLS__read` returns entries in full: the latest, one or more by id, or every entry of one period (`today`, `yesterday`, or one year, month or day). For a period, it also takes `project`, `cwd`, `host`, `user`, `agent`, `limit` and `offset`, and a last line names the `offset` that gives the older entries.
+- `__TOOLS__list` lists entries, oldest first, one line each with the id, the project and the summary. It filters by `project` (`.` is the current project), by `date` (one year, month or day, `today` or `yesterday`), by `since` and `until` (a day, `today`, a number of days back such as `7d`, or a time), by `branch` (`.` is the current branch) and `commit` (a hash or its start, `.` is the current commit), and by `cwd`, `host`, `user` and `agent`. It gives the 50 most recent matches, or up to 200 with `limit`, and a last line then names the `offset` that gives the older ones. With `terms`, it searches the summaries and the bodies: each term is a regex that ignores case, an entry must match every term, and each line also gets the body line that matched. With `by`, it lists no entries but counts every match for each project or day, with a total.
+- `__TOOLS__read` returns entries in full: the latest, one or more by id, or every entry of one period (`today`, `yesterday`, or one year, month or day). For a period, it also takes `project`, `branch`, `commit`, `cwd`, `host`, `user`, `agent`, `limit` and `offset`, and a last line names the `offset` that gives the older entries.
 
 How to find what the user asks for:
 
@@ -132,7 +132,7 @@ How to find what the user asks for:
 - A question about a kind of thing, such as what failed, what was decided or what changed, has no one word that finds every entry. List all summaries of the project in that time, and also search with one term of several words for the same thing, such as `decided|chose|picked|went with` for a decision, because a body can say what its summary does not.
 - For the first entries of something, or a story over a long time, follow the offset until no older matches are left.
 - For any count, use `by`. Never count the lines of a list yourself.
-- When the user means this machine, this directory, this account or this agent, give its value from Current session as the filter `host`, `cwd`, `user` or `agent`. `cwd` also finds the entries of the directories under it. Without such words, use no filter of this kind.
+- When the user means this machine, this directory, this account or this agent, give its value from Current session as the filter `host`, `cwd`, `user` or `agent`. `cwd` also finds the entries of the directories under it. For this branch or this commit, give `.` as the filter `branch` or `commit`. Without such words, use no filter of this kind.
 <!-- end -->
 <!-- without tools -->
 
@@ -156,11 +156,12 @@ Some commands that work, all from inside the folder:
                                                                              # the summaries of one project since a day
     grep -lE '^project: "?my-lib"?$' *.md | head -1                          # the first entry of a project
     grep -il -E 'deploy|release' *.md | xargs grep -H '^summary:'            # entries with either word, with their summaries
+    grep -lE '^commit: "?3f2a9c1' *.md | xargs grep -H '^summary:'           # the entries of one commit, by the start of its hash
     ls | awk '$0 >= "2026-01-04T230000Z"' | xargs grep -h '^project:' | tr -d '"' | sort | uniq -c   # entries per project since a day
 
 How to find what the user asks for:
 
 - Narrow with the summaries first, and open whole entries only once they point somewhere.
 - A question about a kind of thing, such as what failed, what was decided or what changed, has no one word that finds every entry. Read all summaries of the project in that time, then search the bodies with several words for the same thing, such as `decided|chose|picked|went with` for a decision.
-- When the user means this machine, this directory, this account or this agent, search the frontmatter for its value from Current session, for example `grep -lE '^host: "?my-laptop"?$' *.md`. Without such words, use no filter of this kind.
+- When the user means this machine, this directory, this account or this agent, search the frontmatter for its value from Current session, for example `grep -lE '^host: "?my-laptop"?$' *.md`. For this branch or this commit, take the value from the command for a new entry, because it can change during the session. Without such words, use no filter of this kind.
 <!-- end -->

@@ -87,6 +87,16 @@ const FILTERS = {
     type: 'string',
     description: 'Only entries filed under this project. "." is the current project.',
   },
+  branch: {
+    type: 'string',
+    description:
+      'Only entries written on this branch (fix-retry). "." is the current branch. * and ? work as in a shell glob.',
+  },
+  commit: {
+    type: 'string',
+    description:
+      'Only entries written at this commit: its hash, or the start of one (3f2a9c1). "." is the current commit.',
+  },
   cwd: {
     type: 'string',
     description:
@@ -139,7 +149,7 @@ export const TOOL_SPECS: ReadonlyArray<ToolSpec> = [
           type: 'string',
           enum: [...BY_FIELDS],
           description:
-            'Count the matches for each value of this field instead of listing them: project, date (the local day), host, user or agent. Every match counts, so it takes no limit or offset.',
+            'Count the matches for each value of this field instead of listing them: project, branch, date (the local day), host, user or agent. Every match counts, so it takes no limit or offset.',
         },
       },
     },
@@ -159,6 +169,8 @@ export const TOOL_SPECS: ReadonlyArray<ToolSpec> = [
             'One of: ["latest"]; one or more entry ids, each whole or a prefix that matches one entry; or one local period: ["today"], ["yesterday"], ["2026"], ["2026-10"] or ["2026-10-22"].',
         },
         project: FILTERS.project,
+        branch: FILTERS.branch,
+        commit: FILTERS.commit,
         cwd: FILTERS.cwd,
         host: FILTERS.host,
         user: FILTERS.user,

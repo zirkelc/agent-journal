@@ -29,7 +29,7 @@ export type Entry = {
 };
 
 /** The fields that `list` can count its matches by. */
-export const BY_FIELDS = ['project', 'date', 'host', 'user', 'agent'] as const;
+export const BY_FIELDS = ['project', 'branch', 'date', 'host', 'user', 'agent'] as const;
 export type ByField = (typeof BY_FIELDS)[number];
 
 /** The filters the CLI's query commands take, as the tools and the pane give them. */
@@ -39,6 +39,9 @@ export type Filters = {
   since?: string;
   until?: string;
   project?: string;
+  /** The branch, a glob, and the commit, the start of its hash. `.` is the one checked out where the CLI runs. */
+  branch?: string;
+  commit?: string;
   /** The directory of the entries and the directories under it. `*` and `?` match within one name of the path. */
   cwd?: string;
   /** The machine, the account and the agent or model that wrote the entries, each a glob. */
@@ -79,7 +82,7 @@ function plain(name: string, value: string): string {
 }
 
 /** The filters that name who and where, which `read` takes for a period as `list` does, in the order the help lists them. */
-const SCOPE_FILTERS = ['project', 'cwd', 'host', 'user', 'agent'] as const;
+const SCOPE_FILTERS = ['project', 'branch', 'commit', 'cwd', 'host', 'user', 'agent'] as const;
 
 /** The flags of the filters that name who and where. */
 function scopeArgs(filters: Filters): Array<string> {
@@ -139,7 +142,7 @@ export function listArgs(query: Query, maxLimit = MAX_LIMIT): Array<string> {
 export function readArgs(which: ReadonlyArray<string>, filters: Filters = {}): Array<string> {
   if (which.length === 0) {
     throw new InputError(
-      'which is missing. The read tool takes which, a list: ["latest"], one or more entry ids, or one period such as ["2026-10"]. A period also takes project, cwd, host, user, agent, limit and offset.',
+      'which is missing. The read tool takes which, a list: ["latest"], one or more entry ids, or one period such as ["2026-10"]. A period also takes project, branch, commit, cwd, host, user, agent, limit and offset.',
     );
   }
   const args = ['read', ...which.map((item) => plain('which', item))];

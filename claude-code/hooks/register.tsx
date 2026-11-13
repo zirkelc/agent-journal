@@ -433,16 +433,30 @@ export const register: Register = (on) => {
     const period = which.length === 1 && isPeriod(which[0]!) ? which[0]! : undefined;
     if (!period || text.length <= MAX_OUTPUT) return { result: capped(text) };
     /** Cut text would lose the last entries without a word, so a long period gives the summaries of the same page instead. */
-    const { project, cwd, host: machine, user, agent, limit, offset } = query;
+    const { project, branch, commit, cwd, host: machine, user, agent, limit, offset } = query;
     const listed = await runCli(
       host,
-      listArgs({ date: period, project, cwd, host: machine, user, agent, limit: limit ?? MAX_LIMIT, offset }),
+      listArgs({
+        date: period,
+        project,
+        branch,
+        commit,
+        cwd,
+        host: machine,
+        user,
+        agent,
+        limit: limit ?? MAX_LIMIT,
+        offset,
+      }),
     );
     if (listed.exitCode !== 0) return { result: capped(text) };
     const cut = fitList(listed.stdout, listed.stderr, offsetOf(query)) ?? withNote(listed.stdout, listed.stderr);
     /** The same period counted by day, for the note on what the cap left out, as a list gives it. */
     const counted = isCut(cut)
-      ? await runCli(host, listArgs({ date: period, project, cwd, host: machine, user, agent, by: 'date' }))
+      ? await runCli(
+          host,
+          listArgs({ date: period, project, branch, commit, cwd, host: machine, user, agent, by: 'date' }),
+        )
       : undefined;
     const summaries = counted?.exitCode === 0 ? withOlder(cut, counted.stdout) : cut;
     return {
@@ -715,6 +729,8 @@ function queryOf(input: Record<string, unknown>): Query {
     since: text(input.since),
     until: text(input.until),
     project: text(input.project),
+    branch: text(input.branch),
+    commit: text(input.commit),
     cwd: text(input.cwd),
     host: text(input.host),
     user: text(input.user),

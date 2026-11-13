@@ -435,19 +435,35 @@ describe('the tools', () => {
     );
   });
 
-  test(`should filter a list, and the entries of a period, by directory, host, user and agent`, async () => {
+  test(`should filter a list, and the entries of a period, by branch, commit, directory, host, user and agent`, async () => {
     // Arrange
     const store = fixture();
-    const here = { cwd: '~/Developer/demo', host: 'laptop', user: 'me', agent: 'claude/claude-opus-5-5' };
+    const here = {
+      branch: 'fix-retry',
+      commit: '3f2a9c1d0b8e7f6a5c4d3e2f1a0b9c8d7e6f5a4b',
+      cwd: '~/Developer/demo',
+      host: 'laptop',
+      user: 'me',
+      agent: 'claude/claude-opus-5-5',
+    };
     seed(store, [
       { stem: '2026-10-10T090000Z', project: 'demo', summary: 'Here.', ...here },
+      { stem: '2026-10-10T093000Z', project: 'demo', summary: 'Other branch.', ...here, branch: 'main' },
+      { stem: '2026-10-10T094500Z', project: 'demo', summary: 'Other commit.', ...here, commit: '9e8d7c6b5a4f' },
       { stem: '2026-10-10T100000Z', project: 'demo', summary: 'Other dir.', ...here, cwd: '~/Developer/other' },
       { stem: '2026-10-10T110000Z', project: 'demo', summary: 'Other host.', ...here, host: 'build-box' },
       { stem: '2026-10-10T120000Z', project: 'demo', summary: 'Other user.', ...here, user: 'ci' },
       { stem: '2026-10-10T130000Z', project: 'demo', summary: 'Other agent.', ...here, agent: 'pi/claude-sonnet-5-5' },
     ]);
     const host = pi(store);
-    const filters = { cwd: '~/Developer/demo', host: 'lap*', user: 'me', agent: 'claude-opus-*' };
+    const filters = {
+      branch: 'fix-*',
+      commit: '3f2a9c1',
+      cwd: '~/Developer/demo',
+      host: 'lap*',
+      user: 'me',
+      agent: 'claude-opus-*',
+    };
 
     // Act
     const listed = await host.call(TOOL_LIST, filters);

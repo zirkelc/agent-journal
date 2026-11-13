@@ -81,6 +81,18 @@ const FILTERS = {
   project: Type.Optional(
     Type.String({ description: 'Only entries filed under this project. "." is the current project.' }),
   ),
+  branch: Type.Optional(
+    Type.String({
+      description:
+        'Only entries written on this branch (fix-retry). "." is the current branch. * and ? work as in a shell glob.',
+    }),
+  ),
+  commit: Type.Optional(
+    Type.String({
+      description:
+        'Only entries written at this commit: its hash, or the start of one (3f2a9c1). "." is the current commit.',
+    }),
+  ),
   cwd: Type.Optional(
     Type.String({
       description:
@@ -112,7 +124,7 @@ const FILTERS = {
 };
 
 /** The fields that the list tool can count the matches by. */
-export const BY_FIELDS = ['project', 'date', 'host', 'user', 'agent'] as const;
+export const BY_FIELDS = ['project', 'branch', 'date', 'host', 'user', 'agent'] as const;
 type ByField = (typeof BY_FIELDS)[number];
 
 type Filters = {
@@ -120,6 +132,8 @@ type Filters = {
   since?: string;
   until?: string;
   project?: string;
+  branch?: string;
+  commit?: string;
   cwd?: string;
   host?: string;
   user?: string;
@@ -130,7 +144,7 @@ type Filters = {
 };
 
 /** The filters that name who and where, which `read` takes for a period as `list` does, in the order the help lists them. */
-const SCOPE_FILTERS = ['project', 'cwd', 'host', 'user', 'agent'] as const;
+const SCOPE_FILTERS = ['project', 'branch', 'commit', 'cwd', 'host', 'user', 'agent'] as const;
 
 /** The CLI flags of the filters that name who and where. */
 function scopeArgs(filters: Filters): Array<string> {
@@ -314,7 +328,7 @@ export default function agentJournal(pi: ExtensionAPI) {
             type: 'string',
             enum: [...BY_FIELDS],
             description:
-              'Count the matches for each value of this field instead of listing them: project, date (the local day), host, user or agent. Every match counts, so it takes no limit or offset.',
+              'Count the matches for each value of this field instead of listing them: project, branch, date (the local day), host, user or agent. Every match counts, so it takes no limit or offset.',
           }),
         ),
       }),
@@ -356,6 +370,8 @@ export default function agentJournal(pi: ExtensionAPI) {
             'One of: ["latest"]; one or more entry ids, each whole or a prefix that matches one entry; or one local period: ["today"], ["yesterday"], ["2026"], ["2026-10"] or ["2026-10-22"].',
         }),
         project: FILTERS.project,
+        branch: FILTERS.branch,
+        commit: FILTERS.commit,
         cwd: FILTERS.cwd,
         host: FILTERS.host,
         user: FILTERS.user,
@@ -394,16 +410,30 @@ export default function agentJournal(pi: ExtensionAPI) {
         const text = withNote(run.stdout, run.stderr);
         if (text.length <= MAX_OUTPUT || !period) return textResult(capped(text));
         /** Cut text would lose the last entries without a word, so a long period gives the summaries of the same page instead. */
-        const { project, cwd, host, user, agent, limit, offset } = params;
+        const { project, branch, commit, cwd, host, user, agent, limit, offset } = params;
         const list = await runTool(
-          ['list', ...filterArgs({ date: period, project, cwd, host, user, agent, limit: limit ?? MAX_LIMIT, offset })],
+          [
+            'list',
+            ...filterArgs({
+              date: period,
+              project,
+              branch,
+              commit,
+              cwd,
+              host,
+              user,
+              agent,
+              limit: limit ?? MAX_LIMIT,
+              offset,
+            }),
+          ],
           ctx,
         );
         const cut = fitList(list.stdout, list.stderr, offset) ?? withNote(list.stdout, list.stderr);
         /** The same period counted by day, for the note on what the cap left out, as a list gives it. Without the count, the short note stays. */
         const counted = isCut(cut)
           ? await runTool(
-              ['list', ...filterArgs({ date: period, project, cwd, host, user, agent, by: 'date' })],
+              ['list', ...filterArgs({ date: period, project, branch, commit, cwd, host, user, agent, by: 'date' })],
               ctx,
             ).catch(() => null)
           : null;
