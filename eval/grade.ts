@@ -22,7 +22,16 @@ export type Session = {
   start: Date;
   end: Date;
   /** What the new entries must record. */
-  expected: { cwd: string; host: string; user: string; agent: string; sessionId: string };
+  expected: {
+    cwd: string;
+    host: string;
+    user: string;
+    agent: string;
+    sessionId: string;
+    /** The branch and the commit of the repository at the end of the session, or undefined for none. */
+    branch?: string;
+    commit?: string;
+  };
 };
 
 const matches = (pattern: string, text: string): boolean => new RegExp(pattern, 'i').test(text);
@@ -133,6 +142,12 @@ function writeChecks(test: Case, session: Session): Array<Check> {
       expect.project === null ? !('project' in fieldsOf(file.text)) : fieldsOf(file.text).project === expect.project,
     );
   }
+  every(expected.branch === undefined ? 'has no branch' : `branch is ${expected.branch}`, (file) =>
+    expected.branch === undefined ? !('branch' in fieldsOf(file.text)) : fieldsOf(file.text).branch === expected.branch,
+  );
+  every(expected.commit === undefined ? 'has no commit' : 'commit is the HEAD of the repository', (file) =>
+    expected.commit === undefined ? !('commit' in fieldsOf(file.text)) : fieldsOf(file.text).commit === expected.commit,
+  );
   every(`cwd is ${expected.cwd}`, (file) => fieldsOf(file.text).cwd === expected.cwd);
   every(`host is ${expected.host}`, (file) => fieldsOf(file.text).host === expected.host);
   every(`user is ${expected.user}`, (file) => fieldsOf(file.text).user === expected.user);

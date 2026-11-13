@@ -247,7 +247,7 @@ Adds an entry. The file name and the `date` field come from the same clock readi
 | `--agent A`       | the agent and model, for example `claude/opus-5-5`                                                                                |
 | `--session-id ID` | the session the entry comes from                                                                                                  |
 
-The summary cannot contain a quote or a newline. The project, the agent and the session ID also cannot contain a colon or a tab. The entry also records the `host` and the `user` from the [configuration](../README.md#configuration). When [Git sync](../README.md#git-sync) is on, `write` runs `aj sync` after it writes the entry.
+The summary cannot contain a quote or a newline. The project, the agent and the session ID also cannot contain a colon or a tab. The entry also records the `branch` and the `commit` of `--cwd` when it is written, and the `host` and the `user` from the [configuration](../README.md#configuration). It leaves out the branch on a detached HEAD, the commit before the first commit, and both outside a repository or for an entry filed under another project with `--project`. When [Git sync](../README.md#git-sync) is on, `write` runs `aj sync` after it writes the entry.
 
 Without the CLI, you must write the frontmatter yourself, with the same instant in the `date` field as in the file name. See [Format](../README.md#format).
 

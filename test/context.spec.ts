@@ -1,7 +1,20 @@
-import { mkdirSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
-import { configure, context, fields, fixture, run, tilde, worktree } from './helpers.ts';
+import {
+  baseEnv,
+  configure,
+  context,
+  type Fixture,
+  fields,
+  fixture,
+  frontmatter,
+  GIT_IDENTITY,
+  run,
+  tilde,
+  worktree,
+} from './helpers.ts';
 
 describe('the rules', () => {
   test(`should frame the rules as a standing instruction rather than as background`, () => {
@@ -88,6 +101,33 @@ describe('the variant with tools', () => {
     expect(rules).not.toContain('__TOOLS__');
   });
 
+  test(`should list the branch and the commit of the session after the project`, () => {
+    // Arrange
+    const store = fixture();
+    const tree = worktree(store, 'fix-auth');
+    const head = execFileSync('git', ['-C', tree, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+
+    // Act
+    const result = context(store, { cwd: tree });
+
+    // Assert
+    expect(result).toContain(
+      `- \`project\`: \`repo\`\n- \`branch\`: \`fix-auth\`\n- \`commit\`: \`${head}\`\n- \`cwd\`:`,
+    );
+  });
+
+  test(`should drop the commit line before the first commit`, () => {
+    // Arrange
+    const store = fixture();
+
+    // Act
+    const result = context(store);
+
+    // Assert
+    expect(result).toMatch(/^- `branch`: `.+`$/m);
+    expect(result).not.toMatch(/^- `commit`: `/m);
+  });
+
   test(`should give both variants the values of the current session, and point to them from writing and recalling`, () => {
     // Arrange
     const store = fixture();
@@ -108,7 +148,9 @@ describe('the variant with tools', () => {
       expect(section).toContain('- `agent`: `claude/claude-opus-5-5`');
       expect(section).toContain('- `session_id`: `abc-123`');
     }
-    expect(tools).toContain('and the values of Current session');
+    expect(tools).toContain(
+      'the project, the branch, the commit, the directory, the host, the user, the agent and the session id',
+    );
     expect(tools).toContain('give its value from Current session as the filter');
     expect(files).toContain('Copy each value exactly as it is listed there, character for character');
     expect(files).toContain('search the frontmatter for its value from Current session');
@@ -352,5 +394,96 @@ describe('the machine and the account', () => {
     expect(fields(rendered).user).toBe(undefined);
     expect(rendered).not.toContain('- `host`: `');
     expect(rendered).not.toContain('- `user`: `');
+  });
+});
+
+describe('the command that reads the repository for an entry file', () => {
+  // The lines the rules without tools tell the model to run, as the rendered text gives them.
+  function command(store: Fixture): string {
+    const rules = context(store);
+    const block = /Run these lines as one command[^\n]*\n\n((?: {4}.*\n)+)/.exec(rules)?.[1] ?? '';
+    return block.replace(/^ {4}/gm, '');
+  }
+
+  // The output read as the rules say: each git line found by its start, so a missing line moves no other.
+  function readAsTheRulesSay(output: string): Record<string, string | undefined> {
+    const lines = output.split('\n');
+    const gitDir = lines.find((line) => line.startsWith('/'));
+    const parts = gitDir?.split('/') ?? [];
+    const name = parts.at(-1) === '.git' ? parts.at(-2) : parts.at(-1);
+    return {
+      project: name?.replace(/\.git$/, ''),
+      branch: lines.find((line) => line.startsWith('refs/heads/'))?.slice('refs/heads/'.length),
+      commit: lines.find((line) => line.startsWith('commit '))?.slice('commit '.length),
+    };
+  }
+
+  // What the CLI records for the same directory, the reference for an entry written as a file.
+  function recorded(store: Fixture, dir: string): Record<string, string | undefined> {
+    run(store, ['write', '--summary', 'The reference.', '--cwd', dir]);
+    const [name] = readdirSync(store.journalDir);
+    const entry = frontmatter(readFileSync(join(store.journalDir, name!), 'utf8'));
+    rmSync(join(store.journalDir, name!));
+    return { project: entry.project, branch: entry.branch, commit: entry.commit };
+  }
+
+  // Throws on a status that is not 0, which an agent reports as a failed command.
+  function runIn(store: Fixture, dir: string): string {
+    return execFileSync('sh', ['-c', command(store)], { cwd: dir, encoding: 'utf8', env: baseEnv(store) });
+  }
+
+  const git = (dir: string, ...args: Array<string>) =>
+    execFileSync('git', ['-C', dir, ...args], { env: { ...process.env, ...GIT_IDENTITY } });
+
+  test(`should use no command substitution, which a permission check refuses`, () => {
+    // Arrange
+    const store = fixture();
+
+    // Act
+    const result = command(store);
+
+    // Assert
+    expect(result.split('\n').filter(Boolean).length).toBe(4);
+    expect(result).not.toContain('$(');
+    expect(result).not.toContain('`');
+  });
+
+  test.each([
+    ['a worktree on a branch', (store: Fixture) => worktree(store, 'fix-auth')],
+    [
+      'a detached HEAD',
+      (store: Fixture) => {
+        const tree = worktree(store, 'fix-auth');
+        git(tree, 'checkout', '-q', '--detach');
+        return tree;
+      },
+    ],
+    ['a repository before its first commit', (store: Fixture) => store.repo],
+    [
+      'a branch that a tag of the same name shares',
+      (store: Fixture) => {
+        const tree = worktree(store, 'v1');
+        git(tree, 'tag', 'v1');
+        return tree;
+      },
+    ],
+    [
+      'a folder outside a repository',
+      (store: Fixture) => {
+        const folder = join(store.home, 'plain');
+        mkdirSync(folder);
+        return folder;
+      },
+    ],
+  ])(`should give the values the CLI records, in %s`, (_, setUp) => {
+    // Arrange
+    const store = fixture();
+    const dir = setUp(store);
+
+    // Act
+    const result = readAsTheRulesSay(runIn(store, dir));
+
+    // Assert
+    expect(result).toEqual(recorded(store, dir));
   });
 });

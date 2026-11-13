@@ -11,6 +11,7 @@ import {
   fails,
   fixture,
   frontmatter,
+  GIT_IDENTITY,
   rows,
   run,
   seed,
@@ -546,7 +547,7 @@ describe('the machine and the account it records', () => {
 
     // Assert
     const keys = Object.keys(frontmatter(written(store).text));
-    expect(keys).toEqual(['date', 'project', 'summary', 'cwd', 'host', 'user', 'agent']);
+    expect(keys).toEqual(['date', 'summary', 'project', 'branch', 'cwd', 'host', 'user', 'agent']);
     expect(frontmatter(written(store).text).host).toBe('macbook');
     expect(frontmatter(written(store).text).user).toBe('chris');
   });
@@ -580,6 +581,131 @@ describe('the machine and the account it records', () => {
     const result = frontmatter(written(store).text);
     expect(result.host).toBeUndefined();
     expect(result.user).toBeUndefined();
+  });
+});
+
+describe('the branch and the commit it records', () => {
+  // A git command in a directory of the fixture, with a name for commits.
+  function git(dir: string, ...args: Array<string>): string {
+    return execFileSync('git', ['-C', dir, ...args], {
+      encoding: 'utf8',
+      env: { ...process.env, ...GIT_IDENTITY },
+    }).trim();
+  }
+
+  test(`should record the branch and the full commit after the project`, () => {
+    // Arrange
+    const store = fixture();
+    const tree = worktree(store, 'fix-auth');
+    const head = git(tree, 'rev-parse', 'HEAD');
+
+    // Act
+    run(store, ['write', '--summary', 'On a branch.', '--cwd', tree]);
+
+    // Assert
+    const fields = frontmatter(written(store).text);
+    expect(Object.keys(fields).slice(0, 6)).toEqual(['date', 'summary', 'project', 'branch', 'commit', 'cwd']);
+    expect(fields.branch).toBe('fix-auth');
+    expect(fields.commit).toBe(head);
+  });
+
+  test(`should record the commit at the time of the write, not an earlier one`, () => {
+    // Arrange
+    const store = fixture();
+    const tree = worktree(store, 'fix-auth');
+    git(tree, 'commit', '-q', '--allow-empty', '-m', 'later');
+    const head = git(tree, 'rev-parse', 'HEAD');
+
+    // Act
+    run(store, ['write', '--summary', 'After a commit.', '--cwd', tree]);
+
+    // Assert
+    expect(frontmatter(written(store).text).commit).toBe(head);
+  });
+
+  test(`should leave the branch out on a detached HEAD, and keep the commit`, () => {
+    // Arrange
+    const store = fixture();
+    const tree = worktree(store, 'fix-auth');
+    git(tree, 'checkout', '-q', '--detach');
+    const head = git(tree, 'rev-parse', 'HEAD');
+
+    // Act
+    run(store, ['write', '--summary', 'Detached.', '--cwd', tree]);
+
+    // Assert
+    const fields = frontmatter(written(store).text);
+    expect(fields.branch).toBeUndefined();
+    expect(fields.commit).toBe(head);
+  });
+
+  test(`should leave the commit out before the first commit, and keep the branch`, () => {
+    // Arrange
+    const store = fixture();
+    const branch = git(store.repo, 'symbolic-ref', '--short', 'HEAD');
+
+    // Act
+    run(store, ['write', '--summary', 'Nothing committed yet.'], { at: store.repo });
+
+    // Assert
+    const fields = frontmatter(written(store).text);
+    expect(fields.branch).toBe(branch);
+    expect(fields.commit).toBeUndefined();
+  });
+
+  test(`should record the name of a branch that a tag of the same name shares`, () => {
+    // Arrange
+    const store = fixture();
+    const tree = worktree(store, 'v1');
+    git(tree, 'tag', 'v1');
+
+    // Act
+    run(store, ['write', '--summary', 'On a release branch.', '--cwd', tree]);
+
+    // Assert
+    expect(frontmatter(written(store).text).branch).toBe('v1');
+  });
+
+  test(`should leave both out outside a repository`, () => {
+    // Arrange
+    const store = fixture();
+
+    // Act
+    run(store, ['write', '--summary', 'Not in a repository.'], { at: store.home });
+
+    // Assert
+    const fields = frontmatter(written(store).text);
+    expect(fields.branch).toBeUndefined();
+    expect(fields.commit).toBeUndefined();
+  });
+
+  test(`should leave both out for an entry filed under another project`, () => {
+    // Arrange
+    const store = fixture();
+    const tree = worktree(store, 'fix-auth');
+
+    // Act
+    run(store, ['write', '--summary', 'Filed elsewhere.', '--project', 'nebula', '--cwd', tree]);
+
+    // Assert
+    const fields = frontmatter(written(store).text);
+    expect(fields.project).toBe('nebula');
+    expect(fields.branch).toBeUndefined();
+    expect(fields.commit).toBeUndefined();
+  });
+
+  test(`should keep both for a project named as the repository of the directory`, () => {
+    // Arrange
+    const store = fixture();
+    const tree = worktree(store, 'fix-auth');
+
+    // Act
+    run(store, ['write', '--summary', 'Named the same.', '--project', 'repo', '--cwd', tree]);
+
+    // Assert
+    const fields = frontmatter(written(store).text);
+    expect(fields.branch).toBe('fix-auth');
+    expect(fields.commit).toBe(git(tree, 'rev-parse', 'HEAD'));
   });
 });
 

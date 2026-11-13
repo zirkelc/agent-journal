@@ -19,8 +19,10 @@ Entries are in `__JOURNAL_DIR__`, one file each, named by the UTC instant the en
 Each entry starts with frontmatter:
 
 - `date`: the instant the entry was written, the same as its id
-- `project`: the repository the work belongs to, named after its main checkout, so every worktree of it files under one name. Absent when the session was not in a repository
 - `summary`: one line on what happened and what it means
+- `project`: the repository the work belongs to, named after its main checkout, so every worktree of it files under one name. Absent when the session was not in a repository
+- `branch`: the branch the work was on. Absent on a detached HEAD, outside a repository, and in older entries
+- `commit`: the full hash of the commit HEAD pointed to when the entry was written. Changes not committed at that time are not in it. Absent outside a repository, before the first commit, and in older entries
 - `cwd`: the directory the session worked in. This is where a worktree shows
 - `host`: the machine the session ran on. Absent when it was not recorded
 - `user`: the account the session ran as on that machine. Absent when it was not recorded
@@ -32,8 +34,10 @@ The body holds what the summary leaves out: what was decided, what was rejected 
 ```markdown
 ---
 date: 2026-01-11T14:30:00Z
-project: "my-lib"
 summary: "Shipped the v1.2 sync path on prepared statements, with rollback when a batch fails. Not deployed, waiting on Monday's validation."
+project: "my-lib"
+branch: "sync-prepared"
+commit: "9315e36f0c2a4b7e8d1f6a3c5b9e2d4f7a1c8b3e"
 cwd: "~/Developer/oss/my-lib"
 host: "my-laptop"
 user: "me"
@@ -67,6 +71,8 @@ Ids are UTC. A local day can start or end on the neighbouring UTC date, so the d
 The session the user is working in, the one the question comes from. Not the run that reads the journal for it.
 
 - `project`: `__PROJECT__`
+- `branch`: `__BRANCH__`
+- `commit`: `__COMMIT__`
 - `cwd`: `__CWD__`
 - `host`: `__HOST__`
 - `user`: `__USER__`
