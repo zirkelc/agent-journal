@@ -1,5 +1,5 @@
 import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 import {
@@ -1817,6 +1817,148 @@ describe('filters on the recorded fields', () => {
 
     // Assert
     expect(summariesOf(shown)).toEqual(['summary: "Tried a vhs tape for the demo."']);
+  });
+});
+
+describe('filters on the branch and the commit', () => {
+  const FIRST = '3f2a9c1d0b8e7f6a5c4d3e2f1a0b9c8d7e6f5a4b';
+  const SECOND = '9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d';
+
+  /** Two branches of one project, and one entry written outside a repository. */
+  const ON_BRANCHES: Array<Entry> = [
+    { stem: '2026-08-03T091500Z', project: 'repo', branch: 'main', commit: FIRST, summary: 'On main.' },
+    { stem: '2026-08-04T091500Z', project: 'repo', branch: 'fix-retry', commit: SECOND, summary: 'On the fix.' },
+    { stem: '2026-08-05T091500Z', project: 'repo', branch: 'fix-cache', commit: SECOND, summary: 'On the cache fix.' },
+    { stem: '2026-08-06T091500Z', summary: 'Outside a repository.' },
+  ];
+
+  test(`should filter by the branch, with a star and a question mark`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ON_BRANCHES);
+
+    // Act
+    const exact = rows(run(store, ['list', '--branch', 'main']));
+    const pattern = rows(run(store, ['list', '--branch', 'fix-*']));
+
+    // Assert
+    expect(exact.map((row) => row.summary)).toEqual(['On main.']);
+    expect(pattern.map((row) => row.summary)).toEqual(['On the fix.', 'On the cache fix.']);
+  });
+
+  test(`should filter by the whole hash of the commit, or by its start in any case`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ON_BRANCHES);
+
+    // Act
+    const whole = rows(run(store, ['list', '--commit', FIRST]));
+    const start = rows(run(store, ['list', '--commit', SECOND.slice(0, 7).toUpperCase()]));
+
+    // Assert
+    expect(whole.map((row) => row.summary)).toEqual(['On main.']);
+    expect(start.map((row) => row.summary)).toEqual(['On the fix.', 'On the cache fix.']);
+  });
+
+  test(`should combine the branch and the commit with a search and with read for a period`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ON_BRANCHES);
+
+    // Act
+    const listed = rows(run(store, ['list', 'fix', '--commit', SECOND.slice(0, 7), '--branch', 'fix-cache']));
+    const shown = run(store, ['read', '2026-08', '--branch', 'main']);
+
+    // Assert
+    expect(listed.map((row) => row.summary)).toEqual(['On the cache fix.']);
+    expect(shown.match(/^summary: .*$/gm)).toEqual(['summary: "On main."']);
+  });
+
+  test(`should take . as the branch and the commit checked out where it runs`, () => {
+    // Arrange
+    const store = fixture();
+    const tree = worktree(store, 'fix-retry');
+    const head = execFileSync('git', ['-C', store.repo, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    seed(store, [
+      ...ON_BRANCHES,
+      { stem: '2026-08-07T091500Z', project: 'repo', branch: 'main', commit: head, summary: 'At the head.' },
+    ]);
+
+    // Act
+    const branch = rows(run(store, ['list', '--branch', '.'], { at: tree }));
+    const commit = rows(run(store, ['list', '--commit', '.'], { at: store.repo }));
+
+    // Assert
+    expect(branch.map((row) => row.summary)).toEqual(['On the fix.']);
+    expect(commit.map((row) => row.summary)).toEqual(['At the head.']);
+  });
+
+  test(`should count the entries per branch`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ON_BRANCHES);
+
+    // Act
+    const result = run(store, ['list', '--by', 'branch']);
+
+    // Assert
+    expect(result).toBe('1\t(none)\n1\tfix-cache\n1\tfix-retry\n1\tmain\ntotal\t4\n');
+  });
+
+  test(`should refuse a commit that is not a hash, rather than list nothing`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ON_BRANCHES);
+
+    // Act
+    const result = fails(store, ['list', '--commit', 'HEAD~1']);
+
+    // Assert
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('not a commit');
+  });
+
+  test(`should refuse . before the first commit`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ON_BRANCHES);
+
+    // Act
+    const result = fails(store, ['list', '--commit', '.'], { at: store.repo });
+
+    // Assert
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('has no commit checked out');
+  });
+
+  test(`should refuse . on a detached HEAD and outside a repository`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ON_BRANCHES);
+    worktree(store, 'other');
+    execFileSync('git', ['-C', store.repo, 'checkout', '-q', '--detach']);
+
+    // Act
+    const detached = fails(store, ['list', '--branch', '.'], { at: store.repo });
+    const outside = fails(store, ['read', '2026', '--branch', '.'], { at: store.home });
+
+    // Assert
+    expect([detached.status, outside.status]).toEqual([2, 2]);
+    expect(detached.stderr).toContain('has no branch checked out');
+    expect(outside.stderr).toContain('not in a repository');
+  });
+
+  test(`should refuse the branch and the commit with read by id`, () => {
+    // Arrange
+    const store = fixture();
+    seed(store, ON_BRANCHES);
+
+    // Act
+    const branch = fails(store, ['read', '2026-08-03T091500Z', '--branch', 'main']);
+    const commit = fails(store, ['read', '2026-08-03T091500Z', '--commit', FIRST]);
+
+    // Assert
+    expect([branch.status, commit.status]).toEqual([2, 2]);
   });
 });
 

@@ -278,6 +278,8 @@ export type Entry = {
   stem: string;
   project?: string;
   summary: string;
+  branch?: string;
+  commit?: string;
   cwd?: string;
   host?: string;
   user?: string;
@@ -297,6 +299,8 @@ export function seed(store: Fixture, entries: Array<Entry>): void {
       `date: ${date}`,
       ...(entry.project ? [`project: ${entry.project}`] : []),
       `summary: "${entry.summary}"`,
+      ...(entry.branch ? [`branch: "${entry.branch}"`] : []),
+      ...(entry.commit ? [`commit: "${entry.commit}"`] : []),
       ...(entry.cwd ? [`cwd: ${entry.cwd}`] : []),
       ...(entry.host ? [`host: "${entry.host}"`] : []),
       ...(entry.user ? [`user: "${entry.user}"`] : []),

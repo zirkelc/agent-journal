@@ -99,9 +99,9 @@ anyway.
 
 list --by FIELD counts the matches instead of listing them, one line per
 value of the field as count, a tab and the value, the largest count first,
-then a last line with the total. FIELD is project, date (the local day, the
-days in order), host, user or agent. An entry without the field counts as
-(none). It counts every match, so it takes no --limit or --offset.
+then a last line with the total. FIELD is project, branch, date (the local
+day, the days in order), host, user or agent. An entry without the field
+counts as (none). It counts every match, so it takes no --limit or --offset.
 
 read takes one id or several, each whole or a prefix that matches one entry,
 and prints them in full in that order. A prefix that matches several lists
@@ -117,6 +117,9 @@ filters: --date D      one local year, month or day: 2026, 2026-01, 2026-01-11,
                        or a time such as 2026-01-11T14:30:00+01:00
          --until D     up to and including this local day or time, same forms
          --project P   entries filed under one project, or . for the current project
+         --branch B    entries written on one branch, or . for the current branch
+         --commit C    entries written at one commit: its hash, the start of
+                       one, or . for the current commit
          --cwd DIR     entries from a directory and everything under it, where
                        * and ? stay within one name of the path
          --host H      entries written on one machine
@@ -128,10 +131,10 @@ filters: --date D      one local year, month or day: 2026, 2026-01, 2026-01-11,
          --offset N    skip this many of the most recent first, for the next page
          --all         no limit
 
-The values of --project, --cwd, --host, --user and --agent can have * for any
-text and ? for one character, as a shell glob reads them, for example
---agent 'claude-opus-*'. Put them in quotes, so the shell does not expand them
-first.
+The values of --project, --branch, --cwd, --host, --user and --agent can have
+* for any text and ? for one character, as a shell glob reads them, for
+example --agent 'claude-opus-*'. Put them in quotes, so the shell does not
+expand them first.
 
 settings: journal_dir    where journal entries are written
           sync           git: commit the journal folder after each write, and
@@ -369,6 +372,17 @@ resolve_repo() {
 # with 2, as the other refusals do: 1 from read means only that nothing matched.
 no_project_here() {
   printf '%s is not in a repository, so --project . has no project to name\n' "$(abbrev_home "$1")" >&2
+  exit 2
+}
+
+# `--branch .` or `--commit .` where there is none: outside a repository, on a
+# detached HEAD or before the first commit. It is refused for the reason above.
+no_value_here() {
+  if [ -z "$project" ]; then
+    printf '%s is not in a repository, so --%s . has no %s to name\n' "$(abbrev_home "$1")" "$2" "$2" >&2
+  else
+    printf '%s has no %s checked out, so --%s . has none to name\n' "$(abbrev_home "$1")" "$2" "$2" >&2
+  fi
   exit 2
 }
 
@@ -904,6 +918,8 @@ date_filter=
 since=
 until=
 project_filter=
+branch_filter=
+commit_filter=
 host_filter=
 user_filter=
 limit=20
@@ -955,6 +971,10 @@ while [ $# -gt 0 ]; do
     --until=*) until=${1#--until=}; shift ;;
     --project) [ $# -ge 2 ] || usage; project_filter=$2; shift 2 ;;
     --project=*) project_filter=${1#--project=}; shift ;;
+    --branch) [ $# -ge 2 ] || usage; branch_filter=$2; shift 2 ;;
+    --branch=*) branch_filter=${1#--branch=}; shift ;;
+    --commit) [ $# -ge 2 ] || usage; commit_filter=$2; shift 2 ;;
+    --commit=*) commit_filter=${1#--commit=}; shift ;;
     --host) [ $# -ge 2 ] || usage; host_filter=$2; shift 2 ;;
     --host=*) host_filter=${1#--host=}; shift ;;
     --user) [ $# -ge 2 ] || usage; user_filter=$2; shift 2 ;;
@@ -1700,6 +1720,8 @@ render() {
   printf '%s\n' "$@" |
   AGENT_JOURNAL_TERMS=${terms:-} \
   AGENT_JOURNAL_PROJECT=$project_filter \
+  AGENT_JOURNAL_BRANCH=$branch_filter \
+  AGENT_JOURNAL_COMMIT=$commit_filter \
   AGENT_JOURNAL_CWD=$cwd_filter \
   AGENT_JOURNAL_HOST=$host_filter \
   AGENT_JOURNAL_USER=$user_filter \
@@ -1718,9 +1740,12 @@ render() {
     -v cols="$cols" "$unquote_awk"'
     # Whether an entry passes the filters that its frontmatter decides. An
     # agent is recorded as `name/model`, and a filter without a slash is the
-    # name or the model, so `claude` and `claude-opus-*` both work.
-    function wanted(proj, dir, h, u, ag,   name, model) {
+    # name or the model, so `claude` and `claude-opus-*` both work. A commit
+    # filter is a prefix of the hash, as git abbreviates one.
+    function wanted(proj, br, co, dir, h, u, ag,   name, model) {
       if (project != "" && !match(proj, projectre)) return 0
+      if (branchf != "" && !match(br, branchre)) return 0
+      if (commitf != "" && substr(co, 1, length(commitf)) != commitf) return 0
       if (cwdf != "" && !match(dir, cwdre)) return 0
       if (hostf != "" && !match(h, hostre)) return 0
       if (userf != "" && !match(u, userre)) return 0
@@ -1799,7 +1824,7 @@ render() {
     # Reads one file and keeps it when it passes the filters. Matches are kept
     # newest first, the order they are found in. Returns 1 once the file is
     # older than `since`, because every file after it is older still.
-    function scan(file,   stem, line, got, first, fm, proj, dir, h, u, ag, summary, found, tail, text, t) {
+    function scan(file,   stem, line, got, first, fm, proj, br, co, dir, h, u, ag, summary, found, tail, text, t) {
       if (file in skip) return 0
       stem = file
       sub(/.*\//, "", stem)
@@ -1807,7 +1832,7 @@ render() {
       if (since != "" && stem < since) return 1
       if (until != "" && stem > until) return 0
 
-      first = 1; fm = 0; proj = ""; dir = ""; h = ""; u = ""; ag = ""; summary = ""; found = 0; tail = ""
+      first = 1; fm = 0; proj = ""; br = ""; co = ""; dir = ""; h = ""; u = ""; ag = ""; summary = ""; found = 0; tail = ""
       for (t = 1; t <= nt; t++) hit[t] = 0
       nhit = 0
       shown = ""
@@ -1828,7 +1853,7 @@ render() {
             fm = 2
             # Everything a line shows is known now, so the body is read only
             # for terms, and only for an entry the other filters keep.
-            if (nt == 0 || !wanted(proj, dir, h, u, ag)) break
+            if (nt == 0 || !wanted(proj, br, co, dir, h, u, ag)) break
             # The text searched is the summary, a space, then each body line
             # after a space of its own. A regex is matched within one line. A
             # fixed text that ends in a new line starts at most one term length
@@ -1841,6 +1866,10 @@ render() {
           }
           if (substr(line, 1, 8) == "project:") {
             proj = unquote(line, 9)
+          } else if (substr(line, 1, 7) == "branch:") {
+            br = unquote(line, 8)
+          } else if (substr(line, 1, 7) == "commit:") {
+            co = tolower(unquote(line, 8))
           } else if (substr(line, 1, 4) == "cwd:") {
             dir = unquote(line, 5)
           } else if (substr(line, 1, 5) == "host:") {
@@ -1868,7 +1897,7 @@ render() {
       close(file)
 
       if (fm == 0) return 0
-      if (!wanted(proj, dir, h, u, ag)) return 0
+      if (!wanted(proj, br, co, dir, h, u, ag)) return 0
       # Frontmatter that never closes has no body, only its summary to search.
       if (nt && fm == 1) found = look(regex ? tolower(summary) : tolower(summary " "), summary, 1, 0)
       if (nt && !found) return 0
@@ -1887,6 +1916,7 @@ render() {
       # since the name is the instant in UTC.
       if (by != "") {
         if (by == "project") value[n] = proj
+        else if (by == "branch") value[n] = br
         else if (by == "host") value[n] = h
         else if (by == "user") value[n] = u
         else if (by == "agent") value[n] = ag
@@ -1946,12 +1976,15 @@ render() {
       if (length("\303\251") == 2)
         for (c = 128; c < 192; c++) cont = cont sprintf("%c", c)
       project = ENVIRON["AGENT_JOURNAL_PROJECT"]
+      branchf = ENVIRON["AGENT_JOURNAL_BRANCH"]
+      commitf = tolower(ENVIRON["AGENT_JOURNAL_COMMIT"])
       cwdf = ENVIRON["AGENT_JOURNAL_CWD"]
       hostf = ENVIRON["AGENT_JOURNAL_HOST"]
       userf = ENVIRON["AGENT_JOURNAL_USER"]
       agentf = ENVIRON["AGENT_JOURNAL_AGENT"]
       label = ENVIRON["AGENT_JOURNAL_LABEL"]
       projectre = pattern(project, 0)
+      branchre = pattern(branchf, 0)
       cwdre = pattern(cwdf, 1)
       hostre = pattern(hostf, 0)
       userre = pattern(userf, 0)
@@ -2187,7 +2220,7 @@ $terms
 EOF
       # An id names its entry, so a filter could only hide it, or narrow the
       # matches of a prefix without saying so.
-      if [ -n "$date_filter$since$until$project_filter$host_filter$user_filter$agent" ] ||
+      if [ -n "$date_filter$since$until$project_filter$branch_filter$commit_filter$host_filter$user_filter$agent" ] ||
         [ "$cwd_set" = 1 ] || [ "$limit_set" = 1 ] || [ "$all_set" = 1 ] || [ "$offset" != 0 ]; then
         printf 'read with ids takes no filters; they work with read PERIOD and with list\n' >&2
         exit 2
@@ -2324,13 +2357,33 @@ EOF
   # risks a different answer. Not the project of `--cwd`, as for `write`: here
   # that is a filter on what entries recorded, and it often names a worktree
   # that has been removed since, which has no project to resolve. `read` with
-  # an id takes no filters, so it is left alone.
-  if [ "$project_filter" = . ] && { [ "$cmd" != read ] || [ "$read_period" = 1 ]; }; then
+  # an id takes no filters, so it is left alone. `--branch .` and `--commit .`
+  # are the branch and the commit checked out there, in the same way.
+  if { [ "$cmd" != read ] || [ "$read_period" = 1 ]; } &&
+    { [ "$project_filter" = . ] || [ "$branch_filter" = . ] || [ "$commit_filter" = . ]; }; then
     here=$(pwd)
     resolve_repo "$here"
-    [ -n "$project" ] || no_project_here "$here"
-    project_filter=$project
+    if [ "$project_filter" = . ]; then
+      [ -n "$project" ] || no_project_here "$here"
+      project_filter=$project
+    fi
+    if [ "$branch_filter" = . ]; then
+      [ -n "$branch" ] || no_value_here "$here" branch
+      branch_filter=$branch
+    fi
+    if [ "$commit_filter" = . ]; then
+      [ -n "$commit" ] || no_value_here "$here" commit
+      commit_filter=$commit
+    fi
   fi
+  # A commit is matched as a prefix of the hash, so only hex digits can match.
+  # Anything else is refused rather than read as a filter that keeps nothing.
+  case $commit_filter in
+    *[!0-9a-fA-F]*)
+      printf 'not a commit: %s. Give the hash of a commit, or the start of one\n' "$commit_filter" >&2
+      exit 2
+      ;;
+  esac
 
   # The options that say how to read the terms mean nothing without them, and
   # a caller that passed one expects it to narrow the answer.
@@ -2351,9 +2404,9 @@ EOF
       exit 2
     fi
     case $by in
-      project | date | host | user | agent) ;;
+      project | branch | date | host | user | agent) ;;
       *)
-        printf 'not a field to count by: %s. Use project, date, host, user or agent\n' "$by" >&2
+        printf 'not a field to count by: %s. Use project, branch, date, host, user or agent\n' "$by" >&2
         exit 2
         ;;
     esac

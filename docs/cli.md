@@ -26,7 +26,7 @@ Lists the entries that match the [filters](#filters), one line each. `list` is t
 | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | `TERM...`    | search the summaries and the bodies. Each term is an extended regex, matched within one line and ignoring case. An entry must match every term |
 | `--fixed`    | read the terms as plain text, not as a regex. A fixed term also matches when a line break splits it                                            |
-| `--by FIELD` | count the matches for each value of a field, and do not list them. FIELD is `project`, `date`, `host`, `user` or `agent`                       |
+| `--by FIELD` | count the matches for each value of a field, and do not list them. FIELD is `project`, `branch`, `date`, `host`, `user` or `agent`             |
 | filters      | see [Filters](#filters)                                                                                                                        |
 
 In the output, entries are listed oldest first, so the newest is nearest the prompt. Each line starts with the entry ID, which `aj read` takes as it is. In a terminal the columns are aligned. When the limit leaves older matches out, a last line on stderr says so, and which `--offset` shows the next ones. To find this out, the CLI reads only one match more than it shows:
@@ -173,21 +173,23 @@ aj read 2026-10 --limit 3
 
 `aj list` and `aj read` with a period take these filters. Two or more filters together select the entries that match all of them.
 
-| filter      | value                                                    | description                                                                                                                                                                           |
-| ----------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--date`    | `2026`, `2026-01`, `2026-01-11`, `today`, `yesterday`    | one year, month or day                                                                                                                                                                |
-| `--since`   | `2026-01-11`, `today`, `7d`, `2026-01-11T14:30:00+01:00` | from this day or time on                                                                                                                                                              |
-| `--until`   | same forms                                               | up to and including this day or time                                                                                                                                                  |
-| `--project` | a project name or a pattern, or `.` for here             | entries filed under one project, across all its worktrees. `.` names the repository of the current directory the same way the session-start hook does, and fails outside a repository |
-| `--cwd`     | a directory or a pattern, or `.` for here                | one directory and every directory under it                                                                                                                                            |
-| `--host`    | a machine name or a pattern                              | entries written on one machine, as the `host` field records it                                                                                                                        |
-| `--user`    | an account name or a pattern                             | entries written by one account, as the `user` field records it                                                                                                                        |
-| `--agent`   | `claude`, `opus-*` or `claude/opus-5-5`                  | entries of one agent, of one model, or of both. A value without a slash matches the agent name or the model, so `claude` and `opus-*` both work                                       |
-| `--limit`   | a number, default `20`                                   | how many of the most recent to print                                                                                                                                                  |
-| `--offset`  | a number, default `0`                                    | skip this many of the most recent first, to page back through older entries                                                                                                           |
-| `--all`     |                                                          | no limit                                                                                                                                                                              |
+| filter      | value                                                    | description                                                                                                                                                                                                            |
+| ----------- | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--date`    | `2026`, `2026-01`, `2026-01-11`, `today`, `yesterday`    | one year, month or day                                                                                                                                                                                                 |
+| `--since`   | `2026-01-11`, `today`, `7d`, `2026-01-11T14:30:00+01:00` | from this day or time on                                                                                                                                                                                               |
+| `--until`   | same forms                                               | up to and including this day or time                                                                                                                                                                                   |
+| `--project` | a project name or a pattern, or `.` for here             | entries filed under one project, across all its worktrees. `.` names the repository of the current directory the same way the session-start hook does, and fails outside a repository                                  |
+| `--branch`  | a branch name or a pattern, or `.` for here              | entries written on one branch. `.` is the branch checked out in the current directory, and fails on a detached HEAD or outside a repository                                                                            |
+| `--commit`  | a commit hash or the start of one, or `.` for here       | entries written at one commit. A shorter hash matches every commit that starts with it, in any case. `.` is the commit checked out in the current directory, and fails before the first commit or outside a repository |
+| `--cwd`     | a directory or a pattern, or `.` for here                | one directory and every directory under it                                                                                                                                                                             |
+| `--host`    | a machine name or a pattern                              | entries written on one machine, as the `host` field records it                                                                                                                                                         |
+| `--user`    | an account name or a pattern                             | entries written by one account, as the `user` field records it                                                                                                                                                         |
+| `--agent`   | `claude`, `opus-*` or `claude/opus-5-5`                  | entries of one agent, of one model, or of both. A value without a slash matches the agent name or the model, so `claude` and `opus-*` both work                                                                        |
+| `--limit`   | a number, default `20`                                   | how many of the most recent to print                                                                                                                                                                                   |
+| `--offset`  | a number, default `0`                                    | skip this many of the most recent first, to page back through older entries                                                                                                                                            |
+| `--all`     |                                                          | no limit                                                                                                                                                                                                               |
 
-For patterns, the values of `--project`, `--cwd`, `--host`, `--user` and `--agent` can have wildcards, as in a shell glob: `*` is any text, and `?` is one character. All other characters, also `.`, stand for themselves, and the pattern must match the whole value. In `--cwd`, `*` and `?` stay within one name of the path, and the pattern also matches every directory under it, for example `'~/Developer/worktrees/*/fix-*'`. Put a pattern in quotes, so that the shell does not expand it first. There are no bracket expressions such as `[abc]`.
+For patterns, the values of `--project`, `--branch`, `--cwd`, `--host`, `--user` and `--agent` can have wildcards, as in a shell glob: `*` is any text, and `?` is one character. All other characters, also `.`, stand for themselves, and the pattern must match the whole value. In `--cwd`, `*` and `?` stay within one name of the path, and the pattern also matches every directory under it, for example `'~/Developer/worktrees/*/fix-*'`. Put a pattern in quotes, so that the shell does not expand it first. There are no bracket expressions such as `[abc]`.
 
 Days are local days, in the time zone of the machine. The IDs stay UTC, so an entry written just after local midnight can carry the date before: in Berlin in winter, `--date 2026-01-11` includes `2026-01-10T231500Z`. A time takes an offset (`+01:00`) or `Z`, and without one it is local time. `--until` with a time includes an entry written in that second. For one exact entry, use `aj read` with its ID.
 
@@ -201,6 +203,14 @@ aj list --date 2026-10
 # entries of one project
 # grep -l '^project: acme-dashboard$' ~/agent-journal/*.md
 aj list --project acme-dashboard
+
+# entries written on one branch of a project
+# grep -l '^branch: "fix-retry"$' $(grep -l '^project: "acme-dashboard"$' ~/agent-journal/*.md)
+aj list --project acme-dashboard --branch fix-retry
+
+# entries written at one commit
+# grep -l '^commit: "3f2a9c1' ~/agent-journal/*.md
+aj list --commit 3f2a9c1
 
 # entries from one directory and every directory under it
 # grep -lE '^cwd: ~/Developer/acme-dashboard(/|$)' ~/agent-journal/*.md
