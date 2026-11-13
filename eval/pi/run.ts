@@ -13,7 +13,7 @@
  * Pi runs in RPC mode, which counts as a session with a UI, so the extension
  * gives its rules as it does in the terminal.
  */
-import { type ChildProcess, execFileSync, spawn } from 'node:child_process';
+import { type ChildProcess, spawn } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
@@ -44,6 +44,9 @@ import {
   strayEntries,
   type ToolCall,
   USER,
+  initRepo,
+  repoState,
+  runGitBefore,
 } from '../runner.ts';
 
 /** The time zone of every session and of the grader, so that both see the same local days. */
@@ -78,10 +81,7 @@ function prepare(test: Case, now: Date) {
   writeFileSync(join(config, 'config'), `journal_dir=${journalDir}\nhost=${HOST}\nuser=${USER}\n`);
   const cwd = join(home, test.dir);
   mkdirSync(cwd, { recursive: true });
-  if (test.git) {
-    execFileSync('git', ['init', '-q', '-b', 'main', cwd]);
-    writeFileSync(join(cwd, 'README.md'), `# ${test.dir.split('/').at(-1)}\n`);
-  }
+  if (test.git) initRepo(cwd);
   const agentDir = join(base, 'pi-agent');
   mkdirSync(agentDir, { recursive: true });
   const realAgentDir = process.env.PI_CODING_AGENT_DIR ?? join(homedir(), '.pi', 'agent');
@@ -209,7 +209,10 @@ async function runOne(test: Case, mode: Mode, repeat: number, model: string): Pr
   try {
     const state = await pi.command({ type: 'get_state' });
     sessionId = state.data?.sessionId ?? '';
-    for (const message of test.messages) await pi.prompt(fill(message, run.placed));
+    for (const [index, message] of test.messages.entries()) {
+      runGitBefore(test, index, run.cwd);
+      await pi.prompt(fill(message, run.placed));
+    }
     /** A model call that failed ends the turn without an answer; that is an error of the run, not a wrong answer. */
     const failed = pi.events.find(
       (event) =>
@@ -268,6 +271,7 @@ async function runOne(test: Case, mode: Mode, repeat: number, model: string): Pr
       user: USER,
       agent: `pi/${modelId}`,
       sessionId,
+      ...repoState(test, run.cwd),
     },
   };
   const graded = grade(test, session, run.placed as Array<Placed>);

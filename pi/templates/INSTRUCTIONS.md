@@ -1,7 +1,7 @@
 <!--
 The entire text injected into the model's context at the start of every session, by whichever adapter is installed. Edit this file to change it; nothing needs to be copied anywhere.
 
-This comment is stripped before injection. `__JOURNAL_DIR__`, `__PROJECT__`, `__CWD__`, `__HOST__`, `__USER__`, `__SESSION_ID__` and `__AGENT__` are replaced with what the session resolved to, and `__TIME__` with the clock and the calendar as key=value lines, in the variant without tools only, so every path and command below is runnable as written. A line whose placeholder resolves to nothing is dropped whole, which is how an agent with no session id produces no line claiming one.
+This comment is stripped before injection. `__JOURNAL_DIR__`, `__PROJECT__`, `__BRANCH__`, `__COMMIT__`, `__CWD__`, `__HOST__`, `__USER__`, `__SESSION_ID__` and `__AGENT__` are replaced with what the session resolved to, and `__TIME__` with the clock and the calendar as key=value lines, in the variant without tools only, so every path and command below is runnable as written. A line whose placeholder resolves to nothing is dropped whole, which is how an agent with no session id produces no line claiming one.
 
 The opening paragraph is framing rather than instruction: `additionalContext` and its equivalents arrive as ambient information, so without being told otherwise the model reads all of this as background material about journaling rather than as a requirement to journal. An agent that takes its instructions some other way can prepend its own framing instead.
 
@@ -40,9 +40,11 @@ Never write an entry about the entry: "Created the required journal entry for th
 
 ### Current session
 
-The values of this session, already resolved:
+The values of this session, resolved when it started. The `project`, the `branch` and the `commit` can change during the session, so each new entry resolves them again:
 
 - `project`: `__PROJECT__`
+- `branch`: `__BRANCH__`
+- `commit`: `__COMMIT__`
 - `cwd`: `__CWD__`
 - `host`: `__HOST__`
 - `user`: `__USER__`
@@ -53,7 +55,7 @@ The values of this session, already resolved:
 
 <!-- with tools -->
 
-Write each entry with the `__TOOLS__write` tool, one call per entry. It takes two things, `summary` and `body`, and sets everything else itself: the date from the clock, and the values of Current session (the project, the directory, the host, the user, the agent and the session id). It answers with the new entry's id. Never create an entry file any other way, and never edit a past one unless explicitly asked.
+Write each entry with the `__TOOLS__write` tool, one call per entry. It takes two things, `summary` and `body`, and sets everything else itself: the date, the project, the branch, the commit, the directory, the host, the user, the agent and the session id. It answers with the new entry's id. Never create an entry file any other way, and never edit a past one unless explicitly asked.
 
 The `summary` is one line, 200 characters at most, without double quotes. This is what makes a directory of entries scannable, so it has to stand on its own: what happened and what it means, never a topic tag. "Fixed the auth bug" is a tag. "Token refresh raced the retry and logged users out, so it is serialized behind a mutex now" is a summary.
 <!-- end -->
@@ -61,19 +63,24 @@ The `summary` is one line, 200 characters at most, without double quotes. This i
 
 `__JOURNAL_DIR__/YYYY-MM-DDTHHMMSSZ.md`
 
-One file per entry. Never append to an existing entry, and never edit a past one unless explicitly asked. Read the clock once at write time, never from memory, and use that one instant for both the filename and the `date` field:
+One file per entry. Never append to an existing entry, and never edit a past one unless explicitly asked. For each entry, read the clock and the repository again, never from memory or an earlier run. Run these lines as one command, as they are, in the `cwd` of Current session, so that the repository values belong to the directory the entry records. Do not add `cd` or `git -C` to it: a permission check refuses a command that changes the directory before it runs git. The shell keeps the directory of an earlier `cd`, for example into the journal. If an earlier command changed it, first run `cd __CWD__` as a command of its own:
 
+    git rev-parse --path-format=absolute --git-common-dir 2>/dev/null
+    git symbolic-ref -q HEAD 2>/dev/null
+    git log -1 --format='commit %H' 2>/dev/null
     date -u +%Y-%m-%dT%H:%M:%SZ
 
-That output is the `date` field verbatim. Remove the colons for the filename, so `2026-01-11T14:30:00Z` becomes `2026-01-11T143000Z.md`. Reading the clock twice can straddle a second and leave the two disagreeing.
+The last line is the `date` field verbatim. It is last so that the command ends without an error also where a git line has no value. Use that one instant for both the filename and the `date` field: remove the colons for the filename, so `2026-01-11T14:30:00Z` becomes `2026-01-11T143000Z.md`. Reading the clock twice can straddle a second and leave the two disagreeing. The lines before it give `project`, `branch` and `commit`. A git line that has no value prints nothing, so find each line by its start, not by its position: the git dir starts with `/`, the branch with `refs/heads/`, and the commit with `commit `. Omit a field when its line is not there.
 
 Use the `Write` tool to create the file, rather than a shell redirect. Writing a file is usually permitted outright, while running a shell command is what stops to ask.
 
 ```markdown
 ---
 date: 2026-01-11T14:30:00Z
-project: "my-lib"
 summary: "Shipped the v1.2 sync path on prepared statements, with rollback when a batch fails. Not deployed, waiting on Monday's validation."
+project: "my-lib"
+branch: "sync-prepared"
+commit: "9315e36f0c2a4b7e8d1f6a3c5b9e2d4f7a1c8b3e"
 cwd: "~/Developer/oss/my-lib"
 host: "my-laptop"
 user: "me"
@@ -89,15 +96,17 @@ Considered doing the same to the reporting queries and decided against it for no
 Exactly these fields, in this order, on every entry:
 
 - `date`: the same instant as the filename, full ISO 8601 with colons. Leave it unquoted, so it parses as a timestamp rather than as a string.
-- `project`: the repository the work belongs to, always double-quoted, named after its main checkout so that every worktree of it files under one name. Omit the field when no `project` is listed under Current session, which means the session is not in a repository at all. Never make one up from the directory name: a bare directory is not a project, and `cwd` still records where the work happened.
 - `summary`: one line, always double-quoted and without double quotes inside, about 150 characters and never more than 200, so one sentence. This is what makes a directory of entries scannable, so it has to stand on its own: what happened and what it means, never a topic tag. "Fixed the auth bug" is a tag. "Token refresh raced the retry and logged users out, so it is serialized behind a mutex now" is a summary.
+- `project`: the repository the work belongs to, always double-quoted. It is the last part of the git dir, or the part before it when the last part is `.git`, without a `.git` at its end: `/Users/me/Developer/my-lib/.git` and `/srv/my-lib.git` both give `my-lib`. In a worktree, the git dir is that of the main checkout, so every worktree of a repository files under one name. No git dir line means no repository. Never make one up from the directory name: a bare directory is not a project, and `cwd` still records where the work happened.
+- `branch`: the branch the work is on, always double-quoted: the text after `refs/heads/`. It has no line on a detached HEAD and outside a repository.
+- `commit`: the full hash of the commit HEAD points to at write time, always double-quoted: the text after `commit `. Changes not committed yet are not in it. It has no line before the first commit and outside a repository.
 - `cwd`: the directory the session is working in, always double-quoted, written with `~` for home. This is the only place a worktree is recorded, since `project` deliberately collapses them.
 - `host`: the machine the session runs on, always double-quoted. A journal can collect entries from several machines, and a session can be resumed only on the machine that has its transcript. Omit the field if Current session does not list it.
 - `user`: the account the session runs as on that machine, always double-quoted. Omit the field if Current session does not list it.
 - `agent`: which agent wrote the entry, and which model it was running as, always double-quoted, since a model id can contain a colon. Together with `session_id` this is what says where the work can be picked back up, since a session id is only meaningful to the tool that issued it. Omit the field if Current session does not list it.
 - `session_id`: the session this entry came from, always double-quoted, which is what joins it back to the full transcript. Omit the field if Current session does not list it.
 
-Take `project`, `cwd`, `host`, `user`, `agent` and `session_id` from Current session. Copy each value exactly as it is listed there, character for character. Do not derive a value again, and do not shorten or tidy it: `cwd` keeps every part of its path, also a part that looks unusual. If the work happened in a different repository than the one listed, or in one when no `project` is listed at all, name that repository by its main checkout, never by a worktree's own directory.
+Take `project`, `branch` and `commit` from the command, because the session can change all three. Take `cwd`, `host`, `user`, `agent` and `session_id` from Current session. Copy each value exactly as it is listed there, character for character. Do not derive a value again, and do not shorten or tidy it: `cwd` keeps every part of its path, also a part that looks unusual.
 
 Double-quote every value except `date`, so that the frontmatter parses as written. Inside the quotes, write each backslash twice (`\\`), because YAML reads a single one as the start of an escape.
 <!-- end -->

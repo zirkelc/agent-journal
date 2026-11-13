@@ -83,9 +83,10 @@ write takes the summary and the body as flags, and anything piped in is the
 body. Without a summary it opens $EDITOR on a template, carrying any body it
 already has. The project and the directory come from where you are unless the
 flags say otherwise. --project . names the repository of --cwd, and fails
-outside one. --agent and --session-id record which agent and session wrote it.
-It prints the new entry's path, whose name without .md is its id. --no-sync
-leaves the sync to the caller.
+outside one. The branch and the commit are those of --cwd when it is written,
+left out for an entry filed under another project. --agent and --session-id
+record which agent and session wrote it. It prints the new entry's path, whose
+name without .md is its id. --no-sync leaves the sync to the caller.
 
 list with terms searches the summaries and the bodies. Each term is an
 extended regex, as grep -E reads it, matched within one line and ignoring
@@ -322,32 +323,43 @@ EOF
 
 # ---------------------------------------------------------------- location
 
-# The name a session's entries are filed under. It comes from the common git
-# dir, never from the working tree's own root: a worktree's root is named after
-# its branch, so `--show-toplevel` would file `nebula.worktrees/fix-auth` under
-# `fix-auth` and scatter one repository across a project per branch. The common
-# dir always points at the main repository, so every worktree agrees. It also
-# collapses subdirectories and bare repositories.
+# The repository a directory is in: the project its entries are filed under,
+# and the branch and the commit its working tree is on. `write` reads them when
+# it writes the entry, so they are those of that moment.
 #
-# Storing entries inside a repository would be the other question, and would
-# take the other answer: that is per-worktree content and would come from
-# `--show-toplevel`. Nothing asks it yet.
-resolve_project() {
+# The project comes from the common git dir, never from the working tree's own
+# root: a worktree's root is named after its branch, so `--show-toplevel` would
+# file `nebula.worktrees/fix-auth` under `fix-auth` and scatter one repository
+# across a project per branch. The common dir always points at the main
+# repository, so every worktree agrees. It also collapses subdirectories and
+# bare repositories. Storing entries inside a repository would be the other
+# question, and would take the other answer: that is per-worktree content and
+# would come from `--show-toplevel`. Nothing asks it yet.
+#
+# The commit is HEAD, so changes that were not committed at that time are not
+# in it. The timestamp alone cannot replace it: a checkout of another branch
+# changes the files without making the entry older. The branch is empty on a
+# detached HEAD, and the commit is empty before the first commit.
+#
+# Outside a repository all three are empty, which drops their lines from the
+# entry. The directory's own name is not a substitute for a project: it would
+# file `Downloads` as a project and dilute the one field whose job is grouping.
+# `cwd` still records where the work happened.
+resolve_repo() {
   project=
-  gitdir=$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || gitdir=
+  branch=
+  commit=
+  gitdir=$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 0
 
-  if [ -n "$gitdir" ]; then
-    case $gitdir in
-      */.git) gitdir=${gitdir%/.git} ;;
-    esac
-    project=${gitdir##*/}
-    project=${project%.git}
-  fi
-
-  # Outside a repository there is no project, and the directory's own name is not
-  # a substitute for one: it would file `Downloads` as a project and dilute the
-  # one field whose job is grouping. Left empty, which drops the line and takes
-  # the field out of the entry. `cwd` still records where the work happened.
+  case $gitdir in
+    */.git) gitdir=${gitdir%/.git} ;;
+  esac
+  project=${gitdir##*/}
+  project=${project%.git}
+  # Not `symbolic-ref --short`, which gives `heads/v1` when a tag is also named
+  # `v1`. This is the command the rules for writing entries as files give.
+  branch=$(git -C "$1" branch --show-current 2>/dev/null) || branch=
+  commit=$(git -C "$1" rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null) || commit=
 }
 
 # `--project .` where there is no project to name. Each command decides which
@@ -2315,7 +2327,7 @@ EOF
   # an id takes no filters, so it is left alone.
   if [ "$project_filter" = . ] && { [ "$cmd" != read ] || [ "$read_period" = 1 ]; }; then
     here=$(pwd)
-    resolve_project "$here"
+    resolve_repo "$here"
     [ -n "$project" ] || no_project_here "$here"
     project_filter=$project
   fi
@@ -2956,11 +2968,18 @@ if [ "$cmd" = write ]; then
   refuse_if_unquotable 'session id' "$session_id" bare
   refuse_if_unquotable agent "$agent" tabless
 
-  resolve_project "$cwd"
+  resolve_repo "$cwd"
   resolve_machine
   [ "$dot" = 0 ] || [ -n "$project" ] || no_project_here "$cwd"
   # Derived from where the session is, unless it was named. The same flag filters
   # the other commands, and here it says which project the entry belongs to.
+  # The branch and the commit are those of `--cwd`, so they go with the project
+  # of `--cwd` only. An entry filed under another project would point a reader
+  # to a commit of the wrong repository.
+  if [ -n "$project_filter" ] && [ "$project_filter" != "$project" ]; then
+    branch=
+    commit=
+  fi
   [ -z "$project_filter" ] || project=$project_filter
 
   mkdir -p "$journal_dir" || exit 1
@@ -3000,9 +3019,11 @@ if [ "$cmd" = write ]; then
   {
     printf -- '---\n'
     printf 'date: %s\n' "$now"
-    field project "$project"
     # Written even when empty, so the editor has the quotes to fill in.
     if [ -n "$summary" ]; then field summary "$summary"; else printf 'summary: ""\n'; fi
+    field project "$project"
+    field branch "$branch"
+    field commit "$commit"
     field cwd "$(abbrev_home "$cwd")"
     field host "$host"
     field user "$user"
@@ -3110,8 +3131,10 @@ if [ "$cmd" = resolve ]; then
   [ "$argc" -eq 0 ] || usage
   resolve_time || exit 1
   printf '%s\n' "$time_text"
-  resolve_project "$cwd"
+  resolve_repo "$cwd"
   printf 'project=%s\n' "$project"
+  printf 'branch=%s\n' "$branch"
+  printf 'commit=%s\n' "$commit"
   printf 'cwd=%s\n' "$(abbrev_home "$cwd")"
   resolve_machine
   printf 'host=%s\n' "$host"
@@ -3149,7 +3172,7 @@ elif [ -z "$tools" ] && resolve_time 2>/dev/null; then
   time=$time_text
 fi
 
-resolve_project "$cwd"
+resolve_repo "$cwd"
 resolve_machine
 
 # Each template is the whole of its text, placeholders and all, so that every
@@ -3159,6 +3182,8 @@ resolve_machine
 AGENT_JOURNAL_TIME=$time awk \
   -v journal_dir="$journal_dir" \
   -v project="$project" \
+  -v branch="$branch" \
+  -v commit="$commit" \
   -v cwd="$(abbrev_home "$cwd")" \
   -v host="$host" \
   -v user="$user" \
@@ -3166,10 +3191,12 @@ AGENT_JOURNAL_TIME=$time awk \
   -v agent="$agent" \
   -v tools="$tools" '
   BEGIN {
-    keys = "journal_dir project cwd host user session_id agent time tools"
+    keys = "journal_dir project branch commit cwd host user session_id agent time tools"
     n = split(keys, key, " ")
     value["journal_dir"] = journal_dir
     value["project"] = project
+    value["branch"] = branch
+    value["commit"] = commit
     value["cwd"] = cwd
     value["host"] = host
     value["user"] = user

@@ -51,6 +51,9 @@ import {
   strayEntries,
   type ToolCall,
   USER,
+  initRepo,
+  repoState,
+  runGitBefore,
 } from '../runner.ts';
 
 /** The time zone of every session and of the grader, so that both see the same local days. */
@@ -66,9 +69,9 @@ const MAX_TURNS = 60;
 
 /**
  * What a session may run without a question, besides a file write: the read
- * tools, and the shell commands that the rules for files use to read the
- * journal. `xargs` only with the reading commands, since it runs the command
- * it is given.
+ * tools, the shell commands that the rules for files use to read the journal,
+ * and the git commands that read the repository for a new entry. `xargs` only
+ * with the reading commands, since it runs the command it is given.
  */
 const ALLOWED_TOOLS = [
   'Read',
@@ -79,6 +82,7 @@ const ALLOWED_TOOLS = [
     (command) => `Bash(${command}:*)`,
   ),
   ...['grep', 'cat', 'head', 'awk', 'wc'].map((command) => `Bash(xargs ${command}:*)`),
+  ...['rev-parse', 'symbolic-ref', 'log'].map((command) => `Bash(git ${command}:*)`),
 ];
 
 /** The tools that write a file, and where each takes the path. */
@@ -119,10 +123,7 @@ function prepare(test: Case, now: Date) {
   writeFileSync(join(config, 'config'), `journal_dir=${journalDir}\nhost=${HOST}\nuser=${USER}\n`);
   const cwd = join(base, test.dir);
   mkdirSync(cwd, { recursive: true });
-  if (test.git) {
-    execFileSync('git', ['init', '-q', '-b', 'main', cwd]);
-    writeFileSync(join(cwd, 'README.md'), `# ${test.dir.split('/').at(-1)}\n`);
-  }
+  if (test.git) initRepo(cwd);
   return { base, journalDir, cwd, placed, before: new Set(readdirSync(journalDir)) };
 }
 
@@ -280,7 +281,8 @@ async function runOne(test: Case, mode: Mode, repeat: number, model: string): Pr
   let error: string | undefined;
   const results: Array<Event> = [];
   try {
-    for (const message of test.messages) {
+    for (const [index, message] of test.messages.entries()) {
+      runGitBefore(test, index, run.cwd);
       const result = await claude.send(fill(message, run.placed));
       results.push(result);
       /** A model call that failed ends the turn without an answer; that is an error of the run, not a wrong answer. */
@@ -323,7 +325,14 @@ async function runOne(test: Case, mode: Mode, repeat: number, model: string): Pr
     stray,
     start,
     end,
-    expected: { cwd: `~/${relative(homedir(), run.cwd)}`, host: HOST, user: USER, agent: agentOf(model), sessionId },
+    expected: {
+      cwd: `~/${relative(homedir(), run.cwd)}`,
+      host: HOST,
+      user: USER,
+      agent: agentOf(model),
+      sessionId,
+      ...repoState(test, run.cwd),
+    },
   };
   const graded = grade(test, session, run.placed as Array<Placed>);
   /** Each result names the calls that a permission check refused in its turn. */

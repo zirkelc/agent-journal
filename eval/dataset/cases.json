@@ -385,6 +385,31 @@
       "why": "A look into the journal, then new work. The look alone gives no entry, and the work after it gives one."
     },
     {
+      "id": "write-after-commit",
+      "kind": "write",
+      "dir": "Developer/billing-api",
+      "git": true,
+      "messages": [
+        "What did we work on in this project last week?",
+        "OK. Since then I fixed the webhook timeouts in another terminal: the handler now acknowledges the event first and processes it in a background job. I committed it on a new branch fix-webhook-timeout. No need to look at the code. Done for today."
+      ],
+      "git_before": {
+        "1": [
+          ["switch", "-q", "-c", "fix-webhook-timeout"],
+          ["commit", "-q", "--allow-empty", "-m", "Acknowledge webhooks before processing them"]
+        ]
+      },
+      "expect": {
+        "entries": {
+          "min": 1,
+          "max": 1
+        },
+        "project": "billing-api",
+        "body": ["webhook", "background|acknowledg"]
+      },
+      "why": "The branch and the commit change after the session started, so the values of Current session are out of date. The entry must have the branch and the commit at the time it is written."
+    },
+    {
       "id": "write-two-milestones",
       "kind": "write",
       "dir": "Developer/billing-api",

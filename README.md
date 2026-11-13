@@ -50,8 +50,10 @@ The file starts with frontmatter, so a search across many files can match single
 ```markdown
 ---
 date: 2026-10-07T14:20:00Z
-project: "acme-dashboard"
 summary: "Export timed out because the CSV was built on the main thread. Moved it to a worker."
+project: "acme-dashboard"
+branch: "csv-worker"
+commit: "4f1c2a9e7b3d5f8a0c6e2b4d9f1a3c5e7b8d0f2a"
 cwd: "~/Developer/acme-dashboard"
 host: "macbook"
 user: "chris"

@@ -32,6 +32,10 @@ function resolve(
   return result;
 }
 
+// The branch a fresh fixture repository is on, which the git config of the machine names.
+const branchOf = (repo: string): string =>
+  execFileSync('git', ['-C', repo, 'symbolic-ref', '--short', 'HEAD'], { encoding: 'utf8' }).trim();
+
 describe('resolve', () => {
   test(`should print every value for one instant`, () => {
     // Arrange
@@ -83,6 +87,8 @@ describe('resolve', () => {
         'utc_last_month_since=2026-08-31T22:00:00Z',
         'utc_last_month_until=2026-09-30T21:59:59Z',
         'project=repo',
+        `branch=${branchOf(store.repo)}`,
+        'commit=',
         'cwd=~/repo',
         'host=macbook',
         'user=chris',

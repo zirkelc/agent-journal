@@ -13,7 +13,7 @@ The dataset and the grader do not depend on an agent. A runner for one agent sta
 - [`dataset/content/`](dataset/content): for each project, a description (`<project>.md`: what it is, its stack, its timeline in days and the near misses it must have) and the text of its filler (`<project>.jsonl`, one entry per line, in time order). A model wrote the text once from the description, so the entries of a project tell one story over the years, with topics that go on over several entries and entries that are near a key entry but are not the answer. The n-th slot of a project gets the n-th line.
 - [`dataset/write.ts`](dataset/write.ts): writes the content files again, through Pi, when the schedule or a description changes. `node eval/dataset/write.ts --pilot --only nebula` writes and prints the first batch of one project. The full run writes about 6,000 entries with Sonnet in about an hour and costs about $40. A finished batch is kept in `eval/results/write-cache`, so a run that stops goes on where it stopped. A change to the schedule moves the text to other slots, so it needs a new full run.
 - [`dataset/check.ts`](dataset/check.ts): finds filler entries that do a key change before the day of its key entry, and writes them again. Before that day, an entry may plan the change but never do it, or a case such as "when did we switch" gets two answers. A model reads the filler of each project with its key entries, 40 entries at a time, and each entry it names is written again from its neighbours. Run it after `write.ts`, and again with `--dry` until it finds nothing. A pass over all projects costs about $10.
-- [`dataset/cases.json`](dataset/cases.json): 32 cases. Each case has a working directory, the messages of the user, what a correct result must contain, and why the case is there.
+- [`dataset/cases.json`](dataset/cases.json): 33 cases. Each case has a working directory, the messages of the user, what a correct result must contain, and why the case is there. A case in a repository starts with one commit. With `git_before`, a case gives git commands that the runner runs before a message, as a user in another terminal would.
 
 The cases:
 
@@ -48,6 +48,7 @@ The cases:
 | `write-small-fix`               | a small fix still gets an entry                                                                                                     |
 | `write-decision`                | a decision without a code change gets an entry                                                                                      |
 | `write-lookup-then-work`        | a look into the journal gives no entry, and the work after it gives one                                                             |
+| `write-after-commit`            | a new branch and a commit after the session started: the entry has those, not the values from the start of the session              |
 | `write-two-milestones`          | two separate results in one session give two entries                                                                                |
 | `write-nothing-lookup`          | only a look into the journal, then an end of session, so no entry                                                                   |
 | `write-nothing-general`         | a general question, then an end of session, so no entry                                                                             |
@@ -67,7 +68,7 @@ The cases:
 | `project`      | every new entry has this project, or no project for `null`                                                                         |
 | `body`         | a new entry matches each regex                                                                                                     |
 
-Each write case also checks every field of each new entry: the file name, the date and the file name are the same instant within the session, and `cwd`, `host`, `user`, `agent` and `session_id` are the values of the session. A recall case also reports whether the session wrote an entry. That check has no score, because it says nothing about the recall.
+Each write case also checks every field of each new entry: the file name, the date and the file name are the same instant within the session, `cwd`, `host`, `user`, `agent` and `session_id` are the values of the session, and `branch` and `commit` are those of the repository at the end of the session (neither outside a repository). A recall case also reports whether the session wrote an entry. That check has no score, because it says nothing about the recall.
 
 ## Run it in Pi
 
@@ -99,7 +100,7 @@ Each session loads only the plugin in [`claude-code/`](../claude-code/), with `-
 
 - **Home**: Claude Code finds its login on macOS by the path of its config, so a session with another `HOME` is not logged in. The folder of each session is in the real home, as `~/.aj-eval-XXXX`, with the journal, the config (through `XDG_CONFIG_HOME`) and the working directory. The rules give the model the working directory as a path from `~`, as a user's rules do.
 - **Without the tools**: the session starts with the plugin's tools turned off, as for Pi. The plugin then registers no tools and gives the rules for files.
-- **Permissions**: Pi asks for no approval. Here the sessions run in `acceptEdits`, which allows a file write in the working directory and in the journal (`--add-dir`), with an allow list of the read tools and of the read-only shell commands that the rules for files use. A session without a UI refuses any other call, and the report counts those calls. The journal tools get no permission check at all at the moment (anthropics/claude-code#104217), so the tools mode never has a refused call.
+- **Permissions**: Pi asks for no approval. Here the sessions run in `acceptEdits`, which allows a file write in the working directory and in the journal (`--add-dir`), with an allow list of the read tools, of the read-only shell commands that the rules for files use, and of the git commands that read the repository for a new entry (`git rev-parse`, `git symbolic-ref` and `git log`). A session without a UI refuses any other call, and the report counts those calls. The journal tools get no permission check at all at the moment (anthropics/claude-code#104217), so the tools mode never has a refused call.
 - **Deferred tools**: the plugin's `list` and `read` are deferred, so a session loads them with `ToolSearch` before it calls them. Pi's tools are always loaded.
 
 The eval runs at any time of day. A key entry of today is at 00:30, which is on yesterday's UTC date in all three zones, also in Berlin's winter time (UTC+1). The newest entry is 20 minutes before the run, so the runner takes the first of `Europe/Berlin`, `Asia/Dubai` and `Asia/Tokyo` where it is now between 03:00 and 22:59. All three are east of UTC, so a local day starts on the UTC date before it, which is what the cases about yesterday test. The record of each session names its time zone.

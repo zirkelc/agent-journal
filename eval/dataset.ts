@@ -40,6 +40,12 @@ export type Case = {
   dir: string;
   git: boolean;
   messages: Array<string>;
+  /**
+   * Git commands that the runner runs in the working directory before the
+   * message of that index, as a user in another terminal would. Each command
+   * is its list of arguments after `git`.
+   */
+  git_before?: Record<string, Array<Array<string>>>;
   expect: Expect;
   why: string;
 };

@@ -102,6 +102,8 @@ export const PROJECT_WIDTH = 12;
 const FIELDS: ReadonlyArray<[string, string]> = [
   ['date', 'Date'],
   ['project', 'Project'],
+  ['branch', 'Branch'],
+  ['commit', 'Commit'],
   ['cwd', 'Directory'],
   ['host', 'Host'],
   ['user', 'User'],

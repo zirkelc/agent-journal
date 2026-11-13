@@ -3,7 +3,8 @@
  * the record of one session, the check for entries outside the journal, and
  * the pool that runs the sessions.
  */
-import { existsSync, readdirSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, readdirSync, writeFileSync } from 'node:fs';
 import { basename, delimiter, dirname, join, resolve } from 'node:path';
 import type { Case } from './dataset.ts';
 import { type grade, ID } from './grade.ts';
@@ -23,6 +24,41 @@ export function pickZone(now: Date): string {
   const zone = ZONES.find((timeZone) => hourIn(timeZone) >= 3 && hourIn(timeZone) <= 22);
   if (!zone) throw new Error('No time zone has a time of day between 03:00 and 22:59 now.');
   return zone;
+}
+
+// A name for the commits of the runner, which a CI runner has no git config to give.
+const GIT_ENV = {
+  ...process.env,
+  GIT_AUTHOR_NAME: 'eval',
+  GIT_AUTHOR_EMAIL: 'eval@example.com',
+  GIT_COMMITTER_NAME: 'eval',
+  GIT_COMMITTER_EMAIL: 'eval@example.com',
+};
+
+const git = (cwd: string, args: Array<string>): string =>
+  execFileSync('git', ['-C', cwd, ...args], {
+    encoding: 'utf8',
+    env: GIT_ENV,
+    stdio: ['ignore', 'pipe', 'ignore'],
+  }).trim();
+
+/** The repository of a case: a README in a first commit, so that an entry has a commit to record. */
+export function initRepo(cwd: string): void {
+  execFileSync('git', ['init', '-q', '-b', 'main', cwd]);
+  writeFileSync(join(cwd, 'README.md'), `# ${basename(cwd)}\n`);
+  git(cwd, ['add', 'README.md']);
+  git(cwd, ['commit', '-q', '-m', 'Initial commit']);
+}
+
+/** Runs the git commands that a case gives for the message of this index, if any. */
+export function runGitBefore(test: Case, index: number, cwd: string): void {
+  for (const args of test.git_before?.[String(index)] ?? []) git(cwd, args);
+}
+
+/** The branch and the commit of a case's repository, which its entries must record. Both undefined without one. */
+export function repoState(test: Case, cwd: string): { branch?: string; commit?: string } {
+  if (!test.git) return {};
+  return { branch: git(cwd, ['branch', '--show-current']) || undefined, commit: git(cwd, ['rev-parse', 'HEAD']) };
 }
 
 /** The host and the user that the config of each session names, and that its entries must record. */
