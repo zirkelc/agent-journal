@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/zirkelc/agent-journal/compare/v0.9.0...v0.10.0) (2026-11-13)
+
+
+### Features
+
+* filter entries by branch and by commit ([#13](https://github.com/zirkelc/agent-journal/issues/13)) ([23c3646](https://github.com/zirkelc/agent-journal/commit/23c3646b6b77ce4377952850f21a730dde59bcac))
+
 ## [0.9.0](https://github.com/zirkelc/agent-journal/compare/v0.8.0...v0.9.0) (2026-11-13)
 
 
